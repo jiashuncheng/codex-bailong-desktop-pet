@@ -19,7 +19,7 @@ MODULES = [
     'test_status_reactions.SchedulerTests', 'test_ring_metrics', 'test_work_actions',
     'test_sustained_reactions', 'test_soft_curves_navigation', 'test_release_version',
     'test_app_updates.ReleaseTests', 'test_app_updates.StagingTests', 'test_loop_cache', 'test_decoder_runtime', 'test_animation_quality',
-    'test_sustained_player', 'test_personal_scroll',
+    'test_sustained_player', 'test_personal_scroll', 'test_action_shuffle',
     'test_read_completion', 'test_bridge_names', 'test_conversation_rows',
     'test_material_store', 'test_material_controller', 'test_continuous_work',
     'test_daily_report', 'test_independent_cards', 'test_companion_options', 'test_status_indicator',

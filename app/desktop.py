@@ -26,6 +26,7 @@ from status_reactions import StatusReactions
 from continuous_work import ContinuousWork
 from sustained_player import SustainedPlayback
 from sustained_assets import profile_paths,seam_items
+from action_shuffle import ActionShuffle
 
 class DesktopPet(EnhancedPet):
     LAZY=True
@@ -50,6 +51,7 @@ class DesktopPet(EnhancedPet):
         self._interactive_action=False;self._manual_action=False;self._priority=0
         self._hit_image=None;self.throwing=False;self.velocity=(0.,0.)
         self._pointer_pressed=False;self._pointer_epoch=0
+        self.click_actions=ActionShuffle()
         self.drag_samples=deque(maxlen=12);self.press_feedback=0;self.buffer_until=0
         self.pending_completion=None;self.settings_dialog=None;self.chat_window=None
         self.reactions=StatusReactions(time.monotonic());self.last_reaction=None
@@ -323,12 +325,14 @@ class DesktopPet(EnhancedPet):
 
     def single_click(self):
         self.last_click=None;self.press_feedback=time.monotonic()
+        if self.gate.state=='task' or (self._visibility_ready and (self._desktop_hidden or not self.settings.get('character_visible',True))):return
         excluded={item.get('playbackFile') or item.get('file')
                   for key in ('dragAnimation','landingAnimation')
                   if isinstance(item:=self.manifest.get(key),dict)}
         pool=[item for item in (all_items(self.manifest) or self.idles)
               if (item.get('playbackFile') or item.get('file')) not in excluded]
-        if pool:self.choose(random.choice(pool),interactive=True)
+        item=self.click_actions.next(pool)
+        if item is not None:self.choose(item,interactive=True)
 
     def say(self,text,ms=4000):
         if self.enhanced_ready:

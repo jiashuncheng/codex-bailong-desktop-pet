@@ -323,8 +323,12 @@ class DesktopPet(EnhancedPet):
 
     def single_click(self):
         self.last_click=None;self.press_feedback=time.monotonic()
-        pool=all_items(self.manifest) or self.idles
-        self.choose(random.choice(pool),interactive=True)
+        excluded={item.get('playbackFile') or item.get('file')
+                  for key in ('dragAnimation','landingAnimation')
+                  if isinstance(item:=self.manifest.get(key),dict)}
+        pool=[item for item in (all_items(self.manifest) or self.idles)
+              if (item.get('playbackFile') or item.get('file')) not in excluded]
+        if pool:self.choose(random.choice(pool),interactive=True)
 
     def say(self,text,ms=4000):
         if self.enhanced_ready:

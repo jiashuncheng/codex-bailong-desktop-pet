@@ -44,6 +44,9 @@ class UpdateController(QObject):
     def snapshot(self):return dict(self.state)
     def publish(self,**changes):self.state.update(changes);self.changed.emit(self.snapshot())
     def configure(self,enabled):
+        import sys
+        if sys.platform=='darwin':
+            self.enabled=False;self.initial.stop();self.timer.stop();return
         enabled=bool(enabled) and self.allow_auto and not self.closing
         if enabled and not self.enabled:self.initial.start();self.timer.start()
         elif not enabled:self.initial.stop();self.timer.stop()
@@ -55,10 +58,15 @@ class UpdateController(QObject):
     def _selected(self,release):
         self.release=release;self.publish(package_kind=release.kind,package_reason=release.reason,total=release.size,downloaded=0,message=release.reason)
     def check(self):
+        import sys
+        if sys.platform=='darwin':
+            self.publish(phase='source',message='Mac 源码版：替换源码后重新启动即可更新。');return False
         if self.closing or self.job is not None:return False
         self.publish(phase='checking',message='正在检查公开稳定版…')
         self._bind(UpdateJob(self.current,self.cache,parent=self));return True
     def download_install(self):
+        import sys
+        if sys.platform=='darwin':return False
         if self.closing or self.job is not None or self.release is None or version_tuple(self.release.version)<=version_tuple(self.current):return False
         self.install_requested=True;self.publish(phase='downloading',message='正在准备下载…',total=self.release.size)
         self._bind(UpdateJob(self.current,self.cache,self.release,parent=self));return True

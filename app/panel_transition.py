@@ -6,6 +6,17 @@ from spring_motion import container_progress,dismiss_progress,EXPAND_MS,SHRINK_M
 from surface_morph import SurfaceState,SurfaceMorph,pixel_size
 
 
+def present_barrier():
+    """Wait for the Windows compositor, not an assumed number of milliseconds.
+
+    Offscreen Qt tests deliberately do not exercise this presentation boundary.
+    """
+    if QApplication.platformName() != 'windows':return
+    import ctypes
+    result=ctypes.windll.dwmapi.DwmFlush()
+    return result == 0
+
+
 class TransitionCover(QWidget):
     def __init__(self,parent):
         super().__init__(parent);self.image=None
@@ -39,9 +50,11 @@ class NativeLanding(QWidget):
         if bool(self.windowFlags()&Qt.WindowType.WindowStaysOnTopHint)!=top:self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint,top)
         # Expose an empty, input-transparent surface during the animation.
         # A first show at the final resize may not be paintable synchronously.
-        self.setGeometry(rect);self.show();self.repaint();self.raise_()
+        if self.geometry()!=rect:self.setGeometry(rect)
+        if not self.isVisible():self.show();self.raise_()
+        self.repaint()
     def present(self,image,rect):
-        self.prepare(rect);self.image=image;self.paints=0;self.repaint()
+        self.image=image;self.paints=0;self.prepare(rect);self.repaint()
     def paintEvent(self,event):
         p=QPainter(self);p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source);p.fillRect(self.rect(),Qt.GlobalColor.transparent)
         if self.image is not None:p.drawPixmap(0,0,self.image)
@@ -62,8 +75,8 @@ class PanelTransition(QObject):
         self.canvas_morph=False;self.start_island=False;self.canvas_rect=None;self.progress=0.;self.raw_progress=0.;self.shrinking=False;self.closing=False
         self.old_surface=None;self.morph=None
         self.landing=NativeLanding(bubble);self.landing_timer=QTimer(self);self.landing_timer.setSingleShot(True)
-        self.landing_timer.setInterval(34);self.landing_timer.timeout.connect(self.release_landing)
-        self._preparation_updates=None;self.status_deferred=False
+        self.landing_timer.setInterval(0);self.landing_timer.timeout.connect(self.release_landing)
+        self._preparation_updates=None;self.status_deferred=False;self.post_handoff=None
         self.animation=QVariantAnimation(self);self.animation.setDuration(280)
         self.animation.setStartValue(0.);self.animation.setEndValue(1.)
         self.animation.setEasingCurve(QEasingCurve.Type.Linear)
@@ -111,15 +124,12 @@ class PanelTransition(QObject):
         for widget in reversed(widgets):
             widget.ensurePolished()
             if widget.layout():widget.layout().activate()
-        for widget in widgets:
-            if widget.layout():widget.layout().activate()
         QApplication.sendPostedEvents(None,QEvent.Type.LayoutRequest)
         # QWidget.render skips update-disabled descendants. Restore them only
         # for synchronous offscreen captures, after all posted layout work.
         # No event-loop turn or native paint is dispatched in this interval.
         b.setUpdatesEnabled(bool(self._preparation_updates))
         for widget in widgets:
-            if widget.layout():widget.layout().activate()
             if not self.shrinking and widget.isVisibleTo(b.content) and hasattr(widget,'begin_reveal'):widget.begin_reveal()
         ratio=b.devicePixelRatioF();size=b.content.size()
         image=QPixmap(pixel_size(size.width(),ratio),pixel_size(size.height(),ratio));image.setDevicePixelRatio(ratio);image.fill(Qt.GlobalColor.transparent if b.is_island() else QColor('#fcfafc'))
@@ -137,7 +147,10 @@ class PanelTransition(QObject):
         self.progress=0.;self.raw_progress=0.;self.canvas_rect=self.start_rect.united(target).united(self.morph.bounds())
         self.morph.prepare_landing(self.canvas_rect,ratio)
         if b.report:b.report.follow.commit(target)
-        if self.shrinking:self.landing.prepare(target)
+        if QApplication.platformName()=='windows':
+            self.landing.present(self.before,self.start_rect)
+            present_barrier()
+        elif self.shrinking:self.landing.prepare(target)
         enabled=b.updatesEnabled();b.setUpdatesEnabled(False)
         try:
             b.content.hide();b.setMinimumSize(0,0);b.setMaximumSize(16777215,16777215)
@@ -146,6 +159,11 @@ class PanelTransition(QObject):
         finally:
             self.preparing=False;b.setUpdatesEnabled(enabled);self._end_preparation()
         self.cover.repaint()
+        if QApplication.platformName()=='windows':
+            present_barrier()
+            self.landing.image=None;self.landing.repaint()
+            present_barrier()
+            self.landing.prepare(target)
         self.animation.start()
     def dismiss(self):
         b=self.bubble
@@ -198,12 +216,13 @@ class PanelTransition(QObject):
         p.setClipping(False);p.setOpacity(normal);p.setPen(QPen(QColor('#e0d9e6'),1));p.setBrush(Qt.BrushStyle.NoBrush);p.drawRoundedRect(rect.adjusted(.5,.5,-.5,-.5),radius,radius)
     def finish(self):
         b=self.bubble;closing=self.closing;self.closing=False
-        guarded=bool(not closing and self.shrinking and b.isVisible() and self.morph and self.morph.end.frame is not None)
+        guarded=bool(not closing and (self.shrinking or QApplication.platformName()=='windows') and b.isVisible() and self.morph and self.morph.end.frame is not None)
         if guarded:
             # Publish on another native backing store BEFORE touching the
             # bubble's native geometry; disabling QWidget updates alone does
             # not cover the Windows compositor during a layered-window resize.
             self.landing.present(self.morph.end.frame,self.target_rect)
+            present_barrier()
         enabled=b.updatesEnabled();b.setUpdatesEnabled(False)
         try:
             if closing:
@@ -225,20 +244,29 @@ class PanelTransition(QObject):
         else:self._hold_icon(False);self.start_reveals()
         deferred=self.deferred;self.deferred=False
         status_deferred=self.status_deferred;self.status_deferred=False
-        if deferred:self.bubble.redraw()
-        elif status_deferred:self.bubble.refresh_status()
+        if deferred or status_deferred:
+            refresh=self.bubble.redraw if deferred else self.bubble.refresh_status
+            if guarded:self.post_handoff=refresh
+            else:refresh()
     def start_reveals(self):
         for widget in self.bubble.content.findChildren(QWidget):
             if widget.isVisible() and hasattr(widget,'start_reveal'):widget.start_reveal()
     def release_landing(self):
         self.landing_timer.stop()
-        if self.landing.image is None:self.landing.release();self._hold_icon(False);return
+        if self.landing.image is None:
+            self.landing.release();self._hold_icon(False);self._run_post_handoff();return
         # The native window is already at its final size. Flush its complete
         # live children before retiring the independent presentation surface.
-        if self.bubble.isVisible():self.bubble.repaint()
+        if self.bubble.isVisible():
+            self.bubble.repaint()
+            present_barrier()
         self.landing.release()
         self._hold_icon(False)
         if not self.running and self.bubble.isVisible():self.start_reveals()
+        self._run_post_handoff()
+    def _run_post_handoff(self):
+        callback=self.post_handoff;self.post_handoff=None
+        if callback and self.bubble.isVisible():QTimer.singleShot(0,self.bubble,callback)
     def complete(self):
         if self.running:self.animation.setCurrentTime(self.animation.duration())
     def thaw(self):

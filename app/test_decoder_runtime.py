@@ -72,9 +72,9 @@ class DecoderRuntimeTests(unittest.TestCase):
         obj=SimpleNamespace(motion_timer=timer,walking=False,throwing=False,settings={'self_talk':False},motion_clock=1)
         try:
             DesktopPet.schedule_movement(obj);self.assertEqual(timer.interval(),1000)
-            obj.throwing=True;before=time.monotonic();DesktopPet.schedule_movement(obj)
-            self.assertEqual(timer.interval(),33);self.assertGreaterEqual(obj.motion_clock,before)
-            obj.throwing=False;obj.walking=True;DesktopPet.schedule_movement(obj);self.assertEqual(timer.interval(),33)
+            obj.throwing=True;before=time.perf_counter();DesktopPet.schedule_movement(obj)
+            self.assertEqual(timer.interval(),16);self.assertGreaterEqual(obj.motion_clock,before)
+            obj.throwing=False;obj.walking=True;DesktopPet.schedule_movement(obj);self.assertEqual(timer.interval(),16)
             timer.stop();DesktopPet.schedule_movement(obj);self.assertFalse(timer.isActive())
         finally:timer.stop()
     def test_frame_clock_uses_high_resolution_counter_independent_of_business_clock(self):

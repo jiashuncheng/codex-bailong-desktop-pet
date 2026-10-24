@@ -70,7 +70,9 @@ class AnimationLoadTests(unittest.TestCase):
         self.assertFalse(r.scroll.verticalScrollBar().isVisible())
         self.assertEqual(r.scroll.verticalScrollBar().maximum(),0)
         for label in (r.analogy_caption,r.note_label) if hasattr(r,'analogy_caption') else (r.note_label,):
-            self.assertIn('font-size:10px',label.styleSheet());self.assertIn('font-weight:600',label.styleSheet())
+            self.assertGreaterEqual(label.font().pixelSize(),11)
+            self.assertLess(label.font().pixelSize(),r.hour_total.font().pixelSize())
+            self.assertLessEqual(label.font().weight(),500)
     def test_landing_cache_is_ready_before_first_motion_frame(self):
         self.b.toggle_details();t=self.b.size_transition
         self.assertTrue(t.running);self.assertIsNotNone(t.morph._landing)

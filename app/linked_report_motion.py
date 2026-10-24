@@ -2,7 +2,7 @@
 from PySide6.QtCore import QObject,QRect,QRectF,QPoint,QTimer,Qt
 from PySide6.QtGui import QPixmap,QPainter,QRegion
 from PySide6.QtWidgets import QWidget
-from panel_transition import NativeLanding
+from panel_transition import NativeLanding,present_barrier
 from surface_morph import pixel_size,raster_offset
 from spring_motion import container_progress,stage
 from card_motion import paint_card
@@ -13,7 +13,7 @@ class LinkedReportMotion(QObject):
         self.old=None;self.new=None;self.start=None;self.end=None;self.canvas=None
         self.frame=None;self.weighted=None;self.saved_opacity=1.;self.saved_passthrough=False;self.status_tracking=False;self.tracked_rect=None
         self.landing=NativeLanding(report.bubble);self.shield=NativeLanding(report.bubble)
-        self.timer=QTimer(self);self.timer.setSingleShot(True);self.timer.setInterval(34);self.timer.timeout.connect(self.release)
+        self.timer=QTimer(self);self.timer.setSingleShot(True);self.timer.setInterval(0);self.timer.timeout.connect(self.release)
     def park(self,surface):
         surface.image=None
         if surface.isVisible():surface.repaint()
@@ -45,7 +45,7 @@ class LinkedReportMotion(QObject):
         # parent's translucent backing-store paints during QWidget.render.
         native=QRect(r.geometry());ratio=r.devicePixelRatioF()
         frame=QPixmap(pixel_size(native.width(),ratio),pixel_size(native.height(),ratio));frame.setDevicePixelRatio(ratio);frame.fill(Qt.GlobalColor.transparent)
-        p=QPainter(frame);p.drawPixmap(r.PAD,r.PAD,self.old);p.end();self.shield.present(frame,native)
+        p=QPainter(frame);p.drawPixmap(r.PAD,r.PAD,self.old);p.end();self.shield.present(frame,native);present_barrier()
         self.saved_opacity=r.windowOpacity();self.saved_passthrough=r.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         r.setWindowOpacity(0.);r._input_passthrough(True)
     def commit(self,host):
@@ -135,7 +135,8 @@ class LinkedReportMotion(QObject):
             r._dismiss_after_host=False;self.release();r.dismiss()
     def release(self):
         self.timer.stop();r=self.report
-        if self.landing.image is not None and r.isVisible():r.repaint()
+        if self.landing.image is not None and r.isVisible():
+            r.repaint();present_barrier()
         self.park(self.landing);self.park(self.shield);r.refresh_button.resume_motion('host')
         if not self.active:self.old=self.new=self.frame=self.weighted=None
         if not self.active and r.isVisible() and r.plot:r.plot.start_reveal()

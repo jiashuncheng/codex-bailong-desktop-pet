@@ -127,7 +127,10 @@ def verify_ready(source,cache,version,archive_sha=None,full=True):
 def prune_program_cache(root,current):
     root=Path(root)
     if not root.is_dir() or root.is_symlink() or root.is_junction():return
-    for p in root.iterdir():
+    # The cache may be removed between the directory check and enumeration.
+    try:entries=tuple(root.iterdir())
+    except OSError:return
+    for p in entries:
         try:
             if version_tuple(p.name)>version_tuple(current) or p.is_symlink() or p.is_junction():continue
             base=p/'program';receipt=base/'receipt.json'

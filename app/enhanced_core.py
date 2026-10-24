@@ -115,6 +115,16 @@ class ActivityReducer:
                     compacting=s.compacting,waiting_reason=waiting,waiting=sum(bool(x.waiting_reason) and not x.done for x in self.sessions.values()),
                     user_message=user_message,turn_started=turn_started,active=sum(not x.done or x.compacting for x in self.sessions.values()))
 
+    def terminate(self,sid,status,turn):
+        s=self.sessions.get(sid)
+        if not s or s.source_subagent or s.done or not turn or s.turn!=turn or status not in ('completed','failed','interrupted'):return []
+        s.done=True;s.compacting=False;s.waiting_reason=''
+        s.state='complete' if status=='completed' else 'interrupted'
+        s.message=s.display={'completed':'任务已完成','failed':'任务执行失败','interrupted':'任务已中断'}[status]
+        events=[]
+        if status=='completed':events.append(dict(kind='complete',session=sid,turn=turn,title=s.title,text=s.message))
+        return events+[self._status(sid,s)]
+
     def set_waiting(self,sid,reason,turn=''):
         s=self.sessions.setdefault(sid,Session())
         if s.source_subagent or s.done or reason not in ('','input','approval'):return []

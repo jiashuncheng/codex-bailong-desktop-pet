@@ -5,10 +5,11 @@ from collections import deque
 from pathlib import Path
 from desktop_core import atomic_json
 from session_read_state import session_id,subagent_sessions
-from PySide6.QtCore import Qt,QRectF,QPointF,QTimer,Signal
-from PySide6.QtGui import QColor,QPainter,QPainterPath,QTransform
+from PySide6.QtCore import Qt,QTimer,Signal
+from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import QWidget
 from status_motion import GlyphMotion,busy_ring_centers,BUSY_RING_RADIUS,BUSY_RING_STROKE,BUSY_BREATH_SECONDS
+from status_paint import paint_liquid_glyph
 
 ACTIVE={'thinking','working','responding'}
 
@@ -183,21 +184,5 @@ class StatusIndicator(QWidget):
         super().keyPressEvent(event)
 
     def paintEvent(self,event):
-        visual=self.visual()
-        color=QColor(('#d6c5ed' if visual!='warning' else '#e3b9c7') if self.island else '#915e74' if visual=='warning' else '#927aaf')
         p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        groups={}
-        for part in self.motion.sample(self._motion_now()):
-            if part.opacity<=.001:continue
-            path=QPainterPath();path.setFillRule(Qt.FillRule.WindingFill)
-            r,l=part.radius,part.length
-            path.addRoundedRect(QRectF(-r,-l-r,2*r,2*(l+r)),r,r)
-            if part.hole>.001:
-                inner=QPainterPath();r=part.hole
-                inner.addRoundedRect(QRectF(-r,-l-r,2*r,2*(l+r)),r,r)
-                path.addPath(inner.toReversed())
-            transform=QTransform();transform.translate(part.x,part.y);transform.rotate(part.angle)
-            group=groups.setdefault(part.opacity,QPainterPath());group.setFillRule(Qt.FillRule.WindingFill)
-            group.addPath(transform.map(path))
-        for opacity,path in groups.items():
-            p.setOpacity(opacity);p.fillPath(path,color)
+        paint_liquid_glyph(p,self.motion.sample(self._motion_now()),self.island)

@@ -1,20 +1,20 @@
 """User initiated, OpenAI-compatible SSE chat, separate from Codex monitoring."""
 import copy
+import sys
 import json
 import time
 import uuid
 from pathlib import Path
-from urllib.parse import urlsplit
-from PySide6.QtCore import Qt,QObject,Signal,QTimer,QUrl
-from PySide6.QtGui import QTextCursor
-from PySide6.QtNetwork import QNetworkAccessManager,QNetworkRequest,QNetworkReply
+from PySide6.QtCore import Qt,Signal,QTimer,QUrl
+from PySide6.QtGui import QTextCursor,QDesktopServices
 from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QComboBox,QPushButton,
     QPlainTextEdit,QLabel,QCheckBox,QMessageBox,QDialog,QFormLayout,QLineEdit,QSpinBox,QStackedWidget,QScrollArea,QMenu)
 from desktop_core import atomic_json
-from desktop_services import SecretStore
 from inline_confirmation import InlineConfirmation
+from chat_config import (CHAT_DEFAULT,load_chat_config,save_chat_config,load_provider_key,
+    provider_key_present,clear_provider_key,delete_chat_provider)
+from chat_protocol import ProviderValidationError,normalize_provider,endpoint_for
 
-CHAT_DEFAULT=dict(providers=[],active='',system_prompt='你是白龙娘，是陪伴用户工作的桌面伙伴。用自然、简洁的中文回应。',history_messages=40,history_chars=24000)
 def load_json(path,default):
     try:return json.loads(Path(path).read_text(encoding='utf-8'))
     except (OSError,ValueError):return copy.deepcopy(default)
@@ -41,103 +41,70 @@ class SessionStore:
         session=dict(id=uuid.uuid4().hex,title='新对话',messages=[],at=time.time())
         self.sessions.insert(0,session);self.save();return session
 
-class ChatStream(QObject):
-    delta=Signal(str);done=Signal(str);failed=Signal(str)
-    def __init__(self,parent=None):
-        super().__init__(parent);self.manager=QNetworkAccessManager(self);self.reply=None
-        self.timer=QTimer(self);self.timer.setSingleShot(True);self.timer.timeout.connect(self.timeout)
-        self.buffer=b'';self.text='';self.cancelled=False;self.completed=False
-    def start(self,provider,key,messages):
-        url=provider.get('base_url','').strip().rstrip('/')
-        parts=urlsplit(url)
-        if parts.scheme not in ('http','https') or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment:
-            raise ValueError('服务地址需为有效的 http/https API 基础地址')
-        if parts.scheme=='http' and parts.hostname not in ('localhost','127.0.0.1','::1'):
-            raise ValueError('远程服务请使用 HTTPS；本地服务可以使用 HTTP')
-        if not provider.get('model','').strip():raise ValueError('请先填写模型名称')
-        if not url.endswith('/chat/completions'):url+='/chat/completions'
-        self.buffer=b'';self.text='';self.cancelled=False;self.completed=False
-        request=QNetworkRequest(QUrl(url));request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,'application/json')
-        request.setRawHeader(b'Accept',b'text/event-stream')
-        request.setAttribute(QNetworkRequest.Attribute.RedirectPolicyAttribute,QNetworkRequest.RedirectPolicy.ManualRedirectPolicy)
-        if key:request.setRawHeader(b'Authorization',('Bearer '+key).encode())
-        body=json.dumps(dict(model=provider['model'],messages=messages,stream=True),ensure_ascii=False).encode('utf-8')
-        self.reply=self.manager.post(request,body);reply=self.reply
-        reply.readyRead.connect(lambda:self.read(reply))
-        reply.finished.connect(lambda:self.finish(reply))
-        self.timer.start(max(5,min(600,int(provider.get('timeout',90))))*1000)
-    def read(self,reply):
-        if self.cancelled or reply is not self.reply:return
-        status=reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
-        if status and int(status)>=300:reply.readAll();return
-        self.buffer+=bytes(reply.readAll())
-        if len(self.buffer)>2_000_000:self.fail('接口返回数据过大');return
-        while b'\n' in self.buffer:
-            line,self.buffer=self.buffer.split(b'\n',1);line=line.rstrip(b'\r')
-            if not line.startswith(b'data:'):continue
-            data=line[5:].strip()
-            if data==b'[DONE]':self.completed=True;continue
-            try:
-                event=json.loads(data)
-                if event.get('error'):self.fail('模型服务返回错误，请检查服务配置');return
-                for choice in event.get('choices',[]):
-                    value=choice.get('delta',{}).get('content')
-                    if isinstance(value,str):
-                        if len(self.text)+len(value)>500000:self.fail('回复过长，已停止');return
-                        self.text+=value;self.delta.emit(value)
-                    if choice.get('finish_reason'):self.completed=True
-            except (ValueError,TypeError,AttributeError):self.fail('无法解析服务的流式响应');return
-    def finish(self,reply):
-        if reply is not self.reply:reply.deleteLater();return
-        if not self.cancelled:self.read(reply)
-        self.timer.stop();self.reply=None
-        if not self.cancelled:
-            status=reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
-            if status and int(status)>=300:self.failed.emit(f'模型服务 HTTP {int(status)}；请检查地址、模型和密钥')
-            elif reply.error()!=QNetworkReply.NetworkError.NoError:self.failed.emit('连接中断或服务不可用；请检查网络后重试')
-            elif not self.completed:self.failed.emit('服务在回复完成前断开，可以重试')
-            else:self.done.emit(self.text)
-        reply.deleteLater()
-    def fail(self,message):
-        self.cancel();self.failed.emit(message)
-    def timeout(self):self.fail('请求超时，可调整服务超时后重试')
-    def cancel(self):
-        self.cancelled=True;self.timer.stop()
-        if self.reply:self.reply.abort()
+from chat_transport import ChatStream
 
 class ProviderDialog(QDialog):
     def __init__(self,root,parent=None,embedded=False):
         super().__init__(parent,Qt.WindowType.Widget if embedded else Qt.WindowType.Dialog);self.root=Path(root);self.path=self.root/'chat.json'
         if embedded:
             self.setWindowFlags(Qt.WindowType.Widget);self.setObjectName('provider_settings');self.setStyleSheet('QWidget#provider_settings{background:#f5f2f7;}')
-        self.config=load_json(self.path,CHAT_DEFAULT);self.secrets=SecretStore(self.root/'credentials.dpapi.json')
-        self.drafts={};self.current=None
+        self.load_error=''
+        try:self.config=load_chat_config(self.root)
+        except OSError as error:self.config=copy.deepcopy(CHAT_DEFAULT);self.load_error=str(error)
+        self.drafts={};self.current=None;self.mutation_buttons=[]
         self.setWindowTitle('白龙 · 模型服务');self.resize(530,550);layout=QVBoxLayout(self)
         row=QHBoxLayout();self.select=QComboBox();row.addWidget(self.select,1)
         for title,slot in [('添加',self.add),('删除',self.remove)]:
             b=QPushButton(title);b.clicked.connect(slot);row.addWidget(b)
+            self.mutation_buttons.append(b)
             if title=='删除':b.setProperty('role','danger')
         layout.addLayout(row);self.confirmation=InlineConfirmation();layout.addWidget(self.confirmation)
-        self.status=QLabel('编辑内容切换服务时保留；点击保存后生效。删除和清密钥需单独确认。');self.status.setWordWrap(True);layout.addWidget(self.status)
+        self.status=QLabel('切换服务保留草稿；保存后生效，但不代表已验证连通。删除和清密钥需单独确认。');self.status.setTextFormat(Qt.TextFormat.PlainText);self.status.setWordWrap(True);layout.addWidget(self.status)
         form=QFormLayout();layout.addLayout(form)
         self.fields={}
-        for key,title in [('name','服务名称'),('base_url','API基础地址（含 /v1）'),('model','模型名称'),('key','API密钥')]:
+        for key,title in [('name','服务名称'),('base_url','Chat Completions 地址'),('model','模型名称'),('key','API密钥')]:
             w=QLineEdit();self.fields[key]=w
             if key=='key':w.setEchoMode(QLineEdit.EchoMode.Password);w.setPlaceholderText('留空保留；输入新密钥可替换')
+            if key=='base_url':w.setPlaceholderText('服务方给出的基础地址（如含 /v1）或完整端点')
             form.addRow(title,w)
+        self.endpoint=QLabel();self.endpoint.setTextFormat(Qt.TextFormat.PlainText);self.endpoint.setWordWrap(True);self.endpoint.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse);form.addRow('实际请求地址',self.endpoint)
+        self.key_status=QLabel();self.key_status.setTextFormat(Qt.TextFormat.PlainText);self.key_status.setWordWrap(True);form.addRow('',self.key_status)
+        self.fields['base_url'].textChanged.connect(self.update_endpoint)
+        self.fields['key'].textChanged.connect(self.update_key_status)
         self.timeout=QSpinBox();self.timeout.setRange(5,600);form.addRow('超时（秒）',self.timeout)
         self.prompt=QPlainTextEdit();self.prompt.setPlainText(self.config.get('system_prompt',CHAT_DEFAULT['system_prompt']));form.addRow('角色系统提示词',self.prompt)
         self.count=QSpinBox();self.count.setRange(2,200);self.count.setValue(self.config.get('history_messages',40));form.addRow('历史消息上限',self.count)
         self.chars=QSpinBox();self.chars.setRange(1000,200000);self.chars.setSingleStep(1000);self.chars.setValue(self.config.get('history_chars',24000));form.addRow('历史字符上限',self.chars)
-        note=QLabel('仅在你点击发送时请求此服务。Codex 会话不会自动发送。\n密钥使用当前 Windows 用户的 DPAPI 加密保存。');note.setWordWrap(True);note.setStyleSheet('font-size:10px;color:#706879;');layout.addWidget(note)
+        note=QLabel('仅支持 Chat Completions；不支持 Responses 或 Anthropic 原生接口。\n仅主动发送时请求服务，Codex 会话不会自动发送。\n'+('密钥保存在当前 macOS 用户的系统钥匙串中。' if sys.platform=='darwin' else '密钥使用当前 Windows 用户的 DPAPI 加密保存。')+'本地免密服务可留空。');note.setWordWrap(True);note.setStyleSheet('font-size:11px;color:#706879;');layout.addWidget(note)
         row=QHBoxLayout();save=QPushButton('保存并设为当前服务');save.setProperty('role','primary');save.clicked.connect(self.save);row.addWidget(save)
         clear=QPushButton('清除此服务密钥');clear.setProperty('role','danger');clear.clicked.connect(self.clear_key);row.addWidget(clear);layout.addLayout(row)
+        self.mutation_buttons.extend((save,clear))
+        self.recovery=QPushButton('打开配置目录');self.recovery.clicked.connect(lambda:QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.root))));layout.addWidget(self.recovery);self.recovery.hide()
         if embedded:
             back=QPushButton('返回聊天（保留未保存输入）');back.clicked.connect(self.reject);layout.addWidget(back)
         self.select.currentIndexChanged.connect(self.change);self.reload()
+        if self.load_error:self.block_writes(self.load_error)
         for button in self.findChildren(QPushButton):button.setAutoDefault(False)
         from PySide6.QtGui import QShortcut,QKeySequence
-        self.save_shortcut=QShortcut(QKeySequence('Ctrl+S'),self);self.save_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut);self.save_shortcut.activated.connect(self.save)
+        self.save_shortcut=QShortcut(QKeySequence(QKeySequence.StandardKey.Save),self);self.save_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut);self.save_shortcut.activated.connect(self.save)
+    def block_writes(self,message):
+        self.load_error=message
+        self.status.setText('无法安全读取聊天配置或凭据：'+message+' 原文件已保留，暂停保存、删除及清密钥。请先备份配置目录，修复文件或恢复备份后重启桌宠。')
+        self.recovery.show()
+        for button in self.mutation_buttons:button.setEnabled(False)
+    def update_endpoint(self):
+        try:self.endpoint.setText(endpoint_for({'base_url':self.fields['base_url'].text()}))
+        except ProviderValidationError as error:self.endpoint.setText(str(error))
+    def update_key_status(self):
+        if self.fields['key'].text():self.key_status.setText('新密钥待保存；不会显示已保存密钥。');return
+        if self.load_error:self.key_status.setText('暂时无法读取已保存密钥状态。');return
+        try:present=provider_key_present(self.root,self.current or {'id':''})
+        except OSError as error:self.key_status.setText('凭据文件不可读取，原文件已保留。');self.block_writes(str(error));return
+        self.key_status.setText('已保存密钥 · 留空保留' if present else '未保存密钥 · 本地免密服务可留空')
+    def validation_failed(self,error):
+        self.status.setText(str(error)+' 配置尚未保存。')
+        field=self.timeout if error.field=='timeout' else self.fields.get(error.field)
+        if field:field.setFocus();field.selectAll()
     def reload(self):
         self.current=None
         self.select.blockSignals(True);self.select.clear()
@@ -150,32 +117,37 @@ class ProviderDialog(QDialog):
         values=self.drafts.get(self.current['id'],self.current) if self.current else {}
         for k,w in self.fields.items():w.setText(values.get(k,''))
         self.timeout.setValue(values.get('timeout',90))
+        self.update_endpoint();self.update_key_status()
     def add(self):
+        if self.load_error:return
         if self.current:self.drafts[self.current['id']]={**{key:w.text() for key,w in self.fields.items()},'timeout':self.timeout.value()}
         self.config.setdefault('providers',[]).append(dict(id=uuid.uuid4().hex,name='新服务',base_url='',model='',timeout=90))
         self.config['active']=self.config['providers'][-1]['id'];self.reload()
     def remove(self):
-        if not self.current:return
+        if self.load_error or not self.current:return
         key=self.current['id'];name=self.fields['name'].text().strip() or self.current.get('name','未命名服务')
         self.confirmation.request(f'删除服务“{name}”及其已保存的密钥？聊天记录会保留。',lambda:self.remove_confirmed(key))
     def remove_confirmed(self,key):
-        candidate=copy.deepcopy(self.config);candidate['providers']=[p for p in candidate['providers'] if p['id']!=key]
-        if candidate.get('active')==key:candidate['active']=candidate['providers'][0]['id'] if candidate['providers'] else ''
-        try:atomic_json(self.path,candidate)
-        except OSError:self.status.setText('服务删除失败，原配置已保留。');return
+        if self.load_error:return
+        try:candidate,warning=delete_chat_provider(self.root,self.config,key)
+        except OSError as error:self.status.setText('服务删除未提交，原配置仍有效。'+str(error));return
         self.config=candidate;self.drafts.pop(key,None);self.reload()
-        try:self.secrets.put(key,'');self.status.setText('服务及密钥已删除；聊天记录保留。')
-        except OSError:self.status.setText('服务已删除，但密钥清理失败；请检查用户目录权限。')
+        self.status.setText('服务已删除；聊天记录保留。'+warning)
     def clear_key(self):
-        if not self.current:return
+        if self.load_error or not self.current:return
         key=self.current['id'];name=self.fields['name'].text().strip() or self.current.get('name','未命名服务')
         self.confirmation.request(f'清除服务“{name}”的密钥？下次发送前需要重新填写。',lambda:self.clear_key_confirmed(key),'确认清除密钥')
     def clear_key_confirmed(self,key):
-        try:self.secrets.put(key,'')
-        except OSError:self.status.setText('密钥清除失败，请检查用户目录权限。');return
+        if self.load_error:return
+        try:committed,warning=clear_provider_key(self.root,key)
+        except OSError as error:self.status.setText('密钥清除未提交，原配置仍有效。'+str(error));return
+        # Only credential references change here; editing fields remain drafts.
+        saved=next((p for p in committed['providers'] if p['id']==key),{})
+        for provider in self.config['providers']:
+            if provider['id']==key:provider['credential_id']=saved.get('credential_id','')
         if key in self.drafts:self.drafts[key]['key']=''
         if self.current and self.current['id']==key:self.fields['key'].clear();self.fields['key'].setPlaceholderText('已清除密钥，请重新填写')
-        self.status.setText('密钥已清除，其他输入尚未保存。')
+        self.update_key_status();self.status.setText('密钥已清除，其他输入尚未保存。'+warning)
     def reject(self):
         self.confirmation.cancel();super().reject()
     def keyPressEvent(self,event):
@@ -183,19 +155,22 @@ class ProviderDialog(QDialog):
             self.confirmation.cancel();event.accept();return
         super().keyPressEvent(event)
     def save(self):
+        if self.load_error:return
         entered={key:w.text().strip() for key,w in self.fields.items()};timeout=self.timeout.value()
+        try:normalized=normalize_provider({key:value for key,value in entered.items() if key!='key'}|{'timeout':timeout})
+        except ProviderValidationError as error:self.validation_failed(error);return
         if not self.current:
             self.add()
             for key,value in entered.items():self.fields[key].setText(value)
             self.timeout.setValue(timeout)
         candidate=copy.deepcopy(self.config)
         current=next(p for p in candidate['providers'] if p['id']==self.current['id'])
-        current.update({key:value for key,value in entered.items() if key!='key'},timeout=timeout)
+        current.update(normalized)
         try:
-            if entered['key']:self.secrets.put(current['id'],entered['key'])
             candidate.update(active=current['id'],system_prompt=self.prompt.toPlainText(),history_messages=self.count.value(),history_chars=self.chars.value())
-            atomic_json(self.path,candidate);self.config=candidate;self.drafts.pop(current['id'],None);self.reload();self.accept()
-        except OSError:self.status.setText('服务配置保存失败；输入已保留，可检查用户目录权限后重试。')
+            self.config=save_chat_config(self.root,candidate,current['id'],entered['key'])
+            self.drafts.pop(current['id'],None);self.reload();self.status.setText('配置已保存；尚未验证连通，请主动发送消息验证。');self.accept()
+        except OSError as error:self.status.setText('服务配置未提交；输入已保留。'+str(error))
 
 class ChatInput(QPlainTextEdit):
     send=Signal()
@@ -224,7 +199,7 @@ class ChatWindow(QWidget):
         layout.addLayout(row);self.sessions.currentIndexChanged.connect(self.switch)
         self.confirmation=InlineConfirmation();layout.addWidget(self.confirmation)
         self.transcript=QPlainTextEdit();self.transcript.setReadOnly(True);layout.addWidget(self.transcript,1)
-        self.status=QLabel('这里是与白龙的对话；Codex 进度可切换到状态页查看。');self.status.setWordWrap(True);layout.addWidget(self.status)
+        self.status=QLabel('这里是与白龙的对话；Codex 进度可切换到状态页查看。');self.status.setTextFormat(Qt.TextFormat.PlainText);self.status.setWordWrap(True);layout.addWidget(self.status)
         self.input=ChatInput();self.input.setMaximumHeight(110);self.input.setPlaceholderText('Enter 发送，Shift+Enter 换行');self.input.send.connect(self.send);layout.addWidget(self.input)
         row=QHBoxLayout();self.send_button=QPushButton('发送');self.send_button.setProperty('role','primary');self.send_button.clicked.connect(self.send);row.addWidget(self.send_button)
         self.stop_button=QPushButton('停止');self.stop_button.clicked.connect(self.stop);row.addWidget(self.stop_button)
@@ -303,10 +278,13 @@ class ChatWindow(QWidget):
                 self.provider_dialog=ProviderDialog(self.root,self,embedded=True)
                 self.provider_page=QScrollArea();self.provider_page.setWidgetResizable(True);self.provider_page.setWidget(self.provider_dialog)
                 self.pages.addWidget(self.provider_page)
-                self.provider_dialog.finished.connect(lambda result:self.pages.setCurrentWidget(self.chat_body))
+                self.provider_dialog.finished.connect(self.provider_finished)
             self.pages.setCurrentWidget(self.provider_page);self.provider_dialog.show();return
         if self.provider_dialog and self.provider_dialog.isVisible():self.provider_dialog.raise_();return
-        self.provider_dialog=ProviderDialog(self.root,self);self.provider_dialog.show()
+        self.provider_dialog=ProviderDialog(self.root,self);self.provider_dialog.finished.connect(self.provider_finished);self.provider_dialog.show()
+    def provider_finished(self,result):
+        if self.embedded:self.pages.setCurrentWidget(self.chat_body)
+        if result==QDialog.DialogCode.Accepted:self.status.setText('聊天配置已保存；尚未验证连通，发送消息时才会请求服务。')
     def send(self):
         self.confirmation.cancel()
         if self.busy:return
@@ -320,11 +298,13 @@ class ChatWindow(QWidget):
         if messages and messages[-1]['role']=='assistant':messages.pop()
         if messages and messages[-1]['role']=='user':self.start(messages[-1]['content'],True)
     def start(self,text,retry):
-        config=load_json(self.root/'chat.json',CHAT_DEFAULT)
+        try:config=load_chat_config(self.root)
+        except OSError as error:self.status.setText('聊天配置无法读取，原文件和输入已保留。'+str(error));return
         provider=next((p for p in config.get('providers',[]) if p['id']==config.get('active')),None)
         if not provider:self.status.setText('请先在“模型服务”中配置接口地址、模型和密钥。');self.provider();return
-        try:key=SecretStore(self.root/'credentials.dpapi.json').get(provider['id'])
-        except OSError:self.status.setText('无法解密密钥，请在模型服务中重新保存。');return
+        try:provider=normalize_provider(provider);key=load_provider_key(self.root,provider)
+        except ProviderValidationError as error:self.status.setText(str(error)+' 请在“聊天服务”中修改，输入已保留。');return
+        except OSError as error:self.status.setText('无法读取聊天凭据，原文件和输入已保留。'+str(error));return
         messages=copy.deepcopy(self.session['messages'])
         if retry and messages and messages[-1]['role']=='assistant':messages.pop()
         if not retry:messages.append(dict(role='user',content=text))
@@ -336,7 +316,12 @@ class ChatWindow(QWidget):
         try:stream.start(provider,key,payload)
         except (ValueError,OSError) as error:
             self.busy=False;stream.deleteLater();self.stream=None;self.status.setText(str(error));self.render();return
-        self.session['messages']=messages;self.session['title']=text[:24];self.store.save();self.input.clear()
+        self.session['messages']=messages;self.session['title']=text[:24]
+        try:self.store.save()
+        except OSError:
+            self.stream=None;self.busy=False;stream.cancel();stream.deleteLater()
+            self.status.setText('聊天记录保存失败；输入已保留，请检查磁盘空间和目录权限。');self.render();return
+        self.input.clear()
         self.status.setText('白龙正在回复…');self.reload()
     def on_delta(self,stream,value):
         if stream is self.stream and self.busy:
@@ -346,7 +331,12 @@ class ChatWindow(QWidget):
         if stream is not self.stream or not self.busy:return
         self.flush_stream()
         if value:self.session['messages'].append(dict(role='assistant',content=value))
-        self.store.save();self.busy=False;self.stream=None;stream.deleteLater();self.status.setText('回复完成');self.render()
+        try:
+            self.store.save();self.status.setText('回复完成')
+        except OSError:
+            self.status.setText('回复已完成，但记录保存失败；请先复制回复，并检查磁盘空间和目录权限。')
+        finally:
+            self.busy=False;self.stream=None;stream.deleteLater();self.render()
     def on_error(self,stream,message):
         if stream is not self.stream or not self.busy:return
         self.busy=False;self.stream=None;stream.deleteLater();self.status.setText(message+'；上条消息已保留，可重试。');self.render()

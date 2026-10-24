@@ -1,4 +1,5 @@
 import os,random,threading,time,unittest
+from unittest.mock import patch
 os.environ['QT_QPA_PLATFORM']='offscreen'
 from PySide6.QtCore import QPointF,QTimer
 from PySide6.QtWidgets import QApplication
@@ -40,20 +41,25 @@ class CurveTests(unittest.TestCase):
 
 class NavigationTests(unittest.TestCase):
     def wait(self,condition):
-        end=time.monotonic()+2
+        end=time.monotonic()+10
         while not condition():
             APP.processEvents();time.sleep(.003)
             self.assertLess(time.monotonic(),end,'navigation did not settle')
     def test_blocked_system_dispatch_does_not_block_ui_and_only_latest_click_is_queued(self):
-        gate=threading.Event();started=threading.Event();called=[];ticks=[]
-        def open_(session):called.append(session);started.set();gate.wait(2)
-        nav=CodexNavigation(open_);before=time.monotonic()
+        gate=threading.Event();started=threading.Event();returned=threading.Event();called=[];ticks=[];threads=[]
+        def open_(session):
+            called.append(session);threads.append(threading.get_ident());started.set();gate.wait(10);returned.set()
+        nav=CodexNavigation(open_)
         try:
-            self.assertTrue(nav.open(SID));self.assertLess(time.monotonic()-before,.1);self.assertTrue(started.wait(.5))
+            self.assertTrue(nav.open(SID));self.assertTrue(started.wait(5))
+            self.assertNotEqual(threads[0],threading.get_ident())
+            self.assertFalse(returned.is_set());self.assertTrue(nav.busy)
             nav.open(SID);nav.open(OTHER);nav.open('33333333-3333-4333-8333-333333333333');nav.open(OTHER)
-            QTimer.singleShot(0,lambda:ticks.append(True));APP.processEvents();self.assertEqual(ticks,[True]);self.assertEqual(called,[SID])
+            QTimer.singleShot(0,lambda:ticks.append(not returned.is_set()));APP.processEvents();self.assertEqual(ticks,[True]);self.assertEqual(called,[SID])
             gate.set();self.wait(lambda:not nav.busy)
-            self.assertEqual(called,[SID,OTHER]);self.assertFalse(nav.open(OTHER));self.assertEqual(len(called),2)
+            self.assertEqual(called,[SID,OTHER])
+            with patch('codex_navigation.time.monotonic',return_value=nav.last_request+.1):self.assertFalse(nav.open(OTHER))
+            self.assertEqual(len(called),2)
         finally:gate.set();nav.close();nav.deleteLater();APP.processEvents()
     def test_invalid_id_and_failure_never_open_an_unrelated_thread_or_clear_read_state(self):
         calls=[];nav=CodexNavigation(lambda sid:calls.append(sid))

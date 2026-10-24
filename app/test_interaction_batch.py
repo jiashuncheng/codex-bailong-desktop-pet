@@ -47,7 +47,9 @@ class InteractionTests(unittest.TestCase):
         for p in reversed(self.patches):p.stop()
         self.tmp.cleanup()
     def settings(self):
-        self.pet.open_settings();settle(self.pet);return self.pet.settings_dialog
+        self.pet.open_settings();settle(self.pet)
+        for index in range(6):self.pet.settings_dialog.build_page(index)
+        return self.pet.settings_dialog
     def chat(self):
         self.pet.open_chat();settle(self.pet);return self.pet.chat_window
     def test_external_toggle_and_cross_tab_edits_are_not_overwritten(self):
@@ -78,14 +80,25 @@ class InteractionTests(unittest.TestCase):
         self.assertEqual(self.pet.settings['scale'],1.0);self.assertEqual(self.pet.height(),old)
         self.assertEqual(s.draft.dirty,{'scale'});self.assertIn('保存失败',s.status.text())
     def test_defaults_are_per_tab_and_movement_dependencies_are_explicit(self):
-        s=self.settings();s.fields['scale'].setValue(1.2);s.startup.setChecked(True);s.tabs.setCurrentIndex(1)
+        s=self.settings();s.fields['scale'].setValue(1.2);s.mode.setCurrentIndex(s.mode.findData('mini'));s.startup.setChecked(True);s.tabs.setCurrentIndex(1)
         s.fields['no_move'].setChecked(True);self.assertFalse(s.fields['wandering'].isEnabled())
         self.assertIn('位置已锁定',s.movement_note.text());self.assertEqual(s.fields['move_range'].value(),75)
         self.assertEqual(s.fields['status_action_interval'].decimals(),0)
-        s.defaults_button.click();self.assertFalse(s.fields['no_move'].isChecked());self.assertEqual(s.fields['scale'].value(),1.2)
-        self.assertTrue(s.startup.isChecked());self.startup.assert_not_called()
+        s.defaults_button.click();self.assertFalse(s.fields['no_move'].isChecked());self.assertEqual(s.fields['scale'].value(),1.0)
+        self.assertEqual(s.mode.currentData(),'mini');self.assertTrue(s.startup.isChecked());self.startup.assert_not_called()
+    def test_setting_categories_keep_startup_response_and_chat_together(self):
+        s=self.settings()
+        self.assertEqual([s.tabs.tabText(i) for i in range(s.tabs.count())],['面板','人物','Codex','素材','闲聊','维护'])
+        for key,tab in [('bubble_mode',0),('panel_detached',0),('scale',1),('drag_physics',1),('startup',2),('codex_startup',2),('codex_exit',2),('commentary',2),('status_actions',2),('self_talk',4),('talk_lines',4),('update_checks',5)]:
+            self.assertEqual(s.field_tabs[key],tab,key)
+        s.fields['self_talk'].setChecked(True);s.lines.setPlainText('保留的台词草稿')
+        s.tabs.setCurrentIndex(1);s.defaults_button.click()
+        self.assertEqual(s.lines.toPlainText(),'保留的台词草稿')
+        self.assertTrue(s.fields['self_talk'].isChecked())
+
     def test_menus_have_separate_roles_and_share_live_settings(self):
-        menu=QMenu();self.pet.build_menu(menu);self.assertEqual(len([a for a in menu.actions() if not a.isSeparator()]),8)
+        menu=QMenu();self.pet.build_menu(menu);self.assertEqual(len([a for a in menu.actions() if not a.isSeparator()]),9)
+        panel=next(a for a in menu.actions() if a.objectName()=='command_bubble');self.assertTrue(panel.isCheckable())
         tray=QMenu();self.pet.build_menu(tray,tray=True);self.assertEqual(len([a for a in tray.actions() if not a.isSeparator()]),6)
         self.assertIn('找回组件并关闭穿透',[a.text() for a in tray.actions()])
         pin=next(a for a in menu.findChildren(__import__('PySide6.QtGui',fromlist=['QAction']).QAction) if a.objectName()=='command_pin')
@@ -141,16 +154,21 @@ class InteractionTests(unittest.TestCase):
             c.clear();c.confirmation.confirm();self.assertEqual(c.session['messages'],messages)
             c.delete();c.confirmation.confirm();self.assertEqual(c.session['id'],key);self.assertEqual(len(c.store.sessions),2)
     def test_provider_drafts_survive_switches_and_key_deletion_requires_confirmation(self):
+        from chat_config import load_chat_config,load_provider_key
+        from desktop_services import SecretStore
         config=dict(CHAT_DEFAULT,providers=[dict(id='a',name='Service A',model='A'),dict(id='b',name='Service B',model='B')],active='a')
+        SecretStore(self.root/'credentials.dpapi.json').put('a','isolated-confirm-test-key')
         atomic_json(self.root/'chat.json',config);c=self.chat();c.provider();p=c.provider_dialog
         p.fields['model'].setText('pending-A');p.select.setCurrentIndex(1);p.select.setCurrentIndex(0)
         self.assertEqual(p.fields['model'].text(),'pending-A')
-        with patch.object(p.secrets,'put') as secret:
-            p.clear_key();secret.assert_not_called();p.confirmation.cancel();secret.assert_not_called()
-            p.clear_key();p.confirmation.confirm();secret.assert_called_once_with('a','')
+        original=(self.root/'credentials.dpapi.json').read_bytes()
+        p.clear_key();self.assertEqual((self.root/'credentials.dpapi.json').read_bytes(),original)
+        p.confirmation.cancel();self.assertEqual(load_provider_key(self.root,load_chat_config(self.root)['providers'][0]),'isolated-confirm-test-key')
+        p.clear_key();p.confirmation.confirm();self.assertEqual(load_provider_key(self.root,load_chat_config(self.root)['providers'][0]),'')
+        self.assertEqual(p.fields['model'].text(),'pending-A')
         p.remove();self.assertEqual(len(json.loads((self.root/'chat.json').read_text(encoding='utf-8'))['providers']),2)
         p.select.setCurrentIndex(1);p.confirmation.confirm();self.assertEqual(len(p.config['providers']),2)
-        with patch.object(p.secrets,'put'):p.remove();p.confirmation.confirm()
+        p.remove();p.confirmation.confirm()
         self.assertEqual([x['id'] for x in json.loads((self.root/'chat.json').read_text(encoding='utf-8'))['providers']],['a'])
     def test_escape_cancels_confirmation_then_returns_without_losing_input(self):
         c=self.chat();c.input.setPlainText('unsent draft');c.delete()
@@ -162,7 +180,7 @@ class InteractionTests(unittest.TestCase):
         c=self.chat();c.provider();p=c.provider_dialog
         p.fields['name'].setText('First service');p.fields['model'].setText('local-model')
         p.fields['base_url'].setText('http://localhost:1234/v1');p.timeout.setValue(120)
-        with patch.object(p.secrets,'put') as secret:p.save();secret.assert_not_called()
+        p.save();self.assertFalse((self.root/'credentials.dpapi.json').exists())
         saved=json.loads((self.root/'chat.json').read_text(encoding='utf-8'))
         self.assertEqual(saved['providers'][0]['model'],'local-model');self.assertEqual(saved['providers'][0]['timeout'],120)
         self.assertEqual(saved['providers'][0]['name'],'First service');self.assertEqual(saved['active'],p.current['id'])

@@ -62,6 +62,7 @@ class ShortcutTests(unittest.TestCase):
         self.assertEqual(json.loads((self.root/'settings.json').read_text(encoding='utf-8'))['capsule_action'],'website')
     def test_codex_link_is_separate_draft_and_failed_registration_stays_dirty(self):
         self.pet.open_settings();settle(self.pet);s=self.pet.settings_dialog
+        s.tabs.setCurrentIndex(2)
         s.codex_startup.setChecked(True)
         with patch('codex_startup.configure',side_effect=OSError('denied')):s.apply()
         self.assertIn('codex_startup',s.draft.dirty)

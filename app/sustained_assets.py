@@ -1,6 +1,27 @@
 """Optional seam assets; keep logical actions separate from their playback files."""
 from pathlib import Path
 
+def playback_profile(item):
+    """Migrate only the two shipped recipes, without rewriting asset identity.
+
+    The old variants reach back into prop setup. Choosing the already shipped
+    stable segment is a player policy change, not a new downloadable asset.
+    Any authored/custom recipe difference deliberately opts out of migration.
+    """
+    profile=item.get('sustained')
+    if not isinstance(profile,dict):return None
+    result=dict(profile)
+    spec={'work02':(55,83,163),'work04':(44,85,139)}.get(item.get('id'))
+    if spec is None or item.get('qualityRevision')!=3:return result
+    action=item['id']
+    if item.get('playbackFile')!=f'quality-v3/{action}.webp':return result
+    start,end,frames=spec
+    variants=[dict(start=start-offset,end=end,seamFile=f'quality-v5/{action}-seam-{index}.webp',seamFrames=count)
+              for index,(offset,count) in enumerate(((0,9),(4,13),(2,11)))]
+    expected=dict(variants[0],sourceFrames=frames,variants=variants,revision=2,forwardOnly=True)
+    if profile!=expected or profile.get('forwardOnly') is not True:return result
+    return dict(result,variants=[dict(variants[0])],steadyProp=True)
+
 def seam_items(manifest):
     items=[]
     for action in manifest.get('workAnimations',[]):
@@ -20,8 +41,8 @@ def seam_items(manifest):
     return items
 
 def profile_paths(root,item):
-    profile=item.get('sustained')
-    if not isinstance(profile,dict):return None
+    profile=playback_profile(item)
+    if profile is None:return None
     start,end,frames=(profile.get(k) for k in ('start','end','sourceFrames'))
     if any(not isinstance(v,int) or isinstance(v,bool) for v in (start,end,frames)) or not 0<=start<end<frames-1 or frames>2000:raise ValueError('持续动作范围无效')
     seam_count=profile.get('seamFrames')
@@ -29,8 +50,9 @@ def profile_paths(root,item):
     root=Path(root).resolve();paths=[]
     for name in (item.get('playbackFile') or item['file'],profile.get('seamFile','')):
         if not isinstance(name,str) or not name:raise ValueError('持续动作素材路径无效')
-        path=(root/name).resolve()
-        if not path.is_relative_to(root) or not path.is_file() or path.suffix.lower()!='.webp':raise ValueError('持续动作素材不存在或路径无效')
+        from material_store import checked
+        path=checked(root,name)
+        if not path.is_file() or path.suffix.lower()!='.webp':raise ValueError('持续动作素材不存在或路径无效')
         paths.append(path)
     result=dict(profile,source=paths[0],seam=paths[1])
     variants=profile.get('variants',[])

@@ -11,7 +11,9 @@ APP=QApplication.instance() or QApplication([])
 
 def until(check):
     end=time.monotonic()+5
-    while not check() and time.monotonic()<end:QTest.qWait(10)
+    # Pump Qt and explicitly yield the Python interpreter to the QThread job.
+    # A tight sequence of Qt waits can starve Python workers on hosted macOS.
+    while not check() and time.monotonic()<end:APP.processEvents();time.sleep(.005)
     return check()
 
 class MaterialControllerTests(unittest.TestCase):
@@ -33,6 +35,13 @@ class MaterialControllerTests(unittest.TestCase):
     def test_settings_offer_cache_switch_and_do_not_commit_draft_selection(self):
         self.panel.choice.setCurrentIndex(1);self.assertEqual(self.panel.action.text(),'切换画质');self.assertTrue(self.panel.action.isEnabled())
         self.assertEqual(self.store.current,'light');self.assertFalse(self.store.preference.exists())
+    def test_local_hd_selection_describes_fallback_and_switches(self):
+        root=self.store.import_local_hd(self.fixture.source);self.store.activate('local_hd',root)
+        panel=MaterialPanel(self.c)
+        self.assertEqual(panel.choice.currentData(),'local_hd')
+        self.assertIn('本地高清',panel.summary.text())
+        self.assertFalse(panel.action.isEnabled())
+        panel.close();panel.deleteLater()
     def test_failed_download_keeps_current_and_allows_retry(self):
         with patch.object(self.store,'ensure',side_effect=MaterialError('尚未公开发布')):
             self.c.request('hd');self.assertTrue(until(lambda:self.c.job is None))

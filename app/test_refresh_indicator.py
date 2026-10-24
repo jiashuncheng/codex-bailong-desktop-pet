@@ -8,7 +8,6 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from refresh_indicator import RefreshButton,REFRESH_SECONDS,BRAKE_SECONDS,FEEDBACK_SECONDS,RESTORE_SECONDS
 from compact_bubble import CompactBubble
-from status_motion import BUSY_BREATH_SECONDS,BUSY_ROTATION_SECONDS
 
 APP=QApplication.instance() or QApplication([])
 
@@ -79,8 +78,8 @@ class RefreshIndicatorTests(unittest.TestCase):
         self.assertFalse(self.button.isEnabled());self.advance(.1)
         self.assertGreater(self.button.pose()[0],0)
     def test_speed_is_twenty_percent_faster_not_feedback_shorter(self):
-        self.assertAlmostEqual(3.6/BUSY_ROTATION_SECONDS,1.2)
-        self.assertAlmostEqual(2.4/BUSY_BREATH_SECONDS,1.2)
+        # The approved liquid task icon now has its own crossing choreography;
+        # the existing refresh action retains its speed and readable feedback.
         self.assertAlmostEqual(2.4/REFRESH_SECONDS,1.2)
         self.assertGreaterEqual(FEEDBACK_SECONDS,1.)
     def test_real_bubble_navigation_freezes_and_reuses_button(self):

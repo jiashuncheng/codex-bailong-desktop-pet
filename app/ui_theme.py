@@ -30,7 +30,7 @@ def editor_stylesheet(font_css):
         f'QPushButton{{color:{INK};background:{SURFACE};border:2px solid {BORDER};border-radius:7px;padding:6px 9px;min-height:16px;}}'
         f'QPushButton:hover{{background:{PANEL};border-color:{ACCENT};}}'
         f'QPushButton:pressed{{background:{SELECTED};}}'
-        f'QPushButton[role="primary"]{{color:{ON_PRIMARY};background:{PRIMARY};border-color:{PRIMARY};font-weight:600;}}'
+        f'QPushButton[role="primary"]{{color:{ON_PRIMARY};background:{PRIMARY};border-color:{PRIMARY};font-weight:500;}}'
         f'QPushButton[role="primary"]:hover{{background:{PRIMARY_PRESSED};}}'
         f'QPushButton[role="primary"]:pressed{{background:{PRIMARY_PRESSED};border-color:{INK};}}'
         f'QPushButton[role="danger"]{{color:{DANGER};background:{DANGER_SURFACE};border-color:#d3b8c7;}}'

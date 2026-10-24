@@ -13,14 +13,21 @@ from PIL import Image
 from desktop_core import atomic_json
 
 def command():
+    if sys.platform=='darwin':
+        import shlex
+        from platform_support import python_command
+        return shlex.join(python_command())
     if getattr(sys,'frozen',False):return '"'+sys.executable+'"'
-    return '"'+str(Path(sys.executable).with_name('pythonw.exe'))+'" "'+str(Path(__file__).with_name('enhanced.py'))+'"'
+    return '"'+str(Path(sys.executable).with_name('pythonw.exe'))+'" "'+str(Path(__file__).resolve().parents[1]/'run_source.py')+'"'
 
 def startup_paths():
     root=Path(os.environ['APPDATA'])/'Microsoft/Windows/Start Menu/Programs/Startup'
     return root/'BailongEnhanced.vbs',root/'白龙桌宠增强版.lnk'
 
 def autostart_enabled():
+    if sys.platform=='darwin':
+        from mac_services import autostart_enabled as mac_autostart_enabled
+        return mac_autostart_enabled()
     vbs,link=startup_paths()
     if vbs.exists():
         try:return command().replace('"','""') in vbs.read_text(encoding='utf-16')
@@ -35,6 +42,9 @@ def autostart_enabled():
     return False
 
 def set_autostart(enabled):
+    if sys.platform=='darwin':
+        from mac_services import set_autostart as mac_set_autostart
+        return mac_set_autostart(enabled)
     vbs,link=startup_paths();vbs.parent.mkdir(parents=True,exist_ok=True)
     if enabled:
         script='Option Explicit\nDim shell\nSet shell = CreateObject("WScript.Shell")\nshell.Run "'+command().replace('"','""')+'", 0, False\n'
@@ -61,20 +71,39 @@ def protect(value,decrypt=False):
 class SecretStore:
     def __init__(self,path):self.path=Path(path)
     def read(self):
-        try:return json.loads(self.path.read_text(encoding='utf-8'))
-        except (OSError,ValueError):return {}
+        try:data=json.loads(self.path.read_text(encoding='utf-8'))
+        except FileNotFoundError:return {}
+        except (OSError,ValueError,UnicodeError,RecursionError):
+            raise OSError('无法读取 credentials.dpapi.json；请检查权限或从用户数据备份恢复，原文件未改动。') from None
+        if not isinstance(data,dict) or any(not isinstance(k,str) or not k or not isinstance(v,str) or not v for k,v in data.items()):
+            raise OSError('credentials.dpapi.json 结构损坏；请从用户数据备份恢复，原文件未改动。')
+        return data
     def get(self,name):
         value=self.read().get(name)
+        if sys.platform=='darwin':
+            if not value:return ''
+            if value!='macOS-Keychain':raise OSError('此密钥不属于 macOS 钥匙串格式，请在本机重新填写。')
+            from mac_services import keychain_get,secret_account
+            return keychain_get(secret_account(self.path,name))
         try:return protect(value,True) if value else ''
-        except (ValueError,TypeError,UnicodeError):raise OSError('无法读取本地加密凭据') from None
+        except (OSError,ValueError,TypeError,UnicodeError):raise OSError('无法解密本地密钥；请使用保存时的 Windows 用户，或重新填写密钥。') from None
     def put(self,name,value):
         data=self.read()
+        if sys.platform=='darwin':
+            from mac_services import keychain_put,secret_account
+            keychain_put(secret_account(self.path,name),value)
+            if value:data[name]='macOS-Keychain'
+            else:data.pop(name,None)
+            atomic_json(self.path,data)
+            return
         if value:data[name]=protect(value)
         else:data.pop(name,None)
         atomic_json(self.path,data)
 
 def checked_path(root,name):
-    p=(root/name).resolve()
+    relative=Path(name)
+    if relative.is_absolute() or relative.drive or '..' in relative.parts or ':' in str(name):raise ValueError('素材清单必须使用目录内的相对路径')
+    p=(root/relative).resolve()
     if not p.is_relative_to(root.resolve()):raise ValueError('素材路径超出了角色目录')
     if not p.is_file():raise ValueError('缺少素材：'+str(name))
     return p
@@ -169,6 +198,9 @@ def import_character(source,destination):
         raise
 
 def codex_desktop_open():
+    if sys.platform=='darwin':
+        from mac_services import codex_desktop_open as mac_codex_desktop_open
+        return mac_codex_desktop_open()
     """Inspect package GUI processes on the monitor thread, never the UI loop."""
     import psutil
     denied=False
@@ -192,6 +224,9 @@ def codex_conversation_url(session):
     return 'codex://threads/'+sid
 
 def open_codex(session=None):
+    if sys.platform=='darwin':
+        from mac_services import open_codex as mac_open_codex
+        return mac_open_codex(session)
     if session is not None:
         url=codex_conversation_url(session)
         try:os.startfile(url)

@@ -4,7 +4,7 @@ Codex desktop stream protocol 11 uses four-byte little-endian JSON frames.
 Typed decoding skips unknown fields in C, including reasoning and tool output.
 Only initialize/follow/unfollow and negative discovery responses are sent.
 """
-import ctypes,json,os,struct,threading,time
+import ctypes,json,os,struct,threading,time,sys
 from uuid import UUID
 import msgspec
 
@@ -159,20 +159,24 @@ def waiting_state(state):
     return reason,turn.get('turnId') or ''
 
 class LifecycleProjection:
-    def __init__(self,emit,emit_waiting=None,emit_activity=None):
+    def __init__(self,emit,emit_waiting=None,emit_activity=None,emit_terminal=None):
         self.emit=emit;self.emit_waiting=emit_waiting;self.states={};self.revisions={};self.phases={};self.waiting={}
         self.emit_activity=emit_activity;self.activity_sent={};self.next_heartbeat=0
+        self.emit_terminal=emit_terminal
     def heartbeat(self,now,force=None):
-        if self.emit_activity is None:return
+        if self.emit_activity is None and self.emit_terminal is None:return
         if force is None:
             if now<self.next_heartbeat:return
         for sid,state in self.states.items():
             if force is not None and sid!=force:continue
             turn=latest_turn(state) or {};runtime=state.get('threadRuntimeStatus') or {}
+            if self.emit_terminal and turn.get('turnId') and turn.get('status') in ('completed','failed','interrupted'):
+                self.emit_terminal(sid,turn['status'],turn['turnId'])
             value=(turn.get('turnId') or '',turn.get('status')=='inProgress' and runtime.get('type')=='active')
             previous=self.activity_sent.get(sid)
             if previous and previous[:2]==value and now-previous[2]<15:continue
-            self.activity_sent[sid]=(*value,now);self.emit_activity(sid,value[1],value[0])
+            self.activity_sent[sid]=(*value,now)
+            if self.emit_activity:self.emit_activity(sid,value[1],value[0])
         self.next_heartbeat=min((v[2]+15 for v in self.activity_sent.values()),default=now+15)
     def forget(self,sid,clear=True):
         phase=self.phases.pop(sid,None) if clear else self.phases.get(sid)
@@ -216,9 +220,9 @@ class Frames:
         if offset:del self.buffer[:offset]
 
 class LiveStatusReader(threading.Thread):
-    def __init__(self,stop,emit,emit_waiting=None,emit_activity=None):
+    def __init__(self,stop,emit,emit_waiting=None,emit_activity=None,emit_terminal=None):
         super().__init__(name='BailongCodexLifecycle',daemon=True);self.stop_event=stop;self.emit=emit;self.emit_waiting=emit_waiting
-        self.emit_activity=emit_activity
+        self.emit_activity=emit_activity;self.emit_terminal=emit_terminal
         self._targets=();self.lock=threading.Lock();self.connected=False
         self._health=dict(state='unknown',code='starting')
     def set_health(self,state,code,success_at=None):
@@ -233,6 +237,8 @@ class LiveStatusReader(threading.Thread):
     def targets(self):
         with self.lock:return self._targets
     def run(self):
+        if sys.platform=='darwin':
+            return self.run_unix()
         if os.name!='nt':self.set_health('unavailable','ipc_disconnected');return
         from ctypes import wintypes
         import msvcrt
@@ -249,8 +255,39 @@ class LiveStatusReader(threading.Thread):
             except (OSError,ValueError,msgspec.MsgspecError):self.set_health('degraded','ipc_disconnected')
             finally:self.connected=False
             self.stop_event.wait(5)
+    def run_unix(self):
+        import socket,select,stat
+        from pathlib import Path
+        from codex_connection import data_home
+        class UnixPipe:
+            def __init__(self,connection):self.connection=connection
+            def write(self,data):return self.connection.send(data)
+            def read(self,count):
+                data=self.connection.recv(count)
+                if not data:raise OSError('IPC disconnected')
+                return data
+            def available(self):
+                ready,_,_=select.select([self.connection],[],[],0)
+                if not ready:return 0
+                data=self.connection.recv(1024*1024,socket.MSG_PEEK)
+                if not data:raise OSError('IPC disconnected')
+                return len(data)
+        while not self.stop_event.is_set():
+            try:
+                path=Path(os.environ.get('BAILONG_IPC') or data_home()/'ipc/ipc.sock')
+                info=path.stat()
+                if not stat.S_ISSOCK(info.st_mode) or info.st_uid!=os.getuid():raise OSError('Untrusted IPC socket')
+                with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as connection:
+                    connection.settimeout(2)
+                    connection.connect(str(path))
+                    pipe=UnixPipe(connection)
+                    self._listen(pipe,pipe.available)
+            except (OSError,ValueError,msgspec.MsgspecError):
+                self.set_health('degraded','ipc_disconnected')
+            finally:self.connected=False
+            self.stop_event.wait(5)
     def _listen(self,pipe,available):
-        client='';followed=set();frames=Frames();projection=LifecycleProjection(self.emit,self.emit_waiting,self.emit_activity);resync_at={}
+        client='';followed=set();frames=Frames();projection=LifecycleProjection(self.emit,self.emit_waiting,self.emit_activity,self.emit_terminal);resync_at={}
         def send(message):
             raw=msgspec.json.encode(message);packet=struct.pack('<I',len(raw))+raw
             while packet:

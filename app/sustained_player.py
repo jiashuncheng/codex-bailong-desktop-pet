@@ -6,7 +6,7 @@ from decode_runtime import STATS,opened
 
 class SustainedPlayback:
     def __init__(self):
-        self.phase=None;self.owner=None;self.profile=None;self.cycles=0;self.exit_requested=False
+        self.phase=None;self.owner=None;self.profile=None;self.cycles=0;self.exit_requested=False;self.hard_exit_requested=False
         self.warm_stop=None;self.warmer=None;self.warm_ready=threading.Event();self.error=None;self.tail=None
         self.variant=None;self.variant_index=0;self.cycle_speed=1.;self.rng=random.Random();self.seeds={}
     @property
@@ -27,8 +27,13 @@ class SustainedPlayback:
         else:frame=player.start(path,size,(end-start+1)/24,start_frame=start,end_frame=end,cache_loop=cache,seed=self.seeds.get(StreamPlayer.cache_key(path,size,start,end)),cached_frames=self.body_cache(player,size,v) if self.phase=='body' else None)
         player.playhead=carry
         return frame
-    def request(self,keep):
-        if not keep:self.exit_requested=True
+    def request(self,keep,*,hard=False):
+        # Ordinary same-turn semantic changes are speculative until the tail
+        # begins. Terminal/lifecycle exits stay latched even if new work arrives.
+        if self.phase=='exit':return
+        if not keep:
+            self.exit_requested=True;self.hard_exit_requested|=hard
+        elif not self.hard_exit_requested:self.exit_requested=False
     def speed_factor(self,player):
         if self.phase!='body':return 1.
         duration=(self.profile['end']-self.variant['start']+1)/24
@@ -60,7 +65,9 @@ class SustainedPlayback:
         alternatives=[pair for pair in ready if pair[0]!=self.variant_index]
         if alternatives:self.variant_index,self.variant=self.rng.choice(alternatives)
         elif ready:self.variant_index,self.variant=ready[0]
-        self.cycle_speed=self.rng.uniform(.94,1.04)
+        # A steady prop is an authored content constraint. Varying its whole
+        # clip's tempo cannot create independent finger or facial motion.
+        self.cycle_speed=1. if self.profile.get('steadyProp') else self.rng.uniform(.94,1.04)
     def boundary(self,player,size):
         if not self.active:return None,True
         if player.error:
@@ -136,4 +143,4 @@ class SustainedPlayback:
         self.warmer=None;self.warm_stop=None
     def cancel(self):
         if self.tail:self.tail.close();self.tail=None
-        self.stop_warm();self.phase=None;self.owner=None;self.profile=None;self.variant=None;self.seeds={};self.exit_requested=False
+        self.stop_warm();self.phase=None;self.owner=None;self.profile=None;self.variant=None;self.seeds={};self.exit_requested=False;self.hard_exit_requested=False

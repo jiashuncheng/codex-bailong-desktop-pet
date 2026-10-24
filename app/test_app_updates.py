@@ -46,7 +46,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(check_release('0.7.2',fetch).version,'0.6.50');self.assertEqual(calls,[API])
     def test_network_rate_limit_and_no_release_messages(self):
         for code,kind in ((403,UpdateError),(429,UpdateError),(404,NoRelease),(500,UpdateError)):
-            with patch('app_updates.read_small',side_effect=urllib.error.HTTPError(API,code,'test',{},None)):
+            with patch('app_updates.read_small',side_effect=urllib.error.HTTPError(API,code,'test',{},None)), patch('app_updates.release_without_api',side_effect=UpdateError('offline fallback')):
                 with self.assertRaises(kind):check_release('0.7.2')
     def test_redirects_only_to_https_github_storage(self):
         self.assertTrue(allowed_redirect('https://release-assets.githubusercontent.com/file'))

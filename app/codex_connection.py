@@ -4,7 +4,7 @@ from pathlib import Path
 from functools import lru_cache
 
 def paths_file():
-    return Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'BailongEnhanced/connection-paths.json'
+    return __import__('platform_support').data_dir()/'connection-paths.json'
 
 @lru_cache(maxsize=8)
 def _saved_paths(filename):
@@ -82,6 +82,13 @@ def find_executable():
         located=str(path) if path.is_file() else shutil.which(override)
         if located:return located
         raise RuntimeError('BAILONG_CODEX 指向的程序不存在，请修正该机器的 Codex CLI 路径。' if os.environ.get('BAILONG_CODEX') else '已保存的 CLI 路径不存在，请在设置 → 连接中重新选择。')
+    if sys.platform=='darwin':
+        from mac_services import codex_cli_candidates
+        for candidate in codex_cli_candidates():return str(candidate)
+        for candidate in ('codex','/opt/homebrew/bin/codex','/usr/local/bin/codex'):
+            located=shutil.which(candidate)
+            if located:return located
+        raise RuntimeError('未找到 Codex CLI，请先安装 Codex / ChatGPT，或在设置中选择 CLI 路径。')
     local=Path(os.environ.get('LOCALAPPDATA') or Path.home()/'AppData/Local')
     cache=local/'OpenAI/Codex/bin';candidates=list(cache.glob('*/codex.exe')) if cache.is_dir() else []
     if (cache/'codex.exe').is_file():candidates.append(cache/'codex.exe')
@@ -129,7 +136,7 @@ def check_connection(query_quota=True,cancel=None):
             code=getattr(error,'code','unavailable');code=code if code in ('authentication','network','timeout','cli_missing') else 'unavailable'
             report['quota_error_code']=code;report['capabilities']['quota']=sample('unavailable',code)
     elif not report['cli_found']:report['capabilities']['quota']=sample('unavailable','cli_missing')
-    root=Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'BailongEnhanced'
+    root=__import__('platform_support').data_dir()
     try:
         config=json.loads((root/'chat.json').read_text(encoding='utf-8'));report['chat_configured']=bool(config.get('providers'))
     except (OSError,ValueError):report['chat_configured']=False

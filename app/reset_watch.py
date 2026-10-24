@@ -5,6 +5,8 @@ import math
 import re
 import time
 import urllib.request
+import urllib.error
+import ssl
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from enhanced_core import clean_text
@@ -65,6 +67,50 @@ def pending_reset(snapshot):
     """Old cache compatibility; a passed deadline alone never resolves an announcement."""
     return (snapshot or {}).get('pending',(snapshot or {}).get('scheduled'))
 
+def locally_reset(snapshot):
+    pending=pending_reset(snapshot);record=(snapshot or {}).get('local_reset')
+    return bool(pending and isinstance(record,dict) and record.get('schedule')==schedule_key(pending))
+
+def reset_has_priority(snapshot):
+    return bool(pending_reset(snapshot) and not locally_reset(snapshot))
+
+class LocalResetEvidence:
+    """Persist live account observations separately from the public-feed worker."""
+    def __init__(self,path):
+        self.path=Path(path)
+        try:
+            self.state=json.loads(self.path.read_text(encoding='utf-8'))
+            if not isinstance(self.state,dict):raise ValueError()
+        except (OSError,ValueError):self.state={}
+    def observe(self,windows,observed,source):
+        if source!='live' or not isinstance(observed,(int,float)) or not math.isfinite(observed):return
+        old=self.state.get('window');window=next((w for w in windows if w.get('name')=='一周'),None)
+        if window is None:window=next((w for w in windows if w.get('name')=='5小时'),None)
+        if window is None:return
+        value=window.get('remaining')
+        if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or not 0<=value<=100:return
+        stamp=epoch(window.get('resetsAt'))
+        if isinstance(old,dict) and observed<=old.get('observed',0):return
+        current=dict(name=window['name'],remaining=value,reset=stamp,observed=observed)
+        if isinstance(old,dict) and old.get('name')==window['name']:
+            increase=value-old.get('remaining',value)
+            advanced=stamp and old.get('reset') and stamp>old['reset']+60
+            refilled=value>=99 and increase>=10
+            rolled=advanced and old['reset']<=observed+120
+            if rolled or increase>1 and (advanced or refilled):
+                self.state['reset']=dict(observed=observed,window=window['name'],remaining=value)
+        self.state['window']=current
+        from desktop_core import atomic_json
+        try:atomic_json(self.path,self.state)
+        except OSError:pass  # Keep valid in-memory evidence if persistence is unavailable.
+    def decorate(self,snapshot):
+        if snapshot is None:return None
+        snapshot=dict(snapshot);pending=pending_reset(snapshot);event=self.state.get('reset')
+        if pending and pending.get('reset_type')!='banked' and isinstance(event,dict) and event.get('observed',0)>=pending.get('announced',float('inf')):
+            snapshot['local_reset']=dict(event,schedule=schedule_key(pending))
+        else:snapshot.pop('local_reset',None)
+        return snapshot
+
 def confirms(event,pending):
     return (event.get('reset_type')==pending.get('reset_type') and
             (event.get('id')==pending.get('id') or event.get('announced',0)>=pending.get('announced',0)))
@@ -75,19 +121,60 @@ def schedule_text(snapshot,now=None):
     if not snapshot:return '下轮额外重置：正在查询…'
     if not item:return '下轮额外重置：暂未公布'
     title='备用重置' if item.get('reset_type')=='banked' else '额外重置'
+    if locally_reset(snapshot):return title+'：本机额度已重置 · 公告仍待确认'
     stamp=epoch(item.get('scheduled'))
     if stamp is None:return f'{title}已安排 · 时间待公布'
     if stamp<=now:return f'{title}预计 {local_time(stamp)} · 已过，待确认'
     return f'{title}预计最晚 {local_time(stamp)}（北京时间）'
 
-def fetch_feed():
+class ResetFetchError(RuntimeError):
+    def __init__(self,code,message):super().__init__(message);self.code=code
+
+class ResetCacheError(OSError):
+    def __init__(self,snapshot,alerts):
+        super().__init__('最新公告已获取，但本地缓存保存失败');self.snapshot=snapshot;self.alerts=alerts
+
+def reset_failure(error,phase='fetch'):
+    code=getattr(error,'code',None)
+    if isinstance(error,ResetCacheError) or phase=='cache':code='cache_write';message='最新公告已获取，缓存保存失败'
+    elif isinstance(error,ResetFetchError):message=str(error)
+    elif isinstance(error,FileNotFoundError):code='runtime_file';message='程序联网组件不完整，请更新或修复安装'
+    else:code='unexpected';message='公告查询暂时失败'
+    record=dict(state='unavailable',code=code,message=message,phase=phase,checked=time.time(),errorType=type(error).__name__)
+    if code in ('unexpected','runtime_file'):
+        import traceback
+        record['origin']=[dict(file=Path(frame.filename).name,function=frame.name,line=frame.lineno) for frame in traceback.extract_tb(error.__traceback__)[-6:]]
+        if isinstance(error,OSError):
+            record['osError']=error.errno
+            if error.filename:record['missingFile']=Path(error.filename).name
+    return record
+
+def fetch_feed(opener=None):
     request=urllib.request.Request(API_URL,headers={
-        'User-Agent':'BailongDesktopPet/0.3.3-local (+https://codex-resets.com)',
+        'User-Agent':'BailongDesktopPet/'+__import__('version').VERSION+' (+https://codex-resets.com)',
         'Accept':'application/json', 'Cache-Control':'no-cache'})
-    with urllib.request.urlopen(request,timeout=10) as response:
-        raw=response.read(2*1024*1024+1)
-        if len(raw)>2*1024*1024:raise ValueError('重置消息响应过大')
-        return normalize_feed(json.loads(raw.decode('utf-8')))
+    # urllib's global opener retains the proxy configuration from its first
+    # request. A long-running companion must follow subsequent Windows changes.
+    opener=opener or urllib.request.build_opener().open;started=time.monotonic()
+    for attempt in range(2):
+        remaining=10-(time.monotonic()-started)
+        if remaining<=0:raise ResetFetchError('timeout','公告连接超时，保留上次记录')
+        try:
+            with opener(request,timeout=min(8,remaining)) as response:
+                raw=response.read(2*1024*1024+1)
+            if len(raw)>2*1024*1024:raise ResetFetchError('response_size','公告响应过大，保留上次记录')
+            try:return normalize_feed(json.loads(raw.decode('utf-8-sig')))
+            except (ValueError,UnicodeError) as error:raise ResetFetchError('schema','公告格式变化，保留上次记录') from error
+        except urllib.error.HTTPError as error:
+            code='http_'+str(error.code);message=f'公告服务 HTTP {error.code}，稍后重试'
+            retry=error.code in (408,429,500,502,503,504)
+        except (urllib.error.URLError,TimeoutError,ssl.SSLError,OSError) as error:
+            reason=getattr(error,'reason',error)
+            if isinstance(reason,ssl.SSLCertVerificationError):code='certificate';message='公告证书验证失败，请检查系统时间或网络代理';retry=False
+            elif isinstance(reason,(TimeoutError,)) or 'timed out' in str(reason).lower():code='timeout';message='公告连接超时，保留上次记录';retry=True
+            else:code='network';message='公告网络连接失败，保留上次记录';retry=True
+        if not retry or attempt==1:raise ResetFetchError(code,message)
+        time.sleep(.1)
 
 class ResetTracker:
     def __init__(self,path):
@@ -132,9 +219,10 @@ class ResetTracker:
         if self.state.get('initialized') and pending and schedule_key(pending) not in schedules:
             alerts.append({'kind':'scheduled','title':'Codex 有新的重置安排','text':schedule_text(snapshot,now)})
         state={'initialized':True,'seen':ordered,'schedules':schedule_ids,'resolved':resolved,'snapshot':snapshot}
-        self.path.parent.mkdir(parents=True,exist_ok=True)
-        temp=self.path.with_suffix('.tmp')
-        temp.write_text(json.dumps(state,ensure_ascii=False,indent=2),encoding='utf-8')
-        temp.replace(self.path)
+        from desktop_core import atomic_json
+        try:atomic_json(self.path,state)
+        except OSError:
+            self.state=state
+            raise ResetCacheError(snapshot,alerts) from None
         self.state=state
         return snapshot,alerts

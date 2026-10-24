@@ -1,7 +1,7 @@
 """Small status island and quota satellite; no per-frame window movement."""
 import math,time,re
 from PySide6.QtCore import Qt,QRectF,QSize,QTimer,Signal,QPointF
-from PySide6.QtGui import QColor,QPainter,QPen,QFontMetrics,QFontMetricsF
+from PySide6.QtGui import QColor,QPainter,QPen,QFont,QFontMetrics,QFontMetricsF
 from PySide6.QtWidgets import QWidget,QHBoxLayout,QLabel,QToolButton
 from typography import ui_font,FONT_CSS
 from reset_watch import epoch
@@ -102,9 +102,9 @@ class QuotaSatellite(QToolButton):
         # Cache all text measurements; reveal frames only change the arc span.
         self._label=self.value_text()
         number=self._label.removesuffix('%');suffix='%' if self._label.endswith('%') else ''
-        small=ui_font(9,True);small.setBold(True)
+        small=ui_font(11)
         for size in (14,13,12,11,10):
-            main=ui_font(size,True);main.setBold(True);main.setStretch(90)
+            main=ui_font(size,True);main.setWeight(QFont.Weight.DemiBold);main.setStretch(90)
             metrics=QFontMetricsF(main);bounds=metrics.tightBoundingRect(number)
             suffix_x=metrics.horizontalAdvance(number)+.6
             if suffix:bounds=bounds.united(QFontMetricsF(small).tightBoundingRect(suffix).translated(suffix_x,0))

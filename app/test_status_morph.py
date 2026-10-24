@@ -41,7 +41,8 @@ class MorphTests(unittest.TestCase):
         self.assertSame(old,self.frame())
         self.advance(.5)
         self.assertEqual(self.icon.visual(),'complete')
-        self.assertEqual(self.frame()[2].opacity,0)
+        self.assertEqual(self.frame()[2].opacity,1)
+        self.assertEqual(self.frame()[2].mint,1)
         self.assertLess(self.frame()[0].angle,0);self.assertGreater(self.frame()[1].angle,0)
     def test_checkmark_has_time_to_show_before_other_task_resumes(self):
         self.icon.observe(dict(state='working',active=2));self.advance(.8)
@@ -74,7 +75,8 @@ class MorphTests(unittest.TestCase):
         self.icon.observe(dict(state='interrupted',active=0))
         self.assertEqual(self.icon.visual(),'paused');self.assertSame(old,self.frame())
         self.advance(.5);parts=self.frame()
-        self.assertEqual(parts[0].length,parts[1].length);self.assertEqual(parts[2].opacity,0)
+        self.assertEqual(parts[0].length,parts[1].length)
+        self.assertEqual(parts[2].opacity,1);self.assertEqual(parts[2].mint,1)
         self.assertFalse(self.icon.timer.isActive())
         self.icon.observe(dict(state='working',active=1))
         self.assertSame(parts,self.frame());self.assertTrue(self.icon.timer.isActive())
@@ -118,6 +120,8 @@ class MorphTests(unittest.TestCase):
                     self.assertGreaterEqual(part.x-dx,.39);self.assertLessEqual(part.x+dx,15.61)
                     self.assertGreaterEqual(part.y-dy,.39);self.assertLessEqual(part.y+dy,15.61)
                     self.assertGreaterEqual(part.opacity,0);self.assertLessEqual(part.opacity,1)
+                    for channel in (part.mint,part.bond,part.warm):
+                        self.assertGreaterEqual(channel,0);self.assertLessEqual(channel,1)
     def test_ticks_do_not_emit_semantic_updates_or_change_size(self):
         self.busy();changes=[];self.icon.changed.connect(lambda:changes.append(1))
         geometry=self.icon.geometry()

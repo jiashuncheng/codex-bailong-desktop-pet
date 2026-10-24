@@ -4,7 +4,6 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parent;HERE=ROOT/'本地实装/回归验收';HERE.mkdir(parents=True,exist_ok=True)
 phase=sys.argv[1] if len(sys.argv)>1 else 'current'
 from build_local import source_hashes as current_sources
-initial_hashes=current_sources()
 def run(path):
     began=time.monotonic()
     with tempfile.TemporaryDirectory(prefix='bailong-regression-') as folder:
@@ -33,13 +32,19 @@ def run(path):
         return result
 paths=sorted((ROOT/'app').glob('test_*.py'))
 paths += [ROOT/name for name in ('test_release_version.py','test_release_retention.py','test_local_workflow.py')]
-if len(sys.argv)>2:paths=[p for p in paths if p.stem in sys.argv[2:]]
+expected_modules=sorted(p.stem for p in paths)
+if len(sys.argv)>2:
+    requested=set(sys.argv[2:]);unknown=requested-set(expected_modules)
+    if unknown:raise SystemExit('Unknown test modules: '+', '.join(sorted(unknown)))
+    paths=[p for p in paths if p.stem in requested]
+if not paths:raise SystemExit('No tests selected')
+initial_hashes=current_sources()
 records=[]
 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
     for result in pool.map(run,paths):
         records.append(result);print(json.dumps({k:v for k,v in result.items() if k!='tail'}),flush=True)
 source_hashes=current_sources()
-proof=dict(phase=phase,sourceHashes=source_hashes,sourceUnchangedDuringTests=source_hashes==initial_hashes,modules=len(records),tests=sum(r['tests'] for r in records),passed=source_hashes==initial_hashes and all(r['returncode']==0 for r in records),records=records)
+proof=dict(scope='full' if sorted(p.stem for p in paths)==expected_modules else 'targeted',expectedModules=expected_modules,phase=phase,sourceHashes=source_hashes,sourceUnchangedDuringTests=source_hashes==initial_hashes,modules=len(records),tests=sum(r['tests'] for r in records),passed=bool(records) and source_hashes==initial_hashes and all(r['returncode']==0 and r['tests']>0 for r in records),records=records)
 (HERE/f'{phase}-regressions.json').write_text(json.dumps(proof,ensure_ascii=False,indent=2),encoding='utf-8')
 print(json.dumps(dict(modules=proof['modules'],tests=proof['tests'],failed=[r['module'] for r in records if r['returncode']!=0])))
 raise SystemExit(0 if proof['passed'] else 1)

@@ -1,0 +1,289 @@
+{
+  "version": "0.9.4",
+  "ui_revision": 83,
+  "upstream_commit": "76a2ee36e23ceb6ac4f69e7e24f30d41aa821d18",
+  "upstream_version": "0.9.3",
+  "local_date": "2026-10-24",
+  "source_checks": {
+    "platform": "darwin",
+    "python": "3.12.14",
+    "passed": true,
+    "modules": [
+      {
+        "module": "test_mac_platform",
+        "passed": true,
+        "tests": 18
+      },
+      {
+        "module": "test_source_platform",
+        "passed": true,
+        "tests": 8
+      },
+      {
+        "module": "test_quota_summary_data",
+        "passed": true,
+        "tests": 12
+      },
+      {
+        "module": "test_spring_motion",
+        "passed": true,
+        "tests": 4
+      },
+      {
+        "module": "test_status_reactions.SchedulerTests",
+        "passed": true,
+        "tests": 8
+      },
+      {
+        "module": "test_ring_metrics",
+        "passed": true,
+        "tests": 7
+      },
+      {
+        "module": "test_work_actions",
+        "passed": true,
+        "tests": 10
+      },
+      {
+        "module": "test_sustained_reactions",
+        "passed": true,
+        "tests": 13
+      },
+      {
+        "module": "test_soft_curves_navigation",
+        "passed": true,
+        "tests": 7
+      },
+      {
+        "module": "test_release_version",
+        "passed": true,
+        "tests": 2
+      },
+      {
+        "module": "test_app_updates.ReleaseTests",
+        "passed": true,
+        "tests": 7
+      },
+      {
+        "module": "test_app_updates.StagingTests",
+        "passed": true,
+        "tests": 10
+      },
+      {
+        "module": "test_loop_cache",
+        "passed": true,
+        "tests": 5
+      },
+      {
+        "module": "test_decoder_runtime",
+        "passed": true,
+        "tests": 8
+      },
+      {
+        "module": "test_animation_quality",
+        "passed": true,
+        "tests": 4
+      },
+      {
+        "module": "test_sustained_player",
+        "passed": true,
+        "tests": 19
+      },
+      {
+        "module": "test_personal_scroll",
+        "passed": true,
+        "tests": 5
+      },
+      {
+        "module": "test_read_completion",
+        "passed": true,
+        "tests": 9
+      },
+      {
+        "module": "test_bridge_names",
+        "passed": true,
+        "tests": 8
+      },
+      {
+        "module": "test_conversation_rows",
+        "passed": true,
+        "tests": 10
+      },
+      {
+        "module": "test_material_store",
+        "passed": true,
+        "tests": 20
+      },
+      {
+        "module": "test_material_controller",
+        "passed": true,
+        "tests": 6
+      },
+      {
+        "module": "test_continuous_work",
+        "passed": true,
+        "tests": 10
+      },
+      {
+        "module": "test_daily_report",
+        "passed": true,
+        "tests": 12
+      },
+      {
+        "module": "test_independent_cards",
+        "passed": true,
+        "tests": 6
+      },
+      {
+        "module": "test_companion_options",
+        "passed": true,
+        "tests": 8
+      },
+      {
+        "module": "test_status_indicator",
+        "passed": true,
+        "tests": 12
+      },
+      {
+        "module": "test_reset_card",
+        "passed": true,
+        "tests": 5
+      },
+      {
+        "module": "test_reset_presentation",
+        "passed": true,
+        "tests": 7
+      },
+      {
+        "module": "test_shortcuts_startup",
+        "passed": true,
+        "tests": 13
+      },
+      {
+        "module": "test_reset_watch",
+        "passed": true,
+        "tests": 15
+      },
+      {
+        "module": "test_reset_recovery",
+        "passed": true,
+        "tests": 10
+      },
+      {
+        "module": "test_audit_fixes",
+        "passed": true,
+        "tests": 18
+      },
+      {
+        "module": "test_chat_config",
+        "passed": true,
+        "tests": 19
+      },
+      {
+        "module": "test_chat_config_ui",
+        "passed": true,
+        "tests": 12
+      },
+      {
+        "module": "test_chat_transport",
+        "passed": true,
+        "tests": 12
+      },
+      {
+        "module": "test_typography",
+        "passed": true,
+        "tests": 2
+      },
+      {
+        "module": "test_liquid_status",
+        "passed": true,
+        "tests": 6
+      },
+      {
+        "module": "test_release_retention",
+        "passed": true,
+        "tests": 7
+      },
+      {
+        "module": "test_local_workflow",
+        "passed": true,
+        "tests": 10
+      },
+      {
+        "module": "bridge-regressions",
+        "passed": true,
+        "tests": 9
+      }
+    ],
+    "tests": 393,
+    "light_assets": {
+      "files": 32,
+      "invalid": [],
+      "checked": true
+    },
+    "seconds": 14.2
+  },
+  "native_ui": {
+    "platform": "cocoa",
+    "screens": 2,
+    "dpr": 2.0,
+    "errors": [],
+    "checks": {
+      "normal": true,
+      "report": true,
+      "settings": true,
+      "chat": true,
+      "modes": true
+    },
+    "native_level": 3,
+    "collection_behavior": 337,
+    "passed": true
+  },
+  "native_focus": {
+    "passed": true,
+    "checks": {
+      "pet_rejects_keyboard": true,
+      "status_rejects_keyboard": true,
+      "report_rejects_keyboard": true,
+      "settings_accepts_keyboard": true,
+      "chat_accepts_keyboard": true,
+      "status_rejects_keyboard_again": true,
+      "background_never_key": true,
+      "startup_keeps_external_foreground": true
+    },
+    "native": {
+      "pet_rejects_keyboard": {
+        "can_key": false,
+        "key": false
+      },
+      "status_rejects_keyboard": {
+        "can_key": false,
+        "key": false
+      },
+      "report_rejects_keyboard": {
+        "can_key": false,
+        "key": false
+      },
+      "settings_accepts_keyboard": {
+        "can_key": true,
+        "key": true
+      },
+      "chat_accepts_keyboard": {
+        "can_key": true,
+        "key": true
+      },
+      "status_rejects_keyboard_again": {
+        "can_key": false,
+        "key": false
+      }
+    },
+    "passive_samples": 151,
+    "passive_key_samples": 0,
+    "foreground_not_stolen_at_start": true
+  },
+  "limits": [
+    "Windows native desktop and real-browser acceptance remain separate from CI.",
+    "Windows-only registry/shortcut/junction and actual DPAPI tests are skipped on Mac.",
+    "Native probes use isolated demo data."
+  ]
+}

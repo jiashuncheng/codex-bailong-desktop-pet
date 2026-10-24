@@ -51,6 +51,20 @@ class MaterialStoreTests(unittest.TestCase):
         root=self.store.import_hd(self.source);self.store.activate('hd',root)
         (self.app/'version.txt').write_text('unrelated new program version')
         self.assertEqual(MaterialStore(self.app,self.state).root,root)
+    def test_hardlink_final_name_alias_does_not_discard_verified_hd_cache(self):
+        root=self.store.import_hd(self.source);asset=root/'quality/action.webp';original=Path.resolve
+        def alias(path,*args,**kwargs):
+            return original(self.source/'quality/action.webp') if path==asset else original(path,*args,**kwargs)
+        with patch.object(Path,'resolve',alias):
+            self.assertEqual(checked(root,'quality/action.webp'),asset)
+            self.assertTrue(self.store.available('hd'));self.store.activate('hd',root)
+            self.assertEqual(MaterialStore(self.app,self.state).current,'hd')
+            from desktop import DesktopPet
+            from types import SimpleNamespace
+            from sustained_assets import profile_paths
+            self.assertEqual(DesktopPet.asset_path(SimpleNamespace(asset_root=root),{'file':'quality/action.webp'}),asset)
+            item=dict(file='quality/action.webp',sustained=dict(start=0,end=2,sourceFrames=5,seamFrames=2,seamFile='quality/action.webp'))
+            self.assertEqual(profile_paths(root,item)['source'],root.resolve()/'quality/action.webp')
     def test_download_verify_commit_and_progress(self):
         events=[];root=self.store.ensure('hd',progress=lambda n,t,p:events.append((n,t,p)),opener=lambda *a:self.response(self.archive()))
         self.assertTrue(self.store.available('hd'));self.assertEqual(self.store.current,'light')
@@ -109,5 +123,64 @@ class MaterialStoreTests(unittest.TestCase):
         (self.base/'quality/action.webp').write_bytes(b'bad')
         with self.assertRaises(MaterialError):self.store.ensure('light')
         self.assertEqual(self.store.current,'hd')
+
+    def add_missing_local_animation(self):
+        name='quality/missing.webp'
+        for tier,data in (('light',b'light-fallback'),('hd',b'hd-replacement')):
+            self.catalog['tiers'][tier]['files']=list(self.catalog['tiers'][tier]['files'])
+            self.catalog['tiers'][tier]['files'].append(dict(path=name,bytes=len(data),sha256=hashlib.sha256(data).hexdigest()))
+        (self.app/'app/material_catalog.json').write_text(json.dumps(self.catalog))
+        (self.base/name).write_bytes(b'light-fallback')
+        self.store=MaterialStore(self.app,self.state)
+        return name
+
+    def test_local_partial_import_falls_back_and_survives_source_change(self):
+        name=self.add_missing_local_animation()
+        root=self.store.import_local_hd(self.source);self.store.activate('local_hd',root)
+        self.assertEqual((root/name).read_bytes(),b'light-fallback')
+        self.assertEqual(self.store.local_hd_info()['fallback_files'],[name])
+        self.assertFalse(self.store.available('hd'))
+        (self.source/'quality/action.webp').write_bytes(b'changed-by-sync')
+        fresh=MaterialStore(self.app,self.state)
+        self.assertEqual(fresh.current,'local_hd');self.assertEqual((root/'quality/action.webp').read_bytes(),self.payload['quality/action.webp'])
+        self.assertEqual(fresh.ensure('local_hd',opener=lambda *a:self.fail('unexpected network')),root)
+
+    def test_local_update_uses_new_snapshot_and_preserves_old_one(self):
+        name=self.add_missing_local_animation()
+        old=self.store.import_local_hd(self.source);self.store.activate('local_hd',old)
+        (self.source/name).write_bytes(b'hd-replacement')
+        new=self.store.import_local_hd(self.source);self.store.activate('local_hd',new)
+        self.assertNotEqual(old,new)
+        self.assertEqual((old/name).read_bytes(),b'light-fallback')
+        self.assertEqual((new/name).read_bytes(),b'hd-replacement')
+        self.assertEqual(self.store.local_hd_info()['fallback_files'],[])
+        self.assertEqual(self.store.import_local_hd(self.source),new)
+
+    def test_local_bad_present_file_keeps_active_preference(self):
+        root=self.store.import_local_hd(self.source);self.store.activate('local_hd',root)
+        previous=self.store.preference.read_bytes()
+        (self.source/'quality/action.webp').write_bytes(b'incomplete-download')
+        with self.assertRaises(MaterialError):self.store.import_local_hd(self.source)
+        self.assertEqual(self.store.preference.read_bytes(),previous)
+        self.assertEqual(MaterialStore(self.app,self.state).root,root)
+
+    def test_local_modified_cache_does_not_load(self):
+        root=self.store.import_local_hd(self.source);self.store.activate('local_hd',root)
+        (root/'quality/action.webp').write_bytes(b'corrupt')
+        self.assertFalse(self.store.available('local_hd'))
+        self.assertEqual(MaterialStore(self.app,self.state).current,'light')
+
+    def test_update_script_promotes_completed_snapshot_to_full_hd(self):
+        from importlib.util import spec_from_file_location,module_from_spec
+        from contextlib import redirect_stdout
+        spec=spec_from_file_location('import_local_hd_tool',Path(__file__).resolve().parents[1]/'tools/import_local_hd.py')
+        tool=module_from_spec(spec);spec.loader.exec_module(tool)
+        with patch('material_store.MaterialStore',return_value=self.store),patch('sys.argv',['import_local_hd.py',str(self.source)]),redirect_stdout(io.StringIO()):
+            self.assertEqual(tool.main(),0)
+        self.assertTrue(self.store.available('hd'))
+        self.assertEqual(MaterialStore(self.app,self.state).current,'hd')
+        (self.source/'quality/action.webp').write_bytes(b'changed-by-sync')
+        self.assertTrue(self.store.available('hd'))
+        self.store.verify(self.store.root,'hd')
 
 if __name__=='__main__':unittest.main()

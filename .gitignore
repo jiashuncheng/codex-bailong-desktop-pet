@@ -23,3 +23,14 @@ outputs/**
 *.zip
 *.7z
 .DS_Store
+.checks/
+.local-run/
+materials/
+portable-materials.json
+bridge-config.json
+connection-paths.json
+ssh-bridge/runtime/
+ssh-bridge/bridge-config.json
+ssh-bridge/process.json
+ssh-bridge/status.json
+ssh-bridge/stop-request.json

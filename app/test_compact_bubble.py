@@ -77,6 +77,16 @@ class BubbleTests(unittest.TestCase):
         self.visible_button('card_reset').click();self.assertFalse(self.bubble.refresh_button.isEnabled())
         self.visible_button('card_tokens').click();self.assertFalse(self.bubble.refresh_button.isEnabled())
         self.bubble.finish_refresh();self.bubble.refresh_button.click();self.assertEqual(events,['all','all'])
+    def test_local_reset_demotes_notice_once_and_preserves_manual_review(self):
+        from reset_watch import schedule_key
+        item=dict(id='notice',announced=100,scheduled=190,reset_type='regular')
+        self.bubble.reset_snapshot={'pending':item};self.bubble.redraw();settle()
+        self.assertEqual(self.bubble.dashboard_page,'reset')
+        self.bubble.reset_snapshot=dict(self.bubble.reset_snapshot,local_reset={'schedule':schedule_key(item),'observed':200})
+        self.bubble.redraw();settle();self.assertEqual(self.bubble.dashboard_page,'tokens')
+        self.visible_button('card_reset').click();settle();self.assertEqual(self.bubble.dashboard_page,'reset')
+        self.bubble.redraw();settle();self.assertEqual(self.bubble.dashboard_page,'reset')
+
     def test_new_reset_has_priority_manual_switch_survives_updates_and_resolution_returns_calendar(self):
         self.assertEqual(self.bubble.dashboard_page,'tokens')
         item=dict(id='new',announced=time.time(),reset_type='regular',scheduled=time.time()+3600,text='待落实公告')

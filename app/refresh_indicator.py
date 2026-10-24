@@ -33,7 +33,7 @@ class RefreshButton(QToolButton):
     def finish(self,success=True):
         angle,scale,_,_=self.pose()
         self.finish_angle=angle;self.finish_scale=scale
-        self.busy=False;self.result=bool(success);self.finished_at=self._motion_now()
+        self.busy=False;self.result='partial' if success=='partial' else bool(success);self.finished_at=self._motion_now()
         self.setEnabled(True);self._sync();self.update()
 
     def pose(self):
@@ -102,9 +102,10 @@ class RefreshButton(QToolButton):
             p.restore()
         if result_alpha>.001:
             p.setOpacity(result_alpha);p.translate(-9,-9)
-            if self.result:
+            if self.result is True:
                 path=QPainterPath(QPointF(4,9));path.lineTo(7.4,12.3);path.lineTo(14,5.7);p.drawPath(path)
             else:
-                p.setPen(QPen(QColor('#915e74'),1.65,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
+                color=QColor('#9b7b4c' if self.result=='partial' else '#915e74')
+                p.setPen(QPen(color,1.65,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
                 p.drawLine(QPointF(9,4),QPointF(9,10))
-                p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor('#915e74'));p.drawEllipse(QRectF(8.1,12.5,1.8,1.8))
+                p.setPen(Qt.PenStyle.NoPen);p.setBrush(color);p.drawEllipse(QRectF(8.1,12.5,1.8,1.8))

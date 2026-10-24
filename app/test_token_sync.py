@@ -1,5 +1,6 @@
 """Cross-device replay, partial logs, offline retry and private-data boundaries."""
 import itertools
+from contextlib import closing
 import json
 import tempfile
 import time
@@ -48,7 +49,7 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.authenticate(self.a['token']),self.a['device_id']);self.assertIsNone(self.store.authenticate('invalid'))
         invite=self.store.invite();new=self.store.enroll(invite['invite'],'Linux');self.assertEqual(self.store.authenticate(new['token']),new['device_id'])
         with self.assertRaises(ValueError):self.store.enroll(invite['invite'],'duplicate')
-        with self.store.connect() as db:db.execute('DELETE FROM devices WHERE id=?',(new['device_id'],))
+        with closing(self.store.connect()) as db,db:db.execute('DELETE FROM devices WHERE id=?',(new['device_id'],))
         self.assertIsNone(self.store.authenticate(new['token']))
     def test_unknown_messages_are_not_reported_as_zero_real_messages(self):
         s=self.store.snapshot();self.assertEqual(s['scope'],'all');self.assertIsNone(s['report']['messages']);self.assertFalse(s['report']['messages_available'])
@@ -60,7 +61,7 @@ class LedgerTests(unittest.TestCase):
         ledger=SyncLedger(self.root/'ledger.sqlite3',home);ledger.scan(budget=5)
         self.assertEqual([r['total'] for r in ledger.batch('test')],[100,300])
         first.rename(first.with_name('rollout-renamed.jsonl'));ledger.scan(budget=5);self.assertEqual(len(ledger.batch('test')),2)
-        with ledger.connect() as db:self.assertNotIn('PRIVATE_NEVER_UPLOAD','\n'.join(db.iterdump()))
+        with closing(ledger.connect()) as db:self.assertNotIn('PRIVATE_NEVER_UPLOAD','\n'.join(db.iterdump()))
     def test_truncation_and_rebuild_preserve_old_checkpoints_without_recount(self):
         home=self.root/'home';log(home);ledger=SyncLedger(self.root/'ledger.sqlite3',home);ledger.scan(budget=5)
         log(home,totals=(100,));ledger.scan(budget=5);self.assertEqual(len(ledger.batch('x')),2)

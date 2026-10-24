@@ -190,7 +190,7 @@ class DesktopUiTests(unittest.TestCase):
         self.assertEqual(self.pet.bubble.pos(),position);self.assertTrue(chat.input.hasFocus())
         self.pet.start_walk();self.assertFalse(self.pet.walking)
         with patch('desktop_settings.autostart_enabled',return_value=False):self.pet.open_settings()
-        settings=self.pet.settings_dialog;settings.fields['move_speed'].setValue(123)
+        settings=self.pet.settings_dialog;settings.tabs.setCurrentIndex(1);settings.fields['move_speed'].setValue(123)
         self.pet.open_chat();self.pet.open_settings();self.assertEqual(settings.fields['move_speed'].value(),123)
         self.pet.bubble.show_status();self.pet.open_chat();self.assertEqual(chat.input.toPlainText(),'draft text')
         chat.provider();provider=chat.provider_dialog;self.assertFalse(provider.isWindow())

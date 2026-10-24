@@ -274,7 +274,8 @@ class Pet(QWidget):
             delta=event.globalPosition().toPoint()-self.press_pos
             if delta.manhattanLength()>8 and not self.dragging:
                 self.dragging=True;self.click_timer.stop();self.last_click=None;self.generation+=1
-                self.bubble_timer.stop();self.bubble.hide()
+                self.bubble_timer.stop()
+                if not getattr(self,'settings',{}).get('panel_detached'):self.bubble.hide()
                 self.play(self.manifest.get('dragAnimation') or self.idles[0],'drag')
             if self.dragging:
                 self.move(self.constrained_position(self.origin+delta,event.globalPosition().toPoint()))

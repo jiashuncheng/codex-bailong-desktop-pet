@@ -9,8 +9,8 @@ from session_read_state import is_subagent_metadata,subagent_sessions
 from status_indicator import StatusIndicator
 
 APP=QApplication.instance() or QApplication([])
-PARENT='00000000-0000-4000-8000-000000000002'
-CHILD='00000000-0000-4000-8000-000000000003'
+PARENT='01a14429-54e3-7461-8c2f-83136516256a'
+CHILD='01a15019-01b0-7b61-ab1c-2b91cef1cfb8'
 
 def meta(sid,child=False):
     return dict(type='session_meta',payload=dict(id=sid,session_id=PARENT if child else sid,source={'subagent':{'thread_spawn':{'parent_thread_id':PARENT}}} if child else 'vscode',agent_path='/root/reviewer' if child else None))

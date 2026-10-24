@@ -13,7 +13,9 @@ def checked(root,name):
     if p.is_absolute() or any(v in ('','.','..') for v in name.split('/')):raise MaterialError('素材路径无效')
     root=Path(root);target=root.joinpath(*p.parts)
     if root.is_symlink() or any(v.is_symlink() or getattr(v,'is_junction',lambda:False)() for v in [target,*target.parents] if v!=root.parent and (v==root or root in v.parents)):raise MaterialError('素材目录不能使用链接跳转')
-    if not target.resolve().is_relative_to(root.resolve()):raise MaterialError('素材路径越界')
+    # Windows may report another name of a multiply hard-linked file. All
+    # reparse points above are rejected; validate its directory, not that alias.
+    if not target.parent.resolve().is_relative_to(root.resolve()):raise MaterialError('素材路径越界')
     return target
 
 def cancelled(cancel):

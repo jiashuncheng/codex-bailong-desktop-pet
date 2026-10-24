@@ -1,13 +1,13 @@
 import os
 os.environ['QT_QPA_PLATFORM']='offscreen'
-import tempfile,time,unittest
+import copy,tempfile,time,unittest
 from pathlib import Path
 from unittest.mock import patch
 from PIL import Image
 from PySide6.QtWidgets import QApplication
 from stream_player import StreamPlayer,PreparedSegment
 from sustained_player import SustainedPlayback
-from sustained_assets import profile_paths,seam_items
+from sustained_assets import profile_paths,seam_items,playback_profile
 from status_reactions import Reaction
 
 APP=QApplication.instance() or QApplication([])
@@ -65,6 +65,31 @@ class SegmentTests(unittest.TestCase):
         self.assertEqual(self.s.phase,'body');drain(self.p)
         self.assertTrue(self.s.tail.ready.wait(4))
         self.s.boundary(self.p,16);self.assertEqual(self.s.phase,'exit')
+    def test_soft_exit_can_be_withdrawn_without_replaying_entrance(self):
+        self.s.begin(self.p,self.profile,self.owner,16);drain(self.p)
+        self.s.request(False);self.s.request(True)
+        self.s.boundary(self.p,16);self.assertEqual(self.s.phase,'seam');drain(self.p)
+        # A second short state change while returning to the loop is harmless.
+        self.s.request(False);self.s.request(True)
+        self.s.boundary(self.p,16);self.assertEqual(self.s.phase,'body')
+        self.assertEqual(self.p.frame_index,3);drain(self.p)
+        self.s.boundary(self.p,16);self.assertEqual(self.s.phase,'seam')
+        self.assertEqual(self.s.cycles,2)
+    def test_terminal_exit_stays_latched_even_if_work_returns_before_boundary(self):
+        self.s.begin(self.p,self.profile,self.owner,16);drain(self.p)
+        self.assertTrue(self.s.tail.ready.wait(4))
+        self.s.request(False);self.s.request(False,hard=True);self.s.request(True)
+        self.s.boundary(self.p,16);self.assertEqual(self.s.phase,'exit')
+        self.assertEqual(self.p.frame_index,7);drain(self.p)
+        self.assertTrue(self.s.boundary(self.p,16)[1]);self.assertFalse(self.s.hard_exit_requested)
+    def test_started_tail_never_rewinds_when_work_returns(self):
+        self.s.begin(self.p,self.profile,self.owner,16);drain(self.p)
+        self.assertTrue(self.s.tail.ready.wait(4))
+        self.s.request(False);self.s.boundary(self.p,16);self.assertEqual(self.s.phase,'exit')
+        self.s.request(True);self.assertEqual(self.s.phase,'exit')
+        self.assertTrue(self.s.exit_requested)
+        self.assertEqual([i for _,_,i in drain(self.p)],[8,9])
+        self.assertTrue(self.s.boundary(self.p,16)[1])
     def test_cancel_stops_worker_without_retaining_owner(self):
         self.s.begin(self.p,self.profile,self.owner,32);self.s.cancel()
         self.assertFalse(self.s.active);self.assertIsNone(self.s.owner);self.assertIsNone(self.s.warmer)
@@ -106,6 +131,62 @@ class SegmentTests(unittest.TestCase):
         with self.assertRaises(ValueError):profile_paths(self.root,self.item)
         self.s.profile=dict(self.profile,variants=[dict(self.profile,start=2)]);self.s.variant=self.profile;self.s.variant_index=0
         self.s.choose_cycle(self.p,16);self.assertEqual(self.s.variant['start'],3)
+    def test_steady_prop_uses_native_speed_and_reuses_cached_loop(self):
+        self.item['sustained'].update(steadyProp=True,variants=[dict(start=3,end=6,seamFile='seam.webp',seamFrames=2)])
+        profile=profile_paths(self.root,self.item);self.s.begin(self.p,profile,self.owner,16);drain(self.p)
+        self.assertTrue(self.s.warm_ready.wait(4))
+        with patch.object(self.s.rng,'uniform',side_effect=AssertionError('steady prop tempo randomized')):
+            for _ in range(4):
+                with patch('stream_player.Image.open',side_effect=AssertionError('cached loop decoded again')):
+                    self.s.boundary(self.p,16);self.assertEqual(self.s.phase,'seam');drain(self.p)
+                    self.s.boundary(self.p,16);self.assertEqual(self.s.phase,'body')
+                    self.assertEqual(self.p.frame_index,3)
+                    self.assertEqual([i for _,_,i in drain(self.p)],[4,5,6])
+                for fraction in (0,.25,.5,.75,1):
+                    self.p.playhead=4/24*fraction;self.assertEqual(self.s.speed_factor(self.p),1.)
+        self.assertEqual(self.s.cycle_speed,1.);self.assertGreater(self.p.loop_cache.stats()['hits'],4)
+        self.assertLessEqual(self.p.loop_cache.stats()['bytes'],self.p.loop_cache.limit)
+    def legacy_recipe(self,action):
+        start,end,frames={'work02':(55,83,163),'work04':(44,85,139)}[action]
+        variants=[dict(start=start-offset,end=end,seamFile=f'quality-v5/{action}-seam-{index}.webp',seamFrames=count)
+                  for index,(offset,count) in enumerate(((0,9),(4,13),(2,11)))]
+        return dict(id=action,qualityRevision=3,file=f'{action}.webp',playbackFile=f'quality-v3/{action}.webp',
+                    sustained=dict(variants[0],sourceFrames=frames,variants=variants,revision=2,forwardOnly=True))
+    def test_shipped_recipe_migrates_in_memory_without_changing_asset_list_or_input(self):
+        for action in ('work02','work04'):
+            with self.subTest(action=action):
+                item=self.legacy_recipe(action);before=copy.deepcopy(item)
+                resources=seam_items(dict(workAnimations=[item]));self.assertEqual(len(resources),3)
+                migrated=playback_profile(item)
+                self.assertTrue(migrated['steadyProp']);self.assertEqual(migrated['variants'],[before['sustained']['variants'][0]])
+                # Path resolution uses the migration too; no file content
+                # mutation or re-encoding is required.
+                for name in (item['playbackFile'],*(v['seamFile'] for v in item['sustained']['variants'])):
+                    path=self.root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(self.source.read_bytes())
+                resolved=profile_paths(self.root,item)
+                self.assertTrue(resolved['steadyProp']);self.assertEqual(len(resolved['variants']),1)
+                self.assertEqual(resolved['variants'][0]['start'],item['sustained']['start'])
+                migrated['variants'][0]['start']=-1
+                self.assertEqual(item,before);self.assertEqual(seam_items(dict(workAnimations=[item])),resources)
+    def test_custom_new_or_near_matching_recipes_are_not_migrated(self):
+        edits=(('id','custom'),('qualityRevision',4),('playbackFile','custom/work02.webp'),
+               ('sustained.revision',3),('sustained.start',56),('sustained.end',84),
+               ('sustained.sourceFrames',164),('sustained.seamFile','custom/seam.webp'),
+               ('sustained.seamFrames',10),('sustained.forwardOnly',False),('sustained.forwardOnly',1),
+               ('sustained.steadyProp',False),('sustained.authorLoopMode','custom'),
+               ('sustained.variants.0.start',56),('sustained.variants.1.end',84),
+               ('sustained.variants.2.seamFile','custom/third.webp'),('sustained.variants.1.seamFrames',14))
+        for field,value in edits:
+            with self.subTest(field=field,value=value):
+                item=self.legacy_recipe('work02');parts=field.split('.');node=item
+                for part in parts[:-1]:node=node[int(part)] if isinstance(node,list) else node[part]
+                node[parts[-1]]=value;before=copy.deepcopy(item)
+                self.assertEqual(playback_profile(item),item['sustained']);self.assertEqual(item,before)
+        for variants in ([],[0],[2,1,0]):
+            with self.subTest(variants=variants):
+                item=self.legacy_recipe('work02');original=item['sustained']['variants']
+                item['sustained']['variants']=[original[i] for i in variants]
+                self.assertEqual(playback_profile(item),item['sustained'])
     def test_full_loop_eviction_keeps_prepared_first_frames_off_gui_seek_path(self):
         import threading
         self.s.begin(self.p,self.profile,self.owner,16);drain(self.p);self.assertTrue(self.s.warm_ready.wait(4))

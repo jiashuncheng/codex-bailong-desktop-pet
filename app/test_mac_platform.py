@@ -65,6 +65,41 @@ class MacPathsTests(unittest.TestCase):
             self.assertEqual(store.read(), {'old': 'macOS-Keychain'})
 
 
+    def test_corrupt_secret_index_blocks_keychain_access(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store=SecretStore(Path(folder)/'secrets.json');store.path.write_text('{broken')
+            with patch('mac_services.keychain_get') as get, patch('mac_services.keychain_put') as put:
+                with self.assertRaises(OSError):store.get('provider')
+                with self.assertRaises(OSError):store.put('provider','synthetic-secret')
+                get.assert_not_called();put.assert_not_called()
+                self.assertEqual(store.path.read_text(),'{broken')
+
+    def test_foreign_ciphertext_is_not_treated_as_mac_key(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store=SecretStore(Path(folder)/'secrets.json');store.path.write_text('{"provider":"foreign-ciphertext"}')
+            with patch('mac_services.keychain_get') as get:
+                with self.assertRaises(OSError):store.get('provider')
+                get.assert_not_called()
+
+    def test_chat_key_replacement_failure_retains_old_keychain_slot(self):
+        import chat_config as config
+        from desktop_core import atomic_json
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);keys={}
+            def put(account,value):
+                if value:keys[account]=value
+                else:keys.pop(account,None)
+            with patch('mac_services.keychain_get',side_effect=lambda account:keys.get(account,'')), patch('mac_services.keychain_put',side_effect=put):
+                value=dict(config.CHAT_DEFAULT,active='provider',providers=[dict(id='provider',model='fixture')])
+                atomic_json(root/'chat.json',value);SecretStore(root/'credentials.dpapi.json').put('provider','old-synthetic-key')
+                with patch('chat_config.atomic_json',side_effect=OSError('disk full')):
+                    with self.assertRaises(OSError):config.save_chat_config(root,value,'provider','new-synthetic-key')
+                saved=config.load_chat_config(root)
+                self.assertEqual(config.load_provider_key(root,saved['providers'][0]),'old-synthetic-key')
+                saved=config.save_chat_config(root,value,'provider','new-synthetic-key')
+                self.assertEqual(config.load_provider_key(root,saved['providers'][0]),'new-synthetic-key')
+
+
 class MacBridgeTests(unittest.TestCase):
     def test_ssh_is_opt_in_and_alias_is_not_a_command(self):
         from mac_bridge import read_config, save_config

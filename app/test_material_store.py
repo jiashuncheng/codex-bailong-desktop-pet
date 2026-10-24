@@ -51,6 +51,20 @@ class MaterialStoreTests(unittest.TestCase):
         root=self.store.import_hd(self.source);self.store.activate('hd',root)
         (self.app/'version.txt').write_text('unrelated new program version')
         self.assertEqual(MaterialStore(self.app,self.state).root,root)
+    def test_hardlink_final_name_alias_does_not_discard_verified_hd_cache(self):
+        root=self.store.import_hd(self.source);asset=root/'quality/action.webp';original=Path.resolve
+        def alias(path,*args,**kwargs):
+            return original(self.source/'quality/action.webp') if path==asset else original(path,*args,**kwargs)
+        with patch.object(Path,'resolve',alias):
+            self.assertEqual(checked(root,'quality/action.webp'),asset)
+            self.assertTrue(self.store.available('hd'));self.store.activate('hd',root)
+            self.assertEqual(MaterialStore(self.app,self.state).current,'hd')
+            from desktop import DesktopPet
+            from types import SimpleNamespace
+            from sustained_assets import profile_paths
+            self.assertEqual(DesktopPet.asset_path(SimpleNamespace(asset_root=root),{'file':'quality/action.webp'}),asset)
+            item=dict(file='quality/action.webp',sustained=dict(start=0,end=2,sourceFrames=5,seamFrames=2,seamFile='quality/action.webp'))
+            self.assertEqual(profile_paths(root,item)['source'],root.resolve()/'quality/action.webp')
     def test_download_verify_commit_and_progress(self):
         events=[];root=self.store.ensure('hd',progress=lambda n,t,p:events.append((n,t,p)),opener=lambda *a:self.response(self.archive()))
         self.assertTrue(self.store.available('hd'));self.assertEqual(self.store.current,'light')

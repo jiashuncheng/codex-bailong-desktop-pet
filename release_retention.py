@@ -3,7 +3,8 @@ import hashlib,json,shutil
 from pathlib import Path
 
 def checked_path(release,name,version):
-    if Path(name).name!=name or not name.startswith(f'白龙桌宠-{version}-'):raise ValueError('Unregistered artifact name')
+    prefixes=(f'白龙桌宠-{version}-',f'bailong-desktop-pet-{version}-')
+    if Path(name).name!=name or not name.startswith(prefixes):raise ValueError('Unregistered artifact name')
     p=release/name
     if p.is_symlink() or p.is_junction() or p.resolve()!=p.absolute() or p.parent!=release:raise ValueError('Unsafe artifact path')
     if p.is_dir():
@@ -22,13 +23,14 @@ def replace_previous(root,version,new_names,proof):
     if not proof.get('passed') or proof.get('version')!=version or not all(proof.get(k) for k in required):raise ValueError('New release verification incomplete')
     new=[checked_path(release,n,version) for n in new_names]
     if not new or not all(p.exists() and (not p.is_file() or p.stat().st_size>0) for p in new):raise ValueError('New artifacts missing')
-    old_paths=[checked_path(release,n,old) for n in policy['replaceableArtifacts']]
+    old_paths=[checked_path(release,n,old) for n in dict.fromkeys(policy['replaceableArtifacts']+policy.get('replaceableProgramArtifacts',[]))]
     total=sum(p.stat().st_size for rootpath in old_paths for p in ([rootpath] if rootpath.is_file() else rootpath.rglob('*')) if p.is_file())
     # Validate the entire deletion list and nested contents before deleting any.
     removed=[]
     for p in old_paths:
         if p.is_dir():shutil.rmtree(p);removed.append(p.name)
         elif p.exists():p.unlink();removed.append(p.name)
+    policy['replaceableProgramArtifacts']=[n for n in new_names if n.startswith('bailong-desktop-pet-') and '-program.' in n]
     policy.update(updated=__import__('datetime').date.today().isoformat(),currentReplaceableVersion=version,replaceableArtifacts=new_names)
     policy_path.write_text(json.dumps(policy,ensure_ascii=False,indent=2),encoding='utf-8')
     hashes_path=release/'SHA256.json';hashes=json.loads(hashes_path.read_text(encoding='utf-8')) if hashes_path.exists() else {}

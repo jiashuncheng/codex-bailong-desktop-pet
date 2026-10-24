@@ -2,7 +2,7 @@
 import math,random
 from html import escape
 from datetime import datetime
-from PySide6.QtCore import Qt,QRect,QRectF,QPointF,QPoint,QEvent,Signal,QVariantAnimation,QEasingCurve,QAbstractAnimation,QTimer
+from PySide6.QtCore import Qt,QRect,QRectF,QPointF,QPoint,QSize,QEvent,Signal,QVariantAnimation,QEasingCurve,QAbstractAnimation,QTimer
 from PySide6.QtGui import QPainter,QPainterPath,QPen,QColor,QFontMetrics,QPixmap,QRegion
 from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QLabel,QToolButton,QScrollArea,QApplication,QSizePolicy
 from compact_bubble import font,INK,MUTED,FONT_CSS,action_button
@@ -20,7 +20,7 @@ COLORS=MODEL_COLORS
 def tab(text,slot,checked=False):
     b=QToolButton();b.setText(text);b.setCheckable(True);b.setChecked(checked);b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     b.setCursor(Qt.CursorShape.PointingHandCursor);b.setFixedHeight(23)
-    b.setStyleSheet('QToolButton{'+FONT_CSS+'font-size:11px;font-weight:600;color:#706879;border:0;border-radius:5px;padding:2px 5px;background:transparent;}QToolButton:checked{color:#514360;background:#eae1f2;}QToolButton:hover{background:#f0e9f6;}')
+    b.setStyleSheet('QToolButton{'+FONT_CSS+'font-size:11px;font-weight:500;color:#706879;border:0;border-radius:5px;padding:2px 5px;background:transparent;}QToolButton:checked{color:#514360;background:#eae1f2;}QToolButton:hover{background:#f0e9f6;}')
     b.clicked.connect(slot);return b
 
 class OverviewStats(QWidget):
@@ -34,10 +34,10 @@ class OverviewStats(QWidget):
                ('Token 总量',compact_tokens(r.get('all_total',0))),('最常用模型',r.get('favorite_model','暂无记录')),
                ('消息数',f"{r.get('messages',0):,}"),('高峰时段',f"{r['peak_hour']:02}:00–{r['peak_hour']+1:02}:00" if r.get('peak_hour') is not None else '暂无用量')]
         width=(self.width()-4)/2
-        p.setPen(QColor(PRIMARY));p.setFont(font(10,True));p.drawText(QRectF(1,0,self.width()-2,14),Qt.AlignmentFlag.AlignVCenter,'累计 · 本机记录')
-        p.drawText(QRectF(1,100,self.width()-2,14),Qt.AlignmentFlag.AlignVCenter,'昨日 · '+r.get('day','--'))
+        p.setPen(QColor(PRIMARY));p.setFont(font(11));p.drawText(QRectF(1,0,self.width()-2,16),Qt.AlignmentFlag.AlignVCenter,'累计 · 本机记录')
+        p.drawText(QRectF(1,100,self.width()-2,16),Qt.AlignmentFlag.AlignVCenter,'昨日 · '+r.get('day','--'))
         for i,(label,value) in enumerate(cells):
-            rect=QRectF((i%2)*(width+4),16+(i//2)*41+(16 if i>=4 else 0),width,37)
+            rect=QRectF((i%2)*(width+4),18+(i//2)*41+(18 if i>=4 else 0),width,37)
             p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor('#f1ecf6'));p.drawRoundedRect(rect,6,6)
             p.setPen(MUTED);p.setFont(font(10,True));p.drawText(rect.adjusted(6,2,-3,-20),Qt.AlignmentFlag.AlignVCenter,label)
             p.setPen(INK);p.setFont(font(11 if i in (3,5) else 14,True))
@@ -173,10 +173,10 @@ class DailyReport(QWidget):
         self.follow=LinkedReportMotion(self);self.animation.finished.connect(bubble._apply_pending_mode)
         bubble.installEventFilter(self);self.hide();self.rebuild()
     def label(self,text,size=11,bold=False):
-        size=max(10,size)
+        size=max(11,size)
         w=QLabel(text);w.setFont(font(size,bold));w.setTextFormat(Qt.TextFormat.PlainText)
         # Bubble's inherited QLabel rule otherwise overrides setFont(…).
-        w.setStyleSheet(FONT_CSS+f'font-size:{size}px;font-weight:{700 if bold else 600};color:#393343;background:transparent;');return w
+        w.setStyleSheet(FONT_CSS+f'font-size:{size}px;font-weight:{600 if size>14 else 500};color:#393343;background:transparent;');return w
     def card(self,name):
         w=QWidget();w.setObjectName(name)
         w.setStyleSheet('QWidget#'+name+'{background:#f5f0f8;border-radius:7px;}')
@@ -290,7 +290,7 @@ class DailyReport(QWidget):
         self.data_state.setVisible(bool(unavailable or partial) and bool(self.report))
     def _update_analogy(self,r):
         data=book_analogy(r.get('all_total',0),self.book_index)
-        self.analogy.setText('<span style="font-size:10px;font-weight:600;color:#62576e">累计用量相当于约</span><br><span style="font-size:12px;font-weight:700;color:#514360">'+escape(data['quantity']+' 本《'+data['book']['title']+'》')+'</span>')
+        self.analogy.setText('<span style="font-size:11px;font-weight:500;color:#62576e">累计用量相当于约</span><br><span style="font-size:12px;font-weight:500;color:#514360">'+escape(data['quantity']+' 本《'+data['book']['title']+'》')+'</span>')
         self.analogy.setAccessibleName(data['sentence'])
         self.book_estimate.setText(data['estimate'])
         self.book_estimate.setAccessibleName(data['estimate']+'；Project Gutenberg '+data['book']['source']+'；o200k_base 参考计数，非账单精确值')
@@ -362,7 +362,7 @@ class DailyReport(QWidget):
         self.body_height+=30
         if self.readout:
             self.readout.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed)
-            self.readout.setFixedHeight(14)
+            self.readout.setFixedHeight(max(16,QFontMetrics(self.readout.font()).height()+2))
         if self.page=='overview' and r:
             comparison,comparison_layout=self.card('report_comparison_card');comparison_layout.setSpacing(2)
             line=QHBoxLayout();line.setContentsMargins(0,0,0,0);line.setSpacing(2)
@@ -483,6 +483,10 @@ class DailyReport(QWidget):
         # operations on animation frames, in either direction.
         self.repaint()
     def _finished(self):
+        from panel_transition import present_barrier
+        guarded=self.requested and self._animating and QApplication.platformName()=='windows'
+        if guarded:
+            self.follow.shield.present(self.grab(),self.geometry());present_barrier()
         self._animating=False
         if not self.requested:
             self.fraction=0.;self._frame=None;self.surface.hide()
@@ -497,6 +501,8 @@ class DailyReport(QWidget):
             self._frame=None;self._input_passthrough(False)
         finally:self.setUpdatesEnabled(enabled)
         self.repaint()
+        if guarded:
+            present_barrier();self.follow.park(self.follow.shield)
         if self.plot:self.plot.start_reveal()
     def sync_geometry(self):
         if self._building or self._syncing or self.follow.active:return
@@ -516,7 +522,8 @@ class DailyReport(QWidget):
                 if self.page=='overview' and getattr(self,'stats',None):self.stats.set_columns(width-22)
             self._measure_overview()
             target=max(1,min(self.natural_height,b.y()-area.top()-self.GAP-self.PAD))
-            self.surface.setFixedSize(width,target);self.surface.move(self.PAD,self.PAD);self.layout.activate()
+            if self.surface.size()!=QSize(width,target):self.surface.setFixedSize(width,target)
+            self.surface.move(self.PAD,self.PAD);self.layout.activate()
             self.setGeometry(b.x()-self.PAD,b.y()-self.GAP-target-self.PAD,width+2*self.PAD,target+2*self.PAD)
             if self.isVisible():self.repaint()
         finally:self._syncing=False

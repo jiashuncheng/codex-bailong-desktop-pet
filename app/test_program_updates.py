@@ -103,6 +103,13 @@ class ProgramUpdateTests(unittest.TestCase):
         stage_program(self.release,self.cache,self.old,opener=self.opener);(self.cache/'notes.txt').write_text('keep')
         prune_program_cache(self.cache,'0.7.7');self.assertTrue(program_paths(self.cache,VERSION)['receipt'].exists())
         prune_program_cache(self.cache,VERSION);self.assertFalse((self.cache/VERSION/'program').exists());self.assertEqual((self.cache/'notes.txt').read_text(),'keep')
+    def test_cache_removed_before_prune_scan_is_ignored(self):
+        self.cache.mkdir(parents=True)
+        original=Path.iterdir
+        def vanished(path):
+            if path==self.cache:raise FileNotFoundError(path)
+            return original(path)
+        with patch.object(Path,'iterdir',vanished):prune_program_cache(self.cache,VERSION)
     def test_cleanup_leaves_all_files_intact_while_update_helper_is_running(self):
         from types import SimpleNamespace
         source=stage_program(self.release,self.cache,self.old,opener=self.opener);paths=program_paths(self.cache,VERSION)

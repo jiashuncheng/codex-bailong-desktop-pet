@@ -7,7 +7,8 @@ from PySide6.QtCore import Qt,QPoint
 from PySide6.QtGui import QImage,QPainter,QRegion
 from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QApplication,QWidget
-from status_indicator import StatusIndicator,busy_ring_centers,BUSY_RING_RADIUS,BUSY_RING_STROKE,BUSY_BREATH_SECONDS
+from status_indicator import StatusIndicator,busy_ring_centers,BUSY_RING_RADIUS
+from status_motion import BUSY_ROTATION_SECONDS
 from compact_bubble import CompactBubble
 
 app=QApplication.instance() or QApplication([])
@@ -24,47 +25,40 @@ class IndicatorTests(unittest.TestCase):
         self.icon.observe(dict(state='working',active=1));self.icon.observe(dict(state='responding',active=1))
         self.assertEqual(self.icon.busy_since,start);self.assertEqual(self.icon.visual(),'busy')
         self.assertTrue(self.icon.timer.isActive())
-    def test_orbit_outlines_stay_separate_and_inside_small_icon(self):
-        edge=BUSY_RING_RADIUS+BUSY_RING_STROKE/2
-        for frame in range(241):
+    def test_liquid_orbit_stays_inside_small_icon_and_closes_by_identity(self):
+        edge=BUSY_RING_RADIUS
+        for frame in range(1081):
             centers=busy_ring_centers(frame/100)
             self.assertEqual(len(centers),3)
             for x,y in centers:
                 self.assertGreaterEqual(min(x,y)-edge,.6)
                 self.assertLessEqual(max(x,y)+edge,15.4)
-            for a,b in zip(centers,centers[1:]+centers[:1]):
-                self.assertGreater(math.dist(a,b),2*edge)
-        compact=busy_ring_centers(0);expanded=busy_ring_centers(BUSY_BREATH_SECONDS/2)
-        self.assertGreater(math.dist(expanded[0],(8,8)),math.dist(compact[0],(8,8))+1.5)
-        end=busy_ring_centers(BUSY_BREATH_SECONDS)
-        self.assertTrue(all(min(math.dist(a,b) for b in end)<1e-9 for a in compact))
-        # The unordered three-circle glyph joins smoothly at the loop seam.
-        before=busy_ring_centers(BUSY_BREATH_SECONDS-.001)
+        start=busy_ring_centers(0);end=busy_ring_centers(BUSY_ROTATION_SECONDS)
+        self.assertTrue(all(math.dist(a,b)<1e-9 for a,b in zip(start,end)))
+        # The mint ball must retain its identity across the whole-loop seam.
+        before=busy_ring_centers(BUSY_ROTATION_SECONDS-.001)
         after=busy_ring_centers(.001)
-        self.assertTrue(all(min(math.dist(a,b) for b in after)<.02 for a in before))
-    def test_busy_render_has_hollow_center_and_no_clipped_edges(self):
+        self.assertTrue(all(math.dist(a,b)<.02 for a,b in zip(before,after)))
+    def test_busy_render_has_solid_balls_and_no_clipped_edges(self):
         self.icon.observe(dict(state='working',active=1))
         self.icon.motion.settle()
         for island in (False,True):
             self.icon.set_island(island)
             for scale in (1,1.25,1.5,2,4):
-                for elapsed in (0,.4,.8,1.2,1.6,2,2.4):
+                for elapsed in (0,.4,.95,1.6,2.75,4.55,10.799):
                     self.now=100+elapsed
                     side=round(16*scale)
                     image=QImage(side,side,QImage.Format.Format_ARGB32_Premultiplied)
                     image.fill(Qt.GlobalColor.transparent)
                     painter=QPainter(image);painter.scale(scale,scale)
                     self.icon.render(painter,QPoint(),QRegion(),QWidget.RenderFlag.DrawChildren);painter.end()
-                    # At native 16px the center pixel covers part of the nearby
-                    # antialiased stroke; supersampling tests actual empty space.
+                    # Liquid balls replace outlines, including the mint one.
                     if scale==4:
-                        self.assertEqual(image.pixelColor(side//2,side//2).alpha(),0)
                         for x,y in busy_ring_centers(elapsed):
-                            self.assertEqual(image.pixelColor(round(x*scale),round(y*scale)).alpha(),0)
+                            self.assertGreater(image.pixelColor(round(x*scale),round(y*scale)).alpha(),250)
                     self.assertTrue(any(image.pixelColor(x,y).alpha()>150 for x in range(side) for y in range(side)))
                     border=[(i,0) for i in range(side)]+[(i,side-1) for i in range(side)]+[(0,i) for i in range(side)]+[(side-1,i) for i in range(side)]
-                    # The 0.675px minimum inset may lightly antialias into the
-                    # outermost pixel at 100%; it must never carry a solid edge.
+                    # Fractional DPR antialiasing must not produce a solid edge.
                     self.assertLess(max(image.pixelColor(x,y).alpha() for x,y in border),128)
     def test_real_completion_stays_unread_until_clicked(self):
         self.icon.observe(dict(state='working',active=1))

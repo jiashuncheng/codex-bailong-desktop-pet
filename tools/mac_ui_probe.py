@@ -75,7 +75,15 @@ def main():
         pet.open_settings()
         capture('settings')
         assert pet.bubble.panel_page == 'settings'
-        assert 'macOS' in pet.settings_dialog.startup.text()
+        dialog=pet.settings_dialog
+        for index in range(dialog.tabs.count()):dialog.tabs.setCurrentIndex(index);app.processEvents()
+        assert 'macOS' in dialog.startup.text()
+        assert not dialog.codex_startup.isEnabled()
+        assert not dialog.fields['codex_exit'].isEnabled()
+        assert 'conversation_auto_scroll' in dialog.fields
+        assert dialog.save_shortcut.key()== __import__('PySide6.QtGui',fromlist=['QKeySequence']).QKeySequence(__import__('PySide6.QtGui',fromlist=['QKeySequence']).QKeySequence.StandardKey.Save)
+        dialog.tabs.setCurrentIndex(0)
+        capture('settings')
     def chat():
         pet.open_chat()
         capture('chat')

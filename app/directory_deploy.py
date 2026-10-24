@@ -77,6 +77,29 @@ def backup_data(data_root,install_root,previous):
     proof['complete']=True;atomic(destination/'backup.json',proof)
     return destination
 
+def restore_data(data_root,backup,install_root):
+    """Restore a closed application's verified snapshot, including SQLite sidecars."""
+    data_root=plain_path(Path(data_root).absolute());base=plain_path(Path(install_root).resolve()/'deployment-backups')
+    backup=plain_path(Path(backup).absolute())
+    if backup.parent!=base or backup.resolve()!=backup:raise ValueError('数据备份路径无效')
+    proof=json.loads((backup/'backup.json').read_text(encoding='utf-8'))
+    if proof.get('complete') is not True or not isinstance(proof.get('files'),dict):raise ValueError('用户数据备份未完成')
+    def eligible(name):return Path(name).suffix.lower() in ('.json','.sqlite','.sqlite3','.db') and name not in ('runtime.json','codex-connection-check.json')
+    for name,record in proof['files'].items():
+        if Path(name).name!=name or not eligible(name):raise ValueError('用户数据备份文件名无效')
+        path=plain_path(backup/name)
+        with path.open('rb') as stream:sha=hashlib.file_digest(stream,'sha256').hexdigest()
+        if path.stat().st_size!=record['bytes'] or sha!=record['sha256']:raise ValueError('用户数据备份校验失败')
+    data_root.mkdir(parents=True,exist_ok=True)
+    for path in data_root.iterdir():
+        plain_path(path)
+        if not path.is_file():continue
+        if eligible(path.name) and path.name not in proof['files']:path.unlink()
+        elif path.name.endswith(('-wal','-shm')) and eligible(path.name.rsplit('-',1)[0]):path.unlink()
+    for name in proof['files']:
+        target=data_root/name;temp=target.with_name(name+'.restore.tmp')
+        shutil.copy2(backup/name,temp);os.replace(temp,target)
+
 def deploy_directory(source,startup,root=None,data_root=None,progress=print):
     from installer import ROOT,DATA,deploy,VERSION
     source=Path(source).absolute();root=Path(root or ROOT).resolve();data_root=Path(data_root or DATA)
@@ -88,7 +111,8 @@ def deploy_directory(source,startup,root=None,data_root=None,progress=print):
         nonlocal backup
         progress('旧版已退出，正在备份设置、聊天与统计数据…')
         backup=backup_data(data_root,root,previous)
-    exe=deploy(None,startup,root=root,progress=progress,after_stop=snapshot,
+        return backup
+    exe=deploy(None,startup,root=root,data_root=data_root,progress=progress,after_stop=snapshot,
                populate=lambda dest:populate_directory(source,dest,VERSION))
     result=dict(version=VERSION,current=exe.parent.name,previous=previous,executable=str(exe),backup=str(backup),fullInstallerGenerated=False)
     try:atomic(root/'last-local-deployment.json',result)

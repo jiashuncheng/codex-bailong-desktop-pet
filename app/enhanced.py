@@ -1,4 +1,4 @@
-"""Bailong 0.3.3 local enhancement. Keeps original animation assets and renderer."""
+"""Bailong desktop companion with Codex status and account data."""
 import ctypes
 import json
 import math
@@ -22,7 +22,7 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 from pet import Pet, Bubble, ROOT, QuotaWorker
 from enhanced_core import RolloutTail, motion_step, clean_text, windows_from_limits
-from reset_watch import ResetTracker, fetch_feed, schedule_text, account_reset_text, SOURCE_URL, local_time
+from reset_watch import LocalResetEvidence, locally_reset, ResetTracker, fetch_feed, schedule_text, account_reset_text, SOURCE_URL, local_time
 from token_calendar import TokenUsageIndex
 from refresh_flow import RefreshCoordinator, RefreshRuns
 
@@ -56,7 +56,8 @@ class ActivityThread(QThread):
         self.live_reader=LiveStatusReader(self.stop,
             lambda sid,on,turn:self.live_events.put(('compacting',sid,on,turn)),
             lambda sid,reason,turn:self.live_events.put(('waiting',sid,reason,turn)),
-            lambda sid,on,turn:self.live_events.put(('activity',sid,on,turn)))
+            lambda sid,on,turn:self.live_events.put(('activity',sid,on,turn)),
+            lambda sid,status,turn:self.live_events.put(('terminal',sid,status,turn)))
         self.live_reader.start()
         while not self.stop.is_set():
             if time.monotonic()-self.last_presence_scan>=5:
@@ -88,6 +89,8 @@ class ActivityThread(QThread):
                 while not self.live_events.empty():
                     phase,sid,value,turn=self.live_events.get_nowait();target=self.targets.alias(sid)
                     if target in self.tail.reducer.sessions:
+                        if phase=='terminal':
+                            batch.extend(self.tail.reducer.terminate(target,value,turn));continue
                         if phase=='activity':
                             batch.append(dict(kind='animation_lifecycle',session=target,turn=turn,active=value));continue
                         apply=self.tail.reducer.set_waiting if phase=='waiting' else self.tail.reducer.set_compacting
@@ -172,6 +175,7 @@ class ResetThread(QThread):
     failed=Signal()
     busy=Signal(bool)
     completed=Signal(int,bool)
+    diagnostic=Signal(object)
     def __init__(self,parent=None):
         super().__init__(parent)
         self.stop=threading.Event()
@@ -189,12 +193,17 @@ class ResetThread(QThread):
             run,_=self.refresh_runs.reserve()
             self.wake.clear()
             self.busy.emit(True)
-            success=False
+            success=False;phase='fetch';started=time.monotonic()
             try:
-                snapshot,alerts=self.tracker.update(fetch_feed())
+                feed=fetch_feed();phase='cache'
+                snapshot,alerts=self.tracker.update(feed)
+                self.diagnostic.emit(dict(state='available',code='ok',checked=time.time(),seconds=round(time.monotonic()-started,3)))
                 if not self.stop.is_set():self.ready.emit(snapshot,alerts,True);success=True
-            except Exception:
-                if not self.stop.is_set():self.failed.emit()
+            except Exception as error:
+                from reset_watch import ResetCacheError,reset_failure
+                if not self.stop.is_set():
+                    if isinstance(error,ResetCacheError):self.ready.emit(error.snapshot,error.alerts,True)
+                    self.diagnostic.emit(reset_failure(error,phase));self.failed.emit()
             finally:
                 self.refresh_runs.complete(run)
                 if not self.stop.is_set():self.completed.emit(run,success)
@@ -228,6 +237,7 @@ class EnhancedPet(Pet):
         self.sound=self.settings.get('sound',True)
         self._interaction_sound=False
         self.silent_notifier=None
+        self.local_reset_evidence=LocalResetEvidence(STATE_DIR/'local-reset-evidence.json')
         self.quota_windows=[]
         self.quota_observed=0
         self.quota_source=''
@@ -293,6 +303,7 @@ class EnhancedPet(Pet):
             self.reset_worker=ResetThread(self)
             self.reset_worker.ready.connect(self.on_reset_feed)
             self.reset_worker.failed.connect(self.on_reset_feed_error)
+            self.reset_worker.diagnostic.connect(self.on_reset_diagnostic)
             self.reset_worker.busy.connect(self._reset_busy_changed)
             self.reset_worker.completed.connect(self._reset_refresh_finished)
             self.reset_worker.start()
@@ -468,6 +479,8 @@ class EnhancedPet(Pet):
 
     def update_quota(self,windows,observed,source):
         if source=='session' and observed<self.quota_observed:return
+        self.local_reset_evidence.observe(windows,observed,source)
+        self.bubble.reset_snapshot=self.local_reset_evidence.decorate(self.bubble.reset_snapshot)
         self.quota_windows=windows
         self.quota_observed=observed
         self.quota_source=source
@@ -559,6 +572,8 @@ class EnhancedPet(Pet):
             self.render_quota()
 
     def on_reset_feed(self,snapshot,alerts,fresh):
+        snapshot=self.local_reset_evidence.decorate(snapshot)
+        if locally_reset(snapshot):alerts=[a for a in alerts if a.get('kind')!='scheduled']
         self.bubble.reset_snapshot=snapshot
         if fresh:self.bubble.reset_feed_error=False
         self.reset_checked=snapshot.get('checked',0)
@@ -576,6 +591,14 @@ class EnhancedPet(Pet):
         self.bubble.reset_feed_error=True
         self.bubble.redraw()
         self.position_bubble()
+
+    def on_reset_diagnostic(self,record):
+        self.reset_diagnostic=dict(record)
+        self.bubble.reset_error_details=record if record.get('state')!='available' else None
+        try:
+            from desktop_core import atomic_json
+            atomic_json(STATE_DIR/'reset-connection.json',record)
+        except OSError:pass
 
     def refresh_reset_feed(self):
         if self.reset_worker and not self.closing:
@@ -599,6 +622,7 @@ class EnhancedPet(Pet):
         if self.closing or self.refresh_flow.active('bubble'):return
         self.bubble.set_refresh_busy(True)
         sources=dict(quota=self.refresh_quota(),token=self.refresh_tokens(),reset=self.refresh_reset_feed())
+        self._requested_refresh_sources=set(sources)
         self.refresh_flow.begin('bubble',sources)
         if self.refresh_flow.batches:self.refresh_timeout.start()
 
@@ -622,7 +646,9 @@ class EnhancedPet(Pet):
 
     def _refresh_finished(self,scope,success,failed):
         target=self.bubble if scope=='bubble' else self.bubble.report
-        if target:target.finish_refresh(success)
+        partial=scope=='bubble' and failed==['reset'] and getattr(self,'_requested_refresh_sources',set())=={'quota','token','reset'}
+        self.last_refresh_result=dict(scope=scope,result='partial' if partial else 'success' if success else 'failed',failed=list(failed),checked=time.time())
+        if target:target.finish_refresh('partial' if partial else success)
         if not self.refresh_flow.batches:self.refresh_timeout.stop()
 
     def notify(self,title,text):
@@ -708,6 +734,7 @@ class EnhancedPet(Pet):
                'bubble_bounds':[self.bubble.x(),self.bubble.y(),self.bubble.width(),self.bubble.height()],
                'bubble_owned':self.bubble.parentWidget() is self,'automatic_sound':False,
                'reset_feed_checked':self.reset_checked,'reset_feed_error':self.bubble.reset_feed_error,
+               'reset_connection':getattr(self,'reset_diagnostic',None),'last_refresh_result':getattr(self,'last_refresh_result',None),
                'scheduled_reset':(self.bubble.reset_snapshot or {}).get('scheduled'),
                'dashboard_card':self.bubble.dashboard_page,'token_month':(self.bubble.token_snapshot or {}).get('month'),
                'ring_types':['quota'] if self.bubble.is_island() else [],
@@ -740,6 +767,25 @@ class EnhancedPet(Pet):
 
 
 def main():
+    if '--chat-probe' in sys.argv:
+        from chat_probe import run
+        return run(sys.argv[sys.argv.index('--chat-probe')+1])
+    if '--reset-diagnostics' in sys.argv:
+        from reset_watch import reset_failure
+        started=time.monotonic()
+        try:
+            if '--tls-only' in sys.argv:
+                import ssl
+                context=ssl.create_default_context()
+                result=dict(state='available',code='ok',contextReady=True,certificateVerification=context.verify_mode==ssl.CERT_REQUIRED,hostnameVerification=context.check_hostname,readOnly=True,offline=True)
+            else:
+                feed=fetch_feed();result=dict(state='available',code='ok',events=len(feed['events']),scheduled=feed['scheduled'],seconds=round(time.monotonic()-started,3),readOnly=True)
+        except Exception as error:result=reset_failure(error)
+        index=sys.argv.index('--reset-diagnostics')
+        if index+1<len(sys.argv):
+            from desktop_core import atomic_json
+            atomic_json(Path(sys.argv[index+1]),result)
+        return 0 if result['state']=='available' else 1
     if '--apply-program-update' in sys.argv:
         from program_update_apply import main as apply_program
         return apply_program()
@@ -773,6 +819,7 @@ def main():
     if sys.platform=='darwin':
         from mac_native import prepare_application
         prepare_application(app)
+    app.setWindowIcon(QIcon(str(ROOT/'app/branding/bailong.ico')))
     from typography import install_ui_font
     install_ui_font(app)
     app.setQuitOnLastWindowClosed(False)

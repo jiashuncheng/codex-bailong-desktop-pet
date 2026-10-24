@@ -1,0 +1,5 @@
+© 2014-2021 Adobe (http://www.adobe.com/).
+
+Noto Sans SC Regular / Medium / Bold. Unmodified original font files.
+License: NotoSansSC-OFL.txt
+Upstream: https://github.com/notofonts/noto-cjk

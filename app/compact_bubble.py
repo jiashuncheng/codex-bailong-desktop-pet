@@ -13,7 +13,7 @@ from pet import Bubble
 from enhanced_core import clean_text
 from typography import FONT_FAMILIES,FONT_CSS,ui_font
 from ui_theme import editor_stylesheet,PRIMARY,ACCENT,SELECTED,DISABLED
-from reset_watch import epoch,local_time,schedule_text,account_reset_text,SOURCE_URL,pending_reset,schedule_key
+from reset_watch import epoch,local_time,schedule_text,account_reset_text,SOURCE_URL,pending_reset,schedule_key,locally_reset,reset_has_priority
 
 INK=QColor('#393343');MUTED=QColor('#706879');PURPLE=QColor('#8b78a6')
 GREEN=QColor('#b3a5cb');AMBER=QColor('#915e74');TRACK=QColor('#e4dfea')
@@ -71,7 +71,7 @@ def action_button(kind,tip,text='',parent=None,hit_size=20,keyboard=False,under=
     button.setIconSize(QSize(18,18) if kind=='refresh' else QSize(16,16))
     button.setFocusPolicy(Qt.FocusPolicy.StrongFocus if keyboard else Qt.FocusPolicy.NoFocus);button.setCursor(Qt.CursorShape.PointingHandCursor)
     button.setToolTip(tip);button.setAccessibleName(tip)
-    button.setStyleSheet('QToolButton{'+FONT_CSS+f'border:2px solid transparent;border-radius:6px;color:{PRIMARY};background:transparent;font-size:{10 if under else 11}px;padding:0;}}QToolButton:hover{{background:#f0eaf5;}}QToolButton:pressed{{background:#e0d3eb;}}QToolButton:checked{{background:{SELECTED};border-bottom-color:{PRIMARY};}}QToolButton:disabled{{color:{DISABLED};}}QToolButton:focus{{border-color:{ACCENT};}}')
+    button.setStyleSheet('QToolButton{'+FONT_CSS+f'border:2px solid transparent;border-radius:6px;color:{PRIMARY};background:transparent;font-size:11px;padding:0;}}QToolButton:hover{{background:#f0eaf5;}}QToolButton:pressed{{background:#e0d3eb;}}QToolButton:checked{{background:{SELECTED};border-bottom-color:{PRIMARY};}}QToolButton:disabled{{color:{DISABLED};}}QToolButton:focus{{border-color:{ACCENT};}}')
     if text:
         button.setText(text);button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon if under else Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         if under:button.setFixedSize(hit_size,36)
@@ -149,7 +149,7 @@ class StatusScroller(QLabel):
         self.conversation_title='';self.conversation_id='';self.completed=False;self.short_title='';self.title_width=0;self.title_suffix=''
         self.name_hovered=False;self.name_pressed=False;self.setMouseTracking(True)
         self.overflow=QToolButton(self);self.overflow.setObjectName('conversation_overflow');self.overflow.setFixedSize(26,20);self.overflow.setFocusPolicy(Qt.FocusPolicy.NoFocus);self.overflow.hide()
-        self.overflow.setStyleSheet('QToolButton{'+FONT_CSS+'color:#514360;background:#eee8f3;border:0;border-radius:5px;font-size:10px;}QToolButton:hover{background:#e4dbea;}')
+        self.overflow.setStyleSheet('QToolButton{'+FONT_CSS+'color:#514360;background:#eee8f3;border:0;border-radius:5px;font-size:11px;}QToolButton:hover{background:#e4dbea;}')
         self.animation=QVariantAnimation(self);self.animation.setDuration(300);self.animation.setStartValue(0.);self.animation.setEndValue(1.)
         self.animation.setEasingCurve(QEasingCurve.Type.InOutCubic);self.animation.valueChanged.connect(self._advance);self.animation.finished.connect(self._finish)
         self._from_height=self._to_height=self.line_height;self._scroll_distance=self.line_height+4
@@ -399,7 +399,7 @@ class CompactBubble(Bubble):
         self.layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         self.setFont(font(12));self.setStyleSheet('QLabel{'+FONT_CSS+'font-weight:500;color:#393343;font-size:12px;background:transparent;}')
         self.windows=[];self.status='已启动，正在连接 Codex…';self.heading='白龙 · Codex 桌面伙伴'
-        self.quota_caption='额度加载中…';self.reset_snapshot=None;self.reset_feed_error=False
+        self.quota_caption='额度加载中…';self.reset_snapshot=None;self.reset_feed_error=False;self.reset_error_details=None
         self.show_quota=True;self.enabled=True;self.expanded=False
         self.bubble_mode='auto';self.auto_compact=False;self.last_task_update=time.monotonic();self.codex_open=None
         self._manual_grace_until=0.;self._pending_mode=None;self._pending_navigation=None
@@ -580,7 +580,9 @@ class CompactBubble(Bubble):
     def finish_refresh(self,success=True):
         self.refresh_busy=False;self.refresh_button.finish(success)
         if self.shortcut_button and self.capsule_action=='refresh':self.shortcut_button.finish(success)
-        self.refresh_button.setToolTip('额度、Token 与重置公告已刷新' if success else '部分数据刷新失败，保留上次记录；点击重试')
+        text='额度、Token 已刷新；重置公告暂不可用，已保留上次记录' if success=='partial' else '额度、Token 与重置公告已刷新' if success else '数据刷新失败，保留上次记录；点击重试'
+        if success=='partial' and self.reset_error_details:text='额度、Token 已刷新；'+self.reset_error_details.get('message','重置公告暂不可用')
+        self.refresh_button.setToolTip(text);self.refresh_button.setAccessibleDescription(text)
     def set_quota_busy(self,busy):
         changed=self.quota_busy!=bool(busy)
         self.quota_busy=bool(busy)
@@ -683,7 +685,7 @@ class CompactBubble(Bubble):
         name_row=QHBoxLayout(name_group);name_row.setContentsMargins(0,0,0,0);name_row.setSpacing(2)
         name_row.addWidget(self.status_indicator);self.status_indicator.show();name_row.addWidget(title)
         badge=QLabel();badge.setObjectName('codex_active_count');badge.setFixedHeight(18)
-        badge.setStyleSheet(FONT_CSS+'font-size:10px;font-weight:700;color:#66517e;background:#eee6f4;border-radius:6px;padding:0;')
+        badge.setStyleSheet(FONT_CSS+'font-size:11px;font-weight:500;color:#66517e;background:#eee6f4;border-radius:6px;padding:0;')
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter);name_row.addWidget(badge);self._status_badge=badge
         row.addWidget(name_group);row.addStretch(1)
         self.quota_refresh_button=self.refresh_button;row.addWidget(self.refresh_button);self.refresh_button.show()
@@ -703,16 +705,16 @@ class CompactBubble(Bubble):
             # routine status, quota and token updates preserve manual switching.
             from dashboard_cards import CardDeck,DASH_HEIGHT
             from quota_summary import QuotaSummary,TodayTokens
-            pending=pending_reset(self.reset_snapshot);key=schedule_key(pending) if pending else None
+            pending=pending_reset(self.reset_snapshot);key=(schedule_key(pending),locally_reset(self.reset_snapshot)) if pending else None
             if key!=self._active_reset_key:
-                self.dashboard_page='reset' if pending else 'tokens';self._active_reset_key=key
+                self.dashboard_page='reset' if reset_has_priority(self.reset_snapshot) else 'tokens';self._active_reset_key=key
             container=QWidget();container.setFixedHeight(DASH_HEIGHT+TodayTokens.HEIGHT+2)
             stack=QVBoxLayout(container);stack.setContentsMargins(0,0,0,0);stack.setSpacing(2)
             cards=QWidget();cards.setFixedHeight(DASH_HEIGHT);row=QHBoxLayout(cards);row.setContentsMargins(0,0,0,0);row.setSpacing(6);stack.addWidget(cards)
             quota=QuotaSummary(self.windows,self.quota_caption,progress_cache=self._ring_values);quota.expand.connect(self.show_quota_details)
             quota.resetDue.connect(self._quota_reset_due);row.addWidget(quota,1)
             self.ring_kinds=['quota']*len(quota.items)+['time','tokens']
-            deck=CardDeck(self.dashboard_page,self.token_snapshot,self.reset_snapshot,self.reset_feed_error,self.reset_busy,token_busy=self.token_busy,token_range=self.token_range)
+            deck=CardDeck(self.dashboard_page,self.token_snapshot,self.reset_snapshot,self.reset_error_details or self.reset_feed_error,self.reset_busy,token_busy=self.token_busy,token_range=self.token_range)
             deck.reset_details_requested.connect(self.show_reset_details)
             self.deck=deck
             deck.selected.connect(self.select_dashboard)
@@ -866,13 +868,17 @@ class CompactBubble(Bubble):
             wanted+=min(widget.maximumHeight(),max(widget.minimumSizeHint().height(),h,widget.minimumHeight()))
         owner=self.owner_pet()
         if self.details_tabs and owner:
-            screen=QApplication.screenAt(owner.frameGeometry().center()) or QApplication.primaryScreen()
+            settings=getattr(owner,'settings',{})
+            detached=settings.get('panel_detached') or not settings.get('character_visible',True)
+            rect=owner.card_geometry(self.content.size()) if detached else owner.frameGeometry()
+            screen=QApplication.screenAt(rect.center()) or QApplication.primaryScreen()
             area=screen.availableGeometry()
-            room=max(owner.y()-area.top()-8,area.bottom()-owner.y()-owner.height()-7)
+            room=area.height()-16 if detached else max(owner.y()-area.top()-8,area.bottom()-owner.y()-owner.height()-7)
             old=self.details_tabs.height();height=max(120,min(244,room-(wanted-old)))
             self.details_tabs.setFixedHeight(height);wanted+=height-old
-        self.content.setFixedHeight(max(40,wanted));self.setAccessibleName(self.heading+'；'+self.status)
-        if not self.size_transition.preparing:self.setFixedSize(self.content.size())
+        if self.content.height()!=max(40,wanted):self.content.setFixedHeight(max(40,wanted))
+        self.setAccessibleName(self.heading+'；'+self.status)
+        if not self.size_transition.preparing and self.size()!=self.content.size():self.setFixedSize(self.content.size())
         self.layout.activate();self._fitting_height=False;self._position_now()
     def _position_now(self):
         if self.size_transition.running or self.size_transition.preparing or self.size_transition.landing.image is not None:return
@@ -881,7 +887,7 @@ class CompactBubble(Bubble):
     def content_geometry(self,size=None):
         owner=self.owner_pet();size=self.content.size() if size is None else size
         if owner is None:return QRectF(self.x(),self.y(),size.width(),size.height()).toRect()
-        if hasattr(owner,'card_geometry') and not owner.settings.get('character_visible',True):return owner.card_geometry(size)
+        if hasattr(owner,'card_geometry') and (owner.settings.get('panel_detached') or not owner.settings.get('character_visible',True)):return owner.card_geometry(size)
         screen=QApplication.screenAt(owner.frameGeometry().center()) or QApplication.primaryScreen();area=screen.availableGeometry()
         if self.panel_page!='status' and self._editor_positioned:x,y=self.x(),self.y()
         else:
@@ -921,7 +927,7 @@ class CompactBubble(Bubble):
         else:super().contextMenuEvent(event)
     def card_pointer_press(self,event):
         owner=self.owner_pet()
-        if event.button()==Qt.MouseButton.LeftButton and owner and not owner.settings.get('character_visible',True) and not self.size_transition.running:
+        if event.button()==Qt.MouseButton.LeftButton and owner and (owner.settings.get('panel_detached') or not owner.settings.get('character_visible',True)) and not self.size_transition.running:
             self._card_press=(event.globalPosition().toPoint(),self.pos());self._card_dragged=False;return True
         return False
     def card_pointer_move(self,event):

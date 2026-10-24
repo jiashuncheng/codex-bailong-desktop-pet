@@ -27,14 +27,19 @@ class TokenPlot(QWidget,RasterChart):
         self.setAccessibleName('Codex Token '+('小时曲线' if s['mode']=='line' else '用量柱状图'))
         self.setAccessibleDescription(description);self.setToolTip(description);self.update()
 
-    def chart_rect(self):return QRectF(2,18,max(1,self.width()-4),max(5,self.height()-31))
+    def chart_rect(self):
+        # Both the title and the mixed Chinese/numeric axis use the shared
+        # small-text font. Reserve its actual height instead of a 12px strip.
+        line_height=QFontMetrics(font(11)).height()
+        top=max(18,line_height+3);bottom=line_height+3
+        return QRectF(2,top,max(1,self.width()-4),max(5,self.height()-top-bottom))
     def chart_mode(self):return self.series['mode']
     trace_color='#8d76ab'
     def paintEvent(self,event):self.paint_layers()
     def render_layers(self,p,dynamic):
         s=self.series;w=self.width();h=self.height();p.setFont(font(11,True));p.setPen(INK)
         title=s['title']+' · '+compact_tokens(s['total']) if s['available'] else ('暂不可用' if self.snapshot.get('unavailable') else '统计中…')
-        p.drawText(QRectF(0,0,w,15),Qt.AlignmentFlag.AlignCenter,QFontMetrics(p.font()).elidedText(title,Qt.TextElideMode.ElideRight,w))
+        p.drawText(QRectF(0,0,w,max(16,QFontMetrics(p.font()).height())),Qt.AlignmentFlag.AlignCenter,QFontMetrics(p.font()).elidedText(title,Qt.TextElideMode.ElideRight,w))
         plot=self.chart_rect();bottom=plot.bottom();bins=s['bins'];top=max((b['value'] for b in bins if not b['future']),default=0)
         p.setPen(QPen(QColor('#d8cde3'),.8));p.drawLine(QPointF(plot.left(),bottom),QPointF(plot.right(),bottom))
         p.setPen(QPen(QColor('#e9e1f0'),.6));p.drawLine(QPointF(plot.left(),plot.top()),QPointF(plot.right(),plot.top()))
@@ -67,10 +72,11 @@ class TokenPlot(QWidget,RasterChart):
                 fill=QPainterPath(path);fill.lineTo(last.x(),bottom);fill.lineTo(self.points[0].x(),bottom);fill.closeSubpath()
                 p.fillPath(fill,QColor('#e3d7ef'));p.setPen(QPen(QColor('#8d76ab'),1.8,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin));p.drawPath(path)
             left,right='00时','24时'
-        p=static;p.setFont(font(10,True));p.setPen(MUTED)
-        p.drawText(QRectF(0,h-12,w/2,12),Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter,left)
-        p.drawText(QRectF(w/2,h-12,w/2,12),Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter,right)
-        if s['mode']=='line':p.drawText(QRectF(w/2-14,h-12,28,12),Qt.AlignmentFlag.AlignCenter,'12')
+        p=static;p.setFont(font(11));p.setPen(MUTED)
+        label_height=QFontMetrics(p.font()).height()+2;label_top=h-label_height
+        p.drawText(QRectF(0,label_top,w/2,label_height),Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter,left)
+        p.drawText(QRectF(w/2,label_top,w/2,label_height),Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter,right)
+        if s['mode']=='line':p.drawText(QRectF(w/2-14,label_top,28,label_height),Qt.AlignmentFlag.AlignCenter,'12')
         if s['available'] and not top:
             p.setFont(font(10,True));p.setPen(MUTED);p.drawText(plot,Qt.AlignmentFlag.AlignCenter,'暂无用量')
 
@@ -103,7 +109,7 @@ class TokenChartCard(QWidget):
             button.setAccessibleName(tip);button.setCheckable(True);button.setChecked(self.period==key);button.setMinimumWidth(0)
             button.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed)
             button.setFocusPolicy(Qt.FocusPolicy.NoFocus);button.setCursor(Qt.CursorShape.PointingHandCursor);button.setFixedHeight(18)
-            button.setStyleSheet('QToolButton{'+FONT_CSS+'font-size:10px;font-weight:700;color:#76638c;border:0;padding:0;background:transparent;border-radius:4px;}QToolButton:checked{background:#e8def0;color:#514360;}QToolButton:hover{background:#eee7f5;}')
+            button.setStyleSheet('QToolButton{'+FONT_CSS+'font-size:11px;font-weight:500;color:#76638c;border:0;padding:0;background:transparent;border-radius:4px;}QToolButton:checked{background:#e8def0;color:#514360;}QToolButton:hover{background:#eee7f5;}')
             button.clicked.connect(lambda checked=False,k=key:self.rangeChanged.emit(k));row.addWidget(button,1);self.range_buttons[key]=button
         layout.addWidget(tabs);self.plot=TokenPlot(snapshot,self.period,self,now);layout.addWidget(self.plot,1)
         self.setAccessibleName(self.plot.accessibleName());self.setAccessibleDescription(self.plot.accessibleDescription())

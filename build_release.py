@@ -7,12 +7,59 @@ from desktop_core import VERSION
 from desktop_services import all_items
 from sustained_assets import seam_items
 from release_version import validate_new_version
+def ssl_runtime_data(ssl_module=None):
+    """Preserve data referenced by the build interpreter's SSL implementation."""
+    import ssl
+    module=Path(ssl_module or ssl.__file__)
+    certificate=module.with_name('codex-rejected-cas.pem')
+    if certificate.is_file():return ['--add-data',str(certificate)+';.']
+    if 'codex-rejected-cas.pem' in module.read_text(encoding='utf-8'):
+        raise OSError('构建运行时缺少必需的TLS证书数据，已停止构建')
+    return []
+
+def build_windows_bundle(version):
+    """Create the user-facing Windows ZIP (installer plus docs) and combined checksums."""
+    output=ROOT/'release';name=f'bailong-desktop-pet-{version}-windows-x64.zip'
+    installer=output/f'白龙桌宠-{version}-一键部署.exe'
+    assets={
+        '安装管理.cmd':ROOT/'发布说明/安装管理.cmd',
+        '快速部署说明.txt':ROOT/'发布说明/快速部署说明.txt',
+        '新增功能说明.txt':ROOT/'发布说明/新增功能说明.txt',
+        '迭代历史.txt':ROOT/'发布说明/迭代历史.txt',
+        '本次更新说明.md':ROOT/'发布说明'/f'v{version}.md',
+        '来源与授权说明.txt':ROOT/'发布说明/来源与授权说明.txt',
+        '原项目素材说明.txt':ROOT/'app/licenses/upstream-v0.4.1-assets.txt',
+        installer.name:installer,
+    }
+    hashes={}
+    for label,path in assets.items():
+        path=Path(path)
+        if path.is_symlink() or not path.is_file() or path.stat().st_size==0:raise FileNotFoundError(f'发布ZIP缺少必需文件: {label}')
+        with path.open('rb') as stream:hashes[label]=hashlib.file_digest(stream,'sha256').hexdigest()
+    archive=output/name;temp=archive.with_suffix('.zip.tmp');folder=f'白龙桌宠-{version}-一键部署包'
+    with zipfile.ZipFile(temp,'w',zipfile.ZIP_DEFLATED,compresslevel=3) as z:
+        for label,path in assets.items():z.write(path,f'{folder}/{label}')
+        z.writestr(f'{folder}/SHA256.json',json.dumps(hashes,ensure_ascii=False,indent=2))
+    temp.replace(archive)
+    with archive.open('rb') as stream:full_sha=hashlib.file_digest(stream,'sha256').hexdigest()
+    sums=output/'SHA256SUMS.txt';records={name:full_sha}
+    for asset in (f'bailong-desktop-pet-{version}-program.zip',f'bailong-desktop-pet-{version}-program.json'):
+        path=output/asset
+        if not path.is_file() or path.stat().st_size==0:raise FileNotFoundError(f'发布校验清单缺少必需文件: {asset}')
+        with path.open('rb') as stream:records[asset]=hashlib.file_digest(stream,'sha256').hexdigest()
+    sums.write_text(''.join(digest+'  '+asset+'\n' for asset,digest in sorted(records.items())),encoding='utf-8')
+    Path(str(archive)+'.sha256').write_text(full_sha+'  '+archive.name+'\n',encoding='utf-8')
+    return archive
+
 def build(legacy_formats=False,application_only=True):
     validate_new_version(VERSION)
     from build_materials import build as build_materials,DEST
     catalog=build_materials()
-    subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--windowed','--onedir','--name','BailongEnhanced','--distpath','release','--workpath','build','--specpath','build','--paths','app','--exclude-module','imageio_ffmpeg','app/enhanced.py'],cwd=ROOT,check=True)
+    tls_data=ssl_runtime_data()
+    subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--windowed','--icon',str(ROOT/'app/branding/bailong.ico'),'--onedir','--name','BailongEnhanced','--distpath','release','--workpath','build','--specpath','build','--paths','app','--exclude-module','imageio_ffmpeg',*tls_data,'app/enhanced.py'],cwd=ROOT,check=True)
     release=ROOT/'release/BailongEnhanced'
+    (release/'app/branding').mkdir(parents=True,exist_ok=True)
+    shutil.copy2(ROOT/'app/branding/bailong.ico',release/'app/branding/bailong.ico')
     from package_trim import trim_qt
     trimmed=trim_qt(release)
     (ROOT/'包体优化/依赖裁剪验收.json').write_text(json.dumps(trimmed,ensure_ascii=False,indent=2),encoding='utf-8')
@@ -114,8 +161,9 @@ def build(legacy_formats=False,application_only=True):
             if path.is_file():archive.write(path,path.relative_to(release))
     if legacy_formats:
         shutil.copy2(payload,ROOT/f'release/白龙桌宠-{VERSION}-便携版.zip')
-        subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--windowed','--onefile','--name',f'白龙桌宠-{VERSION}-安装程序','--distpath','release','--workpath','build/installer','--specpath','build','--exclude-module','imageio_ffmpeg','--add-data',str(payload)+';.','app/installer.py'],cwd=ROOT,check=True)
-    subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--windowed','--onefile','--name',f'白龙桌宠-{VERSION}-一键部署','--distpath','release','--workpath','build/quick-installer','--specpath','build','--exclude-module','imageio_ffmpeg','--add-data',str(payload.resolve())+';.','app/installer.py'],cwd=ROOT,check=True)
+        subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--windowed','--icon',str(ROOT/'app/branding/bailong.ico'),'--onefile','--name',f'白龙桌宠-{VERSION}-安装程序','--distpath','release','--workpath','build/installer','--specpath','build','--exclude-module','imageio_ffmpeg',*tls_data,'--add-data',str(payload)+';.','app/installer.py'],cwd=ROOT,check=True)
+    subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--windowed','--icon',str(ROOT/'app/branding/bailong.ico'),'--onefile','--name',f'白龙桌宠-{VERSION}-一键部署','--distpath','release','--workpath','build/quick-installer','--specpath','build','--exclude-module','imageio_ffmpeg',*tls_data,'--add-data',str(payload.resolve())+';.','app/installer.py'],cwd=ROOT,check=True)
+    build_windows_bundle(VERSION)
     files={}
     for p in (ROOT/'release').iterdir():
         if p.is_file() and p.name!='SHA256.json':

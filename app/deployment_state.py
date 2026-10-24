@@ -87,6 +87,11 @@ def stop_version(exe):
 
 def recover(root,system=False):
     root=Path(root).resolve();path=root/'deployment-journal.json'
+    maintenance=root/'maintenance-journal.json'
+    if maintenance.exists():
+        record=json.loads(maintenance.read_text(encoding='utf-8'))
+        if record.get('operation')!='rollback':raise ValueError('维护恢复记录无效')
+        restore_entries(root,record['snapshot'],system);maintenance.unlink()
     if not path.exists():return False
     journal=json.loads(path.read_text(encoding='utf-8'));dest=owned_destination(root,journal['new_version'])
     if journal.get('phase')=='committed':
@@ -95,6 +100,13 @@ def recover(root,system=False):
         path.unlink();return True
     stop_version(dest/'BailongEnhanced.exe')
     restore_entries(root,journal['snapshot'],system)
+    if journal.get('data_backup'):
+        from installer import DATA,ROOT
+        from directory_deploy import restore_data
+        target=Path(journal['data_root']).absolute()
+        expected=DATA.absolute() if root==ROOT.resolve() else root/'user-data'
+        if target!=expected:raise ValueError('用户数据恢复目录无效')
+        restore_data(target,journal['data_backup'],root)
     # Both entry restoration and boundary validation complete before removal.
     if dest.exists():shutil.rmtree(dest)
     from shared_assets import cleanup_new

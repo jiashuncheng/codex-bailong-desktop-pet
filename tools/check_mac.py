@@ -22,8 +22,11 @@ MODULES = [
     'test_sustained_player', 'test_personal_scroll',
     'test_read_completion', 'test_bridge_names', 'test_conversation_rows',
     'test_material_store', 'test_material_controller', 'test_continuous_work',
-    'test_daily_report', 'test_independent_cards', 'test_status_indicator',
+    'test_daily_report', 'test_independent_cards', 'test_companion_options', 'test_status_indicator',
     'test_reset_card','test_reset_presentation','test_shortcuts_startup',
+    'test_reset_watch','test_reset_recovery','test_audit_fixes','test_chat_config',
+    'test_chat_config_ui','test_chat_transport','test_typography','test_liquid_status',
+    'test_release_retention','test_local_workflow',
 ]
 
 
@@ -57,7 +60,7 @@ def main():
     if args.require_assets:result['passed'] &= not missing
     modules=[m for m in MODULES if m!='test_mac_platform' or sys.platform=='darwin']
     if args.without_assets or missing:
-        modules=[m for m in modules if m!='test_independent_cards']
+        modules=[m for m in modules if m not in ('test_independent_cards','test_companion_options')]
         modules=['test_shortcuts_startup.StartupTests' if m=='test_shortcuts_startup' else m for m in modules]
     for module in modules + ['bridge-regressions']:
         with tempfile.TemporaryDirectory(prefix='bailong-mac-check-') as temp:

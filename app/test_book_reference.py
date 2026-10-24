@@ -36,7 +36,9 @@ class BookReferenceTests(unittest.TestCase):
             self.assertEqual(r.scroll.verticalScrollBar().maximum(),0)
             fresh=sample();fresh['report']['all_total']*=2;r.set_snapshot(fresh)
             self.assertEqual(r.book_index,(old+1)%len(catalog()['books']));self.assertIs(r.plot,plot)
-            self.assertEqual(r.note_label.font().pixelSize(),10)
+            self.assertGreaterEqual(r.note_label.font().pixelSize(),11)
+            self.assertLess(r.note_label.font().pixelSize(),r.hour_total.font().pixelSize())
+            self.assertTrue(r.scroll.viewport().rect().contains(r.note_label.mapTo(r.scroll.viewport(),r.note_label.rect().bottomRight())))
         finally:r.close();b.close();b.deleteLater();APP.processEvents()
     def test_reopening_randomizes_book_without_repeating_previous_and_reversal_does_not(self):
         from unittest.mock import patch

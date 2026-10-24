@@ -86,7 +86,8 @@ class ResetTests(unittest.TestCase):
             def __enter__(self):return self
             def __exit__(self,*args):pass
             def read(self,size):return b'{"events":[],"scheduled":null}'
-        with patch('urllib.request.urlopen',return_value=Response()) as open_url:
+        with patch('urllib.request.build_opener') as factory:
+            open_url=factory.return_value.open;open_url.return_value=Response()
             fetch_feed()
             req=open_url.call_args.args[0]
             self.assertEqual(req.full_url,API_URL)
@@ -95,3 +96,44 @@ class ResetTests(unittest.TestCase):
             self.assertFalse(any(k.lower() in ('authorization','cookie') for k,v in req.header_items()))
 
 if __name__=='__main__':unittest.main()
+
+class LocalEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        from reset_watch import LocalResetEvidence
+        self.tmp=tempfile.TemporaryDirectory();self.path=Path(self.tmp.name)/'local.json';self.t=LocalResetEvidence(self.path)
+        self.pending={'pending':dict(id='notice',announced=100,scheduled=190,reset_type='regular')}
+    def tearDown(self):self.tmp.cleanup()
+    def observe(self,value,stamp,when,source='live',name='一周'):
+        self.t.observe([dict(name=name,remaining=value,resetsAt=stamp)],when,source)
+    def test_refill_lowers_priority_persists_and_keeps_announcement(self):
+        from reset_watch import locally_reset,reset_has_priority,LocalResetEvidence
+        from reset_presentation import reset_view
+        self.observe(40,900,150);self.observe(100,900,200)
+        snap=self.t.decorate(self.pending)
+        self.assertTrue(locally_reset(snap));self.assertFalse(reset_has_priority(snap));self.assertIsNotNone(pending_reset(snap))
+        self.assertEqual(reset_view(snap,now=210)['phase'],'local_reset')
+        self.assertTrue(locally_reset(LocalResetEvidence(self.path).decorate(self.pending)))
+        newer={'pending':dict(self.pending['pending'],id='next',announced=220)}
+        self.assertTrue(reset_has_priority(self.t.decorate(newer)))
+    def test_first_observation_and_small_changes_are_not_reset(self):
+        from reset_watch import reset_has_priority
+        self.observe(100,900,150);self.observe(95,900,160);self.observe(99,900,200)
+        self.assertTrue(reset_has_priority(self.t.decorate(self.pending)))
+    def test_session_history_and_out_of_order_live_cannot_confirm(self):
+        from reset_watch import reset_has_priority
+        self.observe(40,900,150);self.observe(100,1000,200,'session');self.observe(100,1000,140)
+        self.assertTrue(reset_has_priority(self.t.decorate(self.pending)))
+    def test_real_period_rollover_can_reset_even_after_new_usage(self):
+        from reset_watch import locally_reset
+        self.observe(95,180,150);self.observe(90,900,200)
+        self.assertTrue(locally_reset(self.t.decorate(self.pending)))
+    def test_five_hour_reset_does_not_override_known_weekly_window(self):
+        from reset_watch import reset_has_priority
+        for value,when in [(40,150),(100,200)]:
+            self.t.observe([dict(name='5小时',remaining=value,resetsAt=when+100),dict(name='一周',remaining=50,resetsAt=900)],when,'live')
+        self.assertTrue(reset_has_priority(self.t.decorate(self.pending)))
+    def test_no_weekly_uses_five_hour_and_banked_notice_is_not_assumed(self):
+        from reset_watch import locally_reset,reset_has_priority
+        self.observe(20,180,150,name='5小时');self.observe(100,900,200,name='5小时')
+        self.assertTrue(locally_reset(self.t.decorate(self.pending)))
+        self.assertTrue(reset_has_priority(self.t.decorate({'pending':dict(self.pending['pending'],reset_type='banked')})))

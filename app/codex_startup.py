@@ -155,3 +155,15 @@ def main():
     finally:kernel.CloseHandle(handle)
     if replacement and enabled():spawn(replacement+[WATCH_FLAG])
     return 0
+
+
+class ExitGate:
+    """Only close after this run actually observed Codex, never on unknown data."""
+    def __init__(self):self.reset()
+    def reset(self):self.seen=False;self.absent=0
+    def observe(self,current):
+        if current is None:self.absent=0;return False
+        if current:self.seen=True;self.absent=0;return False
+        if not self.seen:return False
+        self.absent+=1
+        return self.absent>=3

@@ -1,3 +1,7 @@
+# 跨平台源码开发
+
+Windows / macOS 运行入口为 `run_source.py`，日常启动使用 `launch.py` 或对应的一键脚本。Python 3.12 / 3.13，运行依赖见 `requirements-source.txt`。使用方式、素材与同步说明见 [跨平台源码使用](跨平台源码使用.md)。下文保留 Windows 冻结构建流程；该流程的打包和实机验证需单独执行。
+
 # 开发与构建
 
 Windows x64，Python 3.12（当前本地冻结环境为3.12.14）。先安装 requirements-enhanced.txt，所有命令从仓库根目录执行。原项目与授权边界见根目录 NOTICE.md。
@@ -13,6 +17,8 @@ Git不保存大型动画。安装正式版本后，在设置中下载高清素�
 `python app/enhanced.py` 运行源码；会使用本用户桌宠数据，测试请隔离LOCALAPPDATA/CODEX_HOME，避免与正在运行的正式程序混用。
 
 `python build_local.py --build-only` 完整检查并构建应用目录；`python build_local.py --deploy-verified` 实装刚验证且源码未变的构建，备份用户数据并保留回退。默认不生成公开安装器或ZIP。完整历史回归需要开发素材和夹具，干净仓库不能宣称全量708项都可直接运行。
+
+最终EXE另做离线TLS初始化自检，要求证书和主机名校验开启。构建工具会保留解释器SSL实现依赖的附属数据文件；不要用关闭验证来替代补齐运行依赖。
 
 `python build_release.py` 仅构建应用目录，不改变本机安装。公开发布时显式运行 `python build_release.py --package`，生成默认轻量载荷、程序小包及一键部署EXE；完整Windows下载ZIP还需加入部署文档并验证。`python check_bundle.py` 比对编译模块。输出与缓存不提交Git。
 

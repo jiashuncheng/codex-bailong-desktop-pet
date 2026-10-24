@@ -11,6 +11,13 @@ class RetentionTests(unittest.TestCase):
         for n in (self.old,self.new,'白龙桌宠-0.6.26-归档.exe'):(self.root/'release'/n).write_bytes(b'fixture')
         self.proof=dict(passed=True,version='0.6.28',compiledCodeVerified=True,installationVerified=True,zipVerified=True,volumesVerified=True)
     def run_replace(self):return replace_previous(self.root,'0.6.28',[self.new],self.proof)
+    def test_program_artifacts_are_replaced_and_registered_with_full_package(self):
+        old='bailong-desktop-pet-0.6.27-program.zip';new='bailong-desktop-pet-0.6.28-program.zip'
+        for name in (old,new):(self.root/'release'/name).write_bytes(b'program')
+        policy=json.loads(self.policy.read_text(encoding='utf8'));policy['replaceableProgramArtifacts']=[old];self.policy.write_text(json.dumps(policy),encoding='utf8')
+        replace_previous(self.root,'0.6.28',[self.new,new],self.proof)
+        self.assertFalse((self.root/'release'/old).exists());self.assertTrue((self.root/'release'/new).exists())
+        self.assertEqual(json.loads(self.policy.read_text(encoding='utf8'))['replaceableProgramArtifacts'],[new])
     def test_failed_verification_or_missing_new_artifact_preserves_previous(self):
         self.proof['zipVerified']=False
         with self.assertRaises(ValueError):self.run_replace()
@@ -34,6 +41,7 @@ class RetentionTests(unittest.TestCase):
             self.policy.write_text(json.dumps(dict(currentReplaceableVersion='0.6.27',replaceableArtifacts=[self.old,invalid])),encoding='utf-8')
             with self.assertRaises(ValueError):self.run_replace()
             self.assertTrue((self.root/'release'/self.old).exists())
+    @unittest.skipUnless(__import__('os').name=='nt','Windows directory junction')
     def test_directory_junction_is_rejected_before_deletion(self):
         import subprocess
         outside=self.root/'outside';outside.mkdir();(outside/'keep').write_text('keep')

@@ -28,8 +28,14 @@ def month_bounds(now=None):
 
 class TokenUsageIndex:
     def __init__(self,path,home=None):
-        self.path=Path(path);self.path.parent.mkdir(parents=True,exist_ok=True)
+        self.path=Path(path);self.path.parent.mkdir(parents=True,exist_ok=True);self.legacy_path=self.path
         self.home=__import__('codex_connection').data_home(home)
+        # Each selected source has an independent index; retain the old database
+        # untouched rather than guessing which mixed historical rows belong here.
+        import hashlib,os
+        source=os.path.normcase(str(self.home.resolve()))
+        key=hashlib.sha256(source.encode('utf-8')).hexdigest()[:16]
+        self.path=self.path.with_name(self.path.stem+'-source-'+key+self.path.suffix)
         self.format_known={}
         from log_catalog import LogCatalog
         self.catalog=LogCatalog(self.home)
@@ -41,7 +47,40 @@ class TokenUsageIndex:
         db.execute('CREATE INDEX IF NOT EXISTS usage_stamp ON usage(stamp)')
         from token_analytics import migrate
         migrate(db)
+        db.execute('CREATE TABLE IF NOT EXISTS source_identity (home TEXT PRIMARY KEY)')
+        if not db.execute('SELECT 1 FROM source_identity').fetchone():
+            self.import_legacy(db)
+            db.execute('INSERT INTO source_identity VALUES(?)',(str(self.home),));db.commit()
         return db
+
+    def import_legacy(self,db):
+        """Attribute retained history using file/session metadata; never move the old DB."""
+        if not self.legacy_path.is_file():return
+        savepoint=False
+        try:
+            with closing(sqlite3.connect(self.legacy_path.resolve().as_uri()+'?mode=ro',uri=True,timeout=3)) as old:
+                columns=[r[1] for r in old.execute('PRAGMA table_info(files)')]
+                if not {'path','session'}<=set(columns):return
+                db.execute('SAVEPOINT legacy_copy');savepoint=True
+                owned=set()
+                for row in old.execute('SELECT * FROM files'):
+                    record=dict(zip(columns,row))
+                    if not Path(record['path']).resolve().is_relative_to(self.home):continue
+                    if record['session']:owned.add(record['session'])
+                    names=[c for c in ('path','offset','highwater','session','model','turn','input_water','output_water') if c in record]
+                    db.execute('INSERT OR IGNORE INTO files ('+','.join(names)+') VALUES ('+','.join('?' for _ in names)+')',tuple(record[c] for c in names))
+                for table in ('usage','messages'):
+                    columns=[r[1] for r in old.execute('PRAGMA table_info('+table+')')]
+                    if 'session' not in columns:continue
+                    allowed={r[1] for r in db.execute('PRAGMA table_info('+table+')')};names=[c for c in columns if c in allowed]
+                    query='INSERT OR IGNORE INTO '+table+' ('+','.join(names)+') VALUES ('+','.join('?' for _ in names)+')'
+                    for row in old.execute('SELECT '+','.join(names)+' FROM '+table):
+                        if row[names.index('session')] in owned:db.execute(query,row)
+                db.execute('RELEASE legacy_copy');savepoint=False
+        except (sqlite3.DatabaseError,OSError,ValueError,TypeError):
+            if savepoint:db.execute('ROLLBACK TO legacy_copy');db.execute('RELEASE legacy_copy')
+            # A damaged or older index is retained for recovery; logs rebuild it.
+            return
 
     def scan_file(self,db,path,stop):
         from token_analytics import scan_file

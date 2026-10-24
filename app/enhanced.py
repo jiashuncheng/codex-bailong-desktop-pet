@@ -147,6 +147,9 @@ class ActivityThread(QThread):
         try:
             snapshot=self.token_index.poll(stop=self.stop.is_set)
             if not self.stop.is_set():
+                from token_sync import apply_sync
+                snapshot=apply_sync(snapshot,STATE_DIR,self.token_index.home,self.stop.is_set)
+            if not self.stop.is_set():
                 terminal={'kind':'token_usage','snapshot':snapshot,'run_id':run}
                 code=('token_schema' if snapshot.get('format_unknown') else 'token_missing') if snapshot.get('unavailable') else 'token_cached' if snapshot.get('readable_files')==0 else 'token_partial' if snapshot.get('partial') else 'ok'
                 state='unavailable' if snapshot.get('unavailable') else 'degraded' if code!='ok' else 'available'

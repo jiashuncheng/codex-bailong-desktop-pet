@@ -4,7 +4,7 @@
 
 在 Windows 和 Mac 上使用同一份 Python 源码，查看 Codex 任务状态、接收完成提醒、统计额度与 Token，并与白龙互动。保留源码和一键执行脚本，方便后续修改、更新及两端同步。
 
-**当前版本：v0.9.4 / UI83**。已合入 [Wunsch2048 增强版](https://github.com/Wunsch2048/codex-bailong-desktop-pet) 的 v0.9.3 及其后构建修复，基线提交 `76a2ee3`；同时保留本仓库的个性化功能和 Mac 适配。角色与原始桌宠来自 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet)。
+**当前版本：v0.9.5 / UI84**。已合入 [Wunsch2048 增强版](https://github.com/Wunsch2048/codex-bailong-desktop-pet) 的 v0.9.3 及其后构建修复，基线提交 `76a2ee3`；同时保留本仓库的个性化功能和 Mac 适配。角色与原始桌宠来自 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet)。
 
 [源码使用与更新](docs/跨平台源码使用.md) · [上游 v0.9.3 更新](docs/releases/v0.9.3.md) · [来源与授权](NOTICE.md) · [反馈问题](https://github.com/jiashuncheng/codex-bailong-desktop-pet/issues)
 
@@ -19,6 +19,7 @@
 | 点击人物随机动作 | 主动点击时，排除拖拽和落地，将其余 23 个逻辑动作随机洗牌，每轮各选一次；两轮交界不连续重复同一动作，保留原有播放边界与声音规则 |
 | 本地高清素材接入 | 导入已下载的 720px 高清包，逐文件校验并建立独立快照；有完整轻量素材时支持部分高清回退，补齐后再次更新即可 |
 | Mac 系统集成 | 适配应用发现、登录启动、系统钥匙串、菜单栏及基于辅助功能的视频全屏让位 |
+| 多端 Token 去重同步 | Windows / Mac 与远程 Linux 向私人 ECS 上报统计计数，按会话累计值去重；支持断线补传、全端/本机切换及独立设备配对。详见[多端 Token 同步](docs/多端Token同步.md) |
 | 安全同步源码 | 从本人的 fork 快进更新；工作区有未提交修改或历史分叉时停止，避免覆盖本地修改；更新后自动重启 |
 
 ## 已合入的上游新功能
@@ -61,6 +62,8 @@ Git 不保存大型动画。首次没有素材时，启动脚本会提示选择�
 ### Codex 与 SSH
 
 先在本机安装、登录并使用 Codex。没有状态时，在设置的 Codex 页检测连接，必要时选择本机 CLI 与数据目录。
+
+多端 Token 在设置 → Codex → 多端 Token 同步中配置。已有设备导出一次性连接文件，另一台导入后即可加入，访问凭据不通过 Git 传递。远程 Linux 单独运行轻量采集器，详情见[同步部署说明](docs/多端Token同步.md)。
 
 远程会话在同一页的 SSH 区域配置：使用本机能够免交互连接的 SSH 别名，远端 Linux 需要 `python3`。SSH 只回传远端会话状态，不把远端状态冒充本机 Token 用量；SSH 密钥与认证由各台电脑自行配置。
 

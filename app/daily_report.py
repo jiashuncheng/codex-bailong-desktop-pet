@@ -32,9 +32,9 @@ class OverviewStats(QWidget):
         p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing);r=self.report
         cells=[('会话数',f"{r.get('sessions',0):,}"),('活跃天数',str(r.get('active_days',0))),
                ('Token 总量',compact_tokens(r.get('all_total',0))),('最常用模型',r.get('favorite_model','暂无记录')),
-               ('消息数',f"{r.get('messages',0):,}"),('高峰时段',f"{r['peak_hour']:02}:00–{r['peak_hour']+1:02}:00" if r.get('peak_hour') is not None else '暂无用量')]
+               ('消息数','未同步' if r.get('messages_available') is False else f"{r.get('messages',0):,}"),('高峰时段',f"{r['peak_hour']:02}:00–{r['peak_hour']+1:02}:00" if r.get('peak_hour') is not None else '暂无用量')]
         width=(self.width()-4)/2
-        p.setPen(QColor(PRIMARY));p.setFont(font(11));p.drawText(QRectF(1,0,self.width()-2,16),Qt.AlignmentFlag.AlignVCenter,'累计 · 本机记录')
+        p.setPen(QColor(PRIMARY));p.setFont(font(11));p.drawText(QRectF(1,0,self.width()-2,16),Qt.AlignmentFlag.AlignVCenter,'累计 · 多端去重' if r.get('scope')=='all' else '累计 · 本机记录')
         p.drawText(QRectF(1,100,self.width()-2,16),Qt.AlignmentFlag.AlignVCenter,'昨日 · '+r.get('day','--'))
         for i,(label,value) in enumerate(cells):
             rect=QRectF((i%2)*(width+4),18+(i//2)*41+(18 if i>=4 else 0),width,37)
@@ -276,6 +276,11 @@ class DailyReport(QWidget):
             self.model_rows.append(row);self.model_layout.addWidget(row);row.show()
         if not self.model_rows:self.model_layout.addWidget(self.label('该时间范围内暂无模型用量',11))
     def _note(self,r):
+        if self.snapshot.get('scope')=='all':
+            return ('多端去重汇总 · '+str(len(self.snapshot.get('devices',[])))+' 台设备 · 输入含缓存，输出含推理。'
+                    +(' 离线缓存，待联网更新。' if self.snapshot.get('sync_stale') else '')
+                    +(' 正在补传历史记录。' if self.snapshot.get('sync_more') else '')
+                    +' 消息正文不上传，消息数不汇总。')
         if self.snapshot.get('unavailable'):return '当前统计暂不可用；图中保留上次成功的本机记录。'
         if self.snapshot.get('readable_files')==0:return '源日志暂不可读；显示本机历史统计，近期用量可能不完整。'
         if self.page=='overview':

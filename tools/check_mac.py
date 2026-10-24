@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'app'))
 
 MODULES = [
-    'test_mac_platform', 'test_source_platform', 'test_quota_summary_data', 'test_spring_motion',
+    'test_token_sync', 'test_mac_platform', 'test_source_platform', 'test_quota_summary_data', 'test_spring_motion',
     'test_status_reactions.SchedulerTests', 'test_ring_metrics', 'test_work_actions',
     'test_sustained_reactions', 'test_soft_curves_navigation', 'test_release_version',
     'test_app_updates.ReleaseTests', 'test_app_updates.StagingTests', 'test_loop_cache', 'test_decoder_runtime', 'test_animation_quality',
@@ -44,7 +44,7 @@ def main():
         return 0 if report['cli_found'] and report['home_exists'] else 1
     began = time.monotonic()
     result = dict(platform=sys.platform, python=sys.version.split()[0], passed=True, modules=[], tests=0)
-    for folder in ('app', 'tools', 'ssh-bridge'):
+    for folder in ('app', 'tools', 'ssh-bridge', 'sync-service'):
         if not compileall.compile_dir(ROOT / folder, quiet=2):
             result['passed'] = False
     catalog = json.loads((ROOT / 'app/material_catalog.json').read_text())

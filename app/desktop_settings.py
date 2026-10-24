@@ -159,6 +159,9 @@ class SettingsDialog(QDialog):
             from mac_bridge import BridgeSettingsPanel
             self.section(connection,'SSH 远程会话','填写本机已配置且可免交互连接的 SSH 别名。')
             connection.addRow(BridgeSettingsPanel())
+        from token_sync_widgets import TokenSyncPanel
+        self.section(connection,'多端 Token 同步','各设备独立采集，服务端去重汇总；额度仍来自本机账户。')
+        self.token_sync_panel=TokenSyncPanel(pet);connection.addRow(self.token_sync_panel)
         self.path_toggle=QPushButton('连接路径与检测报告');self.path_toggle.setCheckable(True);connection.addRow(self.path_toggle)
         path_body=QWidget();paths=QFormLayout(path_body);paths.setContentsMargins(0,4,0,4)
         from codex_connection import saved_paths,data_home

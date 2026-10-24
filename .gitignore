@@ -34,3 +34,10 @@ ssh-bridge/bridge-config.json
 ssh-bridge/process.json
 ssh-bridge/status.json
 ssh-bridge/stop-request.json
+
+# Device pairing / token sync private state
+*.bailong-sync
+token-sync.json
+token-sync-credentials.json
+token-sync-status.json
+token-sync-cache.json

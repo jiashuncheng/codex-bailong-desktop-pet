@@ -1,6 +1,6 @@
 # 项目协作
 
-这是 Windows/macOS 共用的白龙桌宠个性化源码工程。当前 v0.9.4 / UI83，合入上游 v0.9.3（76a2ee3），保留个人 Windows 修改与 Mac 适配。先阅读 README.md、NOTICE.md、docs/DEVELOPMENT.md 与 docs/迭代历史.txt。
+这是 Windows/macOS 共用的白龙桌宠个性化源码工程。当前 v0.9.5 / UI84，合入上游 v0.9.3（76a2ee3），保留个人 Windows 修改与 Mac 适配。先阅读 README.md、NOTICE.md、docs/DEVELOPMENT.md 与 docs/迭代历史.txt。
 
 - 保持原角色比例、清晰度和动画播放边界；自动动作不发声。
 - 未读完成提醒优先于视频全屏让位；手动关闭置顶不得自动重开。
@@ -23,3 +23,5 @@
 - 源码同步使用个人 fork 的同一分支；sync_source.py 只允许干净工作区上的快进更新，禁止自动 reset 或丢弃用户修改。
 - 用 tools/check_source.py 检查；CI 无动画时加 --without-assets，本机完整轻量素材可加 --require-assets。Mac 窗口变化另运行隔离的 mac_ui_probe.py / mac_focus_probe.py。
 - 测试必须隔离 LOCALAPPDATA / BAILONG_DATA_DIR 和 CODEX_HOME。不提交本机设置、认证、会话、环境与素材缓存，Mac 验收不等同于 Windows 实机验收。
+
+- Token 同步只能传计数与不可逆会话标识，不传原始日志或正文；按会话累计检查点去重，重复、乱序与部分日志不得重复计费。HTTPS 严格验链，访问凭据不得进入 Git。

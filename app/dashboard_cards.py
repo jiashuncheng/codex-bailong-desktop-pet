@@ -57,7 +57,7 @@ class CardDeck(QWidget):
         layout=QVBoxLayout(self);layout.setContentsMargins(5,2,4,2);layout.setSpacing(0)
         tabs=DeckTabs();self.tabs=tabs;row=QHBoxLayout(tabs);row.setContentsMargins(0,0,0,0);row.setSpacing(3)
         for key,text in [('tokens','Token'),('reset','重置')]:
-            button=QToolButton();button.setObjectName('card_'+key);button.setText(text);button.setCheckable(True);button.setChecked(page==key);button.setFocusPolicy(Qt.FocusPolicy.NoFocus);button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button=QToolButton();button.setObjectName('card_'+key);button.setText('全端' if key=='tokens' and (snapshot or {}).get('scope')=='all' else text);button.setCheckable(True);button.setChecked(page==key);button.setFocusPolicy(Qt.FocusPolicy.NoFocus);button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly);button.setFont(font(12,True));button.setFixedSize(45 if key=='tokens' else 35,20)
             button.setToolTip('Token用量柱状图与今日小时曲线' if key=='tokens' else ('有重置公告待落实，点击查看' if reset_has_priority(reset_snapshot) else '查看额外重置公告'))
             accent='#75618d'

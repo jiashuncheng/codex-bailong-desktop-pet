@@ -20,7 +20,9 @@ class TokenPlot(QWidget,RasterChart):
         s=self.series;bucket=s.get('bucket_days',1)
         description=f"{s['title']} · {s['total']:,} Tokens；{s['start']} 至 {s['end']}。"
         description+='每小时消耗，非累计曲线；当天00–24时，当前小时尚未结束。' if s['mode']=='line' else f'每根柱覆盖{bucket}天，悬停查看日期与用量。'
-        description+='仅本机可读取日志；输入含缓存，输出含推理，均不重复相加。'
+        description+=('全部设备 Codex 日志，按会话累计计数去重；' if self.snapshot.get('scope')=='all' else '仅本机可读取日志；')+'输入含缓存，输出含推理，均不重复相加。'
+        if self.snapshot.get('sync_stale'):description+='当前为离线缓存，等待恢复连接。'
+        if self.snapshot.get('sync_more'):description+='正在补传历史记录。'
         if self.snapshot.get('checked'):description+='截至'+datetime.fromtimestamp(self.snapshot['checked']).strftime('%m-%d %H:%M')+'。'
         if not s['available']:description+='统计中或暂不可用。'
         if self.snapshot.get('partial'):description+='部分日志暂不可读。'
@@ -86,7 +88,7 @@ class TokenPlot(QWidget,RasterChart):
         else:value=f"{b['value']:,} Tokens"
         text=b['label']+' · '+value
         if b['current']:text+='\n当前小时尚未结束' if self.series['mode']=='line' else '\n含今天，今日用量仍在更新'
-        return text+'\n本机 Codex 日志 · 输入（含缓存）+ 输出（含推理）'
+        return text+'\n'+self.snapshot.get('source','本机 Codex 日志')+' · 输入（含缓存）+ 输出（含推理）'
     def begin_reveal(self):self.ensure_layers();self.reveal.prepare()
     def start_reveal(self):self.reveal.start()
     def hideEvent(self,event):self.reveal.stop();super().hideEvent(event)
@@ -104,7 +106,7 @@ class TokenChartCard(QWidget):
         self.period=period if period in TOKEN_RANGES else 'all';self.range_buttons={}
         layout=QVBoxLayout(self);layout.setContentsMargins(0,0,0,0);layout.setSpacing(0)
         tabs=QWidget();tabs.setFixedHeight(18);row=QHBoxLayout(tabs);row.setContentsMargins(0,0,0,0);row.setSpacing(1)
-        for key,text,tip in [('all','全部','全部本机记录；较长时间自动合并日期分组'),('30d','30天','最近30天，每天一根柱'),('7d','7天','最近7天，每天一根柱')]:
+        for key,text,tip in [('all','全部','当前统计来源的全部记录；较长时间自动合并日期分组'),('30d','30天','最近30天，每天一根柱'),('7d','7天','最近7天，每天一根柱')]:
             button=QToolButton();button.setObjectName('token_range_'+key);button.setText(text);button.setToolTip(tip)
             button.setAccessibleName(tip);button.setCheckable(True);button.setChecked(self.period==key);button.setMinimumWidth(0)
             button.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed)

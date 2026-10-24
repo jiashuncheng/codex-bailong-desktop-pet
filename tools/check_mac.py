@@ -80,6 +80,7 @@ def main():
             result['tests'] += entry['tests']
             result['passed'] &= entry['passed']
             print(('通过 ' if entry['passed'] else '失败 ') + module + ' · ' + str(entry['tests']) + ' 项', flush=True)
+            if not entry['passed']:print(entry.get('error','检查失败'),flush=True)
     result['seconds'] = round(time.monotonic() - began, 1)
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2))

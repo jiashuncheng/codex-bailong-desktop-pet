@@ -27,10 +27,11 @@ class MaterialController(QObject):
         super().__init__(parent);self.store=store;self.job=None;self.closing=False
         self.state=dict(phase='idle',message='',downloaded=0,total=0)
     def snapshot(self):
-        return dict(self.state,current=self.store.current,hdCached=self.store.available('hd'),supported=bool(self.store.catalog),busy=self.job is not None)
+        info=self.store.local_hd_info()
+        return dict(self.state,current=self.store.current,hdCached=self.store.available('hd'),localHd=self.store.available('local_hd'),fallback=len(info.get('fallback_files',[])),supported=bool(self.store.catalog),busy=self.job is not None)
     def publish(self,**changes):self.state.update(changes);self.changed.emit(self.snapshot())
     def request(self,tier):
-        if self.closing or self.job or self.state['phase']=='pending' or tier not in ('light','hd'):return False
+        if self.closing or self.job or self.state['phase']=='pending' or tier not in ('light','hd','local_hd'):return False
         if tier==self.store.current:self.publish(message='当前已使用所选画质');return False
         self.publish(phase='verifying' if self.store.available(tier) else 'downloading',message='正在准备素材…',downloaded=0,total=0)
         job=self.job=MaterialJob(self.store,tier,self);job.result.connect(self._result);job.failed.connect(lambda text:self.publish(phase='error',message=text));job.progress.connect(self._progress);job.finished.connect(self._finished);self.changed.emit(self.snapshot());job.start();return True
@@ -60,6 +61,7 @@ class MaterialPanel(QWidget):
         layout=QVBoxLayout(self);layout.setContentsMargins(0,0,0,0)
         self.summary=QLabel();self.summary.setWordWrap(True);layout.addWidget(self.summary)
         row=QHBoxLayout();self.choice=QComboBox();self.choice.addItem('轻量 · 512px（默认）','light');self.choice.addItem('高清 · 720px','hd');row.addWidget(self.choice,1)
+        if controller.store.available('local_hd'):self.choice.addItem('本地高清 · 缺失动作使用轻量','local_hd')
         self.action=QPushButton();row.addWidget(self.action);self.cancel_button=QPushButton('取消');row.addWidget(self.cancel_button);layout.addLayout(row)
         self.progress=QProgressBar();self.progress.setRange(0,1000);layout.addWidget(self.progress)
         self.message=QLabel();self.message.setWordWrap(True);layout.addWidget(self.message)
@@ -68,7 +70,8 @@ class MaterialPanel(QWidget):
         self.choice.currentIndexChanged.connect(lambda:self.refresh(controller.snapshot()));self.action.clicked.connect(lambda:controller.request(self.choice.currentData()));self.cancel_button.clicked.connect(controller.cancel)
         controller.changed.connect(self.refresh);self.refresh(controller.snapshot())
     def refresh(self,s):
-        self.summary.setText('当前：'+('高清 · 720px' if s['current']=='hd' else '轻量 · 512px')+('　｜高清已缓存' if s['hdCached'] else '　｜高清未下载'))
+        current={'hd':'高清 · 720px','light':'轻量 · 512px','local_hd':f"本地高清 · {s['fallback']} 个文件使用轻量"}[s['current']]
+        self.summary.setText('当前：'+current+('　｜完整高清已缓存' if s['hdCached'] else '　｜完整高清未下载'))
         tier=self.choice.currentData();busy=s['busy'] or s['phase']=='pending'
         self.choice.setEnabled(not busy);self.action.setEnabled(s['supported'] and not busy and tier!=s['current'])
         self.action.setText('下载并切换高清' if tier=='hd' and not s['hdCached'] else '切换画质')

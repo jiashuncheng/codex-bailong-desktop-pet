@@ -34,18 +34,72 @@ def subagent_sessions(home,ids):
     except (OSError,sqlite3.Error,ValueError):return set()
 
 
+_bridge_name_cache={}
+
+def bridge_conversation_names(home,ids):
+    """Recover SSH titles from append-only bridge logs, even after restart.
+
+    Cache the last complete record offset so growing logs are read incrementally.
+    Only the bridge's own metadata and title records are eligible.
+    """
+    found={};root=Path(home)/'archived_sessions'
+    ids=[sid for sid in ids if re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',sid)]
+    if not ids:return found
+    try:folders=[p for p in root.glob('bailong-remote-*') if p.is_dir() and not p.is_symlink()]
+    except OSError:return found
+    for folder in folders:
+        for sid in ids:
+            if sid in found:continue
+            path=folder/('rollout-remote-'+sid+'.jsonl')
+            try:
+                if path.is_symlink():continue
+                with path.open('rb') as stream:
+                    header_line=stream.readline(16384)
+                    header=json.loads(header_line);meta=header.get('payload') or {}
+                    if header.get('type')!='session_meta' or meta.get('originator')!='BailongSSHBridge' or meta.get('id')!=sid:continue
+                    host=meta.get('remote_host')
+                    if not isinstance(host,str) or folder.name!='bailong-remote-'+host:continue
+                    prefix='['+host+'] '
+                    stat=path.stat();signature=(stat.st_ino,stat.st_size,stat.st_mtime_ns)
+                    old=_bridge_name_cache.get(str(path))
+                    title='';offset=stream.tell()
+                    if old and old['header']==header_line and old['signature']==signature:
+                        if old['title']:found[sid]=old['title']
+                        continue
+                    if old and old['header']==header_line and old['signature'][0]==stat.st_ino and old['signature'][1]<stat.st_size:
+                        title=old['title'];offset=old['offset'];stream.seek(offset)
+                    while True:
+                        line=stream.readline()
+                        if not line or not line.endswith(b'\n'):break
+                        offset=stream.tell()
+                        try:
+                            record=json.loads(line);value=record.get('payload') or {}
+                            if record.get('type')!='response_item' or value.get('type')!='message' or value.get('role')!='user':continue
+                            content=value.get('content')
+                            if not isinstance(content,list):continue
+                            candidate=' '.join(item.get('text','') for item in content if isinstance(item,dict) and item.get('type')=='input_text' and isinstance(item.get('text'),str)).strip()
+                            if candidate.startswith(prefix) and candidate[len(prefix):].strip():title=re.sub(r'\s+',' ',candidate)[:200]
+                        except (ValueError,TypeError,AttributeError):continue
+                if len(_bridge_name_cache)>=256:_bridge_name_cache.pop(next(iter(_bridge_name_cache)))
+                _bridge_name_cache[str(path)]=dict(header=header_line,signature=signature,title=title,offset=offset)
+                if title:found[sid]=title
+            except (OSError,ValueError,TypeError,AttributeError):continue
+    return found
+
+
 def conversation_names(home,ids):
-    """Fetch only display names for tracked sessions from the desktop store."""
+    """Prefer desktop names; restore missing SSH names from bridge logs."""
     ids=list(dict.fromkeys(session_id(sid) for sid in ids if sid))
     if not ids:return {}
+    found={}
     try:
         with closing(sqlite3.connect((Path(home)/'state_5.sqlite').as_uri()+'?mode=ro',uri=True,timeout=.1)) as db:
-            found={}
             for start in range(0,len(ids),128):
                 chunk=ids[start:start+128];rows=db.execute('SELECT id,name,title FROM threads WHERE id IN ('+','.join('?' for _ in chunk)+')',chunk)
                 found.update({sid:(name or title).strip() for sid,name,title in rows if (name or title or '').strip()})
-            return found
-    except (OSError,sqlite3.Error,ValueError):return {}
+    except (OSError,sqlite3.Error,ValueError):pass
+    found.update(bridge_conversation_names(home,[sid for sid in ids if sid not in found]))
+    return found
 
 def read_unread_sessions(home):
     try:

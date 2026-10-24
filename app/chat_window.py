@@ -1,5 +1,6 @@
 """User initiated, OpenAI-compatible SSE chat, separate from Codex monitoring."""
 import copy
+import sys
 import json
 import time
 import uuid
@@ -129,7 +130,7 @@ class ProviderDialog(QDialog):
         self.prompt=QPlainTextEdit();self.prompt.setPlainText(self.config.get('system_prompt',CHAT_DEFAULT['system_prompt']));form.addRow('角色系统提示词',self.prompt)
         self.count=QSpinBox();self.count.setRange(2,200);self.count.setValue(self.config.get('history_messages',40));form.addRow('历史消息上限',self.count)
         self.chars=QSpinBox();self.chars.setRange(1000,200000);self.chars.setSingleStep(1000);self.chars.setValue(self.config.get('history_chars',24000));form.addRow('历史字符上限',self.chars)
-        note=QLabel('仅在你点击发送时请求此服务。Codex 会话不会自动发送。\n密钥使用当前 Windows 用户的 DPAPI 加密保存。');note.setWordWrap(True);note.setStyleSheet('font-size:10px;color:#706879;');layout.addWidget(note)
+        note=QLabel('仅在你点击发送时请求此服务。Codex 会话不会自动发送。\n'+('密钥保存在当前 macOS 用户的系统钥匙串中。' if sys.platform=='darwin' else '密钥使用当前 Windows 用户的 DPAPI 加密保存。'));note.setWordWrap(True);note.setStyleSheet('font-size:10px;color:#706879;');layout.addWidget(note)
         row=QHBoxLayout();save=QPushButton('保存并设为当前服务');save.setProperty('role','primary');save.clicked.connect(self.save);row.addWidget(save)
         clear=QPushButton('清除此服务密钥');clear.setProperty('role','danger');clear.clicked.connect(self.clear_key);row.addWidget(clear);layout.addLayout(row)
         if embedded:
@@ -137,7 +138,7 @@ class ProviderDialog(QDialog):
         self.select.currentIndexChanged.connect(self.change);self.reload()
         for button in self.findChildren(QPushButton):button.setAutoDefault(False)
         from PySide6.QtGui import QShortcut,QKeySequence
-        self.save_shortcut=QShortcut(QKeySequence('Ctrl+S'),self);self.save_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut);self.save_shortcut.activated.connect(self.save)
+        self.save_shortcut=QShortcut(QKeySequence(QKeySequence.StandardKey.Save),self);self.save_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut);self.save_shortcut.activated.connect(self.save)
     def reload(self):
         self.current=None
         self.select.blockSignals(True);self.select.clear()

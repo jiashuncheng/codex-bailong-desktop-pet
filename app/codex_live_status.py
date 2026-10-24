@@ -4,7 +4,7 @@ Codex desktop stream protocol 11 uses four-byte little-endian JSON frames.
 Typed decoding skips unknown fields in C, including reasoning and tool output.
 Only initialize/follow/unfollow and negative discovery responses are sent.
 """
-import ctypes,json,os,struct,threading,time
+import ctypes,json,os,struct,threading,time,sys
 from uuid import UUID
 import msgspec
 
@@ -233,6 +233,8 @@ class LiveStatusReader(threading.Thread):
     def targets(self):
         with self.lock:return self._targets
     def run(self):
+        if sys.platform=='darwin':
+            return self.run_unix()
         if os.name!='nt':self.set_health('unavailable','ipc_disconnected');return
         from ctypes import wintypes
         import msvcrt
@@ -247,6 +249,37 @@ class LiveStatusReader(threading.Thread):
                         return count.value
                     self._listen(pipe,available)
             except (OSError,ValueError,msgspec.MsgspecError):self.set_health('degraded','ipc_disconnected')
+            finally:self.connected=False
+            self.stop_event.wait(5)
+    def run_unix(self):
+        import socket,select,stat
+        from pathlib import Path
+        from codex_connection import data_home
+        class UnixPipe:
+            def __init__(self,connection):self.connection=connection
+            def write(self,data):return self.connection.send(data)
+            def read(self,count):
+                data=self.connection.recv(count)
+                if not data:raise OSError('IPC disconnected')
+                return data
+            def available(self):
+                ready,_,_=select.select([self.connection],[],[],0)
+                if not ready:return 0
+                data=self.connection.recv(1024*1024,socket.MSG_PEEK)
+                if not data:raise OSError('IPC disconnected')
+                return len(data)
+        while not self.stop_event.is_set():
+            try:
+                path=Path(os.environ.get('BAILONG_IPC') or data_home()/'ipc/ipc.sock')
+                info=path.stat()
+                if not stat.S_ISSOCK(info.st_mode) or info.st_uid!=os.getuid():raise OSError('Untrusted IPC socket')
+                with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as connection:
+                    connection.settimeout(2)
+                    connection.connect(str(path))
+                    pipe=UnixPipe(connection)
+                    self._listen(pipe,pipe.available)
+            except (OSError,ValueError,msgspec.MsgspecError):
+                self.set_health('degraded','ipc_disconnected')
             finally:self.connected=False
             self.stop_event.wait(5)
     def _listen(self,pipe,available):

@@ -1,6 +1,6 @@
 # 项目协作
 
-这是 Windows 独立白龙桌宠增强版。当前基线 v0.8.3 / UI73。先阅读 README.md、NOTICE.md、docs/DEVELOPMENT.md 与 docs/迭代历史.txt。
+这是 Windows/macOS 共用的白龙桌宠个性化源码工程。当前开发版 v0.8.4 / UI74，合并 fork v0.8.3、Windows v0.7.9 个性化修改与 Mac 适配。先阅读 README.md、NOTICE.md、docs/DEVELOPMENT.md 与 docs/迭代历史.txt。
 
 - 保持原角色比例、清晰度和动画播放边界；自动动作不发声。
 - 未读完成提醒优先于视频全屏让位；手动关闭置顶不得自动重开。
@@ -18,3 +18,8 @@
 - 默认本地验证与实装，明确发布时才打包。程序小包必须校验素材ID及全体SHA，保留完整包回退；高清资源独立预发布，不占稳定Latest。
 - 解码器取消不得在GUI线程join，队列按实例隔离；帧时钟使用高精度perf_counter，不与业务monotonic绝对值混算。保留原动作尾部与完成优先级。
 - 动画放Release，资源发布工作流仅手动触发；只允许已验证的公开基包和内容哈希匹配的输入，不能发布半包。
+
+- 通用界面、会话、动画与统计共用 app/；系统差异使用 sys.platform 分发。源码入口 run_source.py，冻结 Windows 构建单独验证。
+- 源码同步使用个人 fork 的同一分支；sync_source.py 只允许干净工作区上的快进更新，禁止自动 reset 或丢弃用户修改。
+- 用 tools/check_source.py 检查；CI 无动画时加 --without-assets，本机完整轻量素材可加 --require-assets。Mac 窗口变化另运行隔离的 mac_ui_probe.py / mac_focus_probe.py。
+- 测试必须隔离 LOCALAPPDATA / BAILONG_DATA_DIR 和 CODEX_HOME。不提交本机设置、认证、会话、环境与素材缓存，Mac 验收不等同于 Windows 实机验收。

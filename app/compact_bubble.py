@@ -132,6 +132,7 @@ class Summary(QWidget):
         if event.button()==Qt.MouseButton.LeftButton:self.expand.emit()
 
 class StatusScroller(QLabel):
+    scrollRequested=Signal(int)
     """Persistent clipped viewport: old text moves up, new text enters below.
 
     A burst retains one latest pending message, not an ever-growing queue.
@@ -187,6 +188,12 @@ class StatusScroller(QLabel):
         metrics=QFontMetrics(font(11,True));budget=min(112,round(self.width()*.42))
         self.short_title=metrics.elidedText(title_keywords(self.conversation_title),Qt.TextElideMode.ElideMiddle,max(1,budget-metrics.horizontalAdvance(self.title_suffix)))+self.title_suffix
         self.title_width=metrics.horizontalAdvance(self.short_title)
+    def wheelEvent(self,event):
+        if self.conversation_rows or self.conversation_id:
+            delta=event.angleDelta().y()
+            if delta:self.scrollRequested.emit(1 if delta<0 else -1)
+            event.accept()
+        else:super().wheelEvent(event)
     def set_conversations(self,items,extra=0,full=False,metadata=None):
         """Each session owns its text clock; the parent animates only row layout."""
         items=items[:2];keys=[sid for sid,text in items]
@@ -203,7 +210,7 @@ class StatusScroller(QLabel):
             row=self.rows.get(sid)
             if row is None:
                 row=StatusScroller(self.width(),self);row.single_line=True
-                row.expand.connect(self.expand.emit);row.conversationRequested.connect(self.conversationRequested.emit);self.rows[sid]=row
+                row.expand.connect(self.expand.emit);row.conversationRequested.connect(self.conversationRequested.emit);row.scrollRequested.connect(self.scrollRequested.emit);self.rows[sid]=row
                 start[sid]=index*self.line_height
             row.setFixedWidth(max(1,self.width()-(30 if extra else 0)))
             info=metadata.get(sid,{})
@@ -421,7 +428,14 @@ class CompactBubble(Bubble):
         self.size_transition.animation.finished.connect(self._apply_pending_mode)
         self._redrawing=False;self._fitting_height=False;self.status_view=StatusScroller(248,self);self.status_view.expand.connect(self.toggle_details)
         self.status_view.conversationRequested.connect(self.conversationRequested.emit)
-        self.status_view.overflow.clicked.connect(self.cycle_conversations)
+        self.status_view.overflow.clicked.connect(lambda:self.cycle_conversations())
+        self.status_view.scrollRequested.connect(self.cycle_conversations)
+        self.conversation_auto_scroll=True
+        self.conversation_timer=QTimer(self)
+        self.conversation_timer.setInterval(6000)
+        self.conversation_timer.timeout.connect(self._auto_cycle_conversations)
+        self.conversation_timer.start()
+        self.status_view.setToolTip('每隔 6 秒轮换会话；悬停暂停，滚轮可手动切换')
         self.status_view.heightChanged.connect(self._status_height_changed)
         self.status_view.animation.finished.connect(self._status_height_finished)
         self.setWindowTitle('白龙增强版 · 状态气泡');self.redraw()
@@ -475,6 +489,9 @@ class CompactBubble(Bubble):
         self._editing_flags(True);self.redraw();self.size_transition.commit()
     def _editing_flags(self,editing):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating,not editing)
+        if __import__('sys').platform=='darwin':
+            from mac_native import set_keyboard_input
+            set_keyboard_input(self,editing)
         through=bool(getattr(self.owner_pet(),'settings',{}).get('mouse_through',False)) and not editing
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents,through)
         if self.windowHandle():self.windowHandle().setFlag(Qt.WindowType.WindowTransparentForInput,through)
@@ -770,7 +787,15 @@ class CompactBubble(Bubble):
         if (self.roster.items or self.status_indicator.unread) and not self._roster_pending:
             self._roster_pending=True;QTimer.singleShot(0,self,self._apply_roster)
     def _apply_roster(self):self._roster_pending=False;self.refresh_status()
-    def cycle_conversations(self):self.roster.cycle();self.refresh_status()
+    def _auto_cycle_conversations(self):
+        if not self.conversation_auto_scroll or not self.status_view.isVisible() or not self.status_view.extra:return
+        if self.panel_page!='status' or self.size_transition.running:return
+        from PySide6.QtGui import QCursor
+        if self.status_view.rect().contains(self.status_view.mapFromGlobal(QCursor.pos())):return
+        self.cycle_conversations()
+    def cycle_conversations(self,direction=1):
+        self.roster.cycle(direction);self.refresh_status()
+        self.conversation_timer.start()
     def _quota_reset_due(self,stamp):
         if self._quota_reset_requested is not None and stamp<=self._quota_reset_requested:return
         self._quota_reset_requested=stamp

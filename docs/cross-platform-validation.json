@@ -1,0 +1,79 @@
+{
+  "version": "0.8.4",
+  "ui_revision": 74,
+  "base_fork_commit": "7518c51",
+  "personal_base": "Windows v0.7.9 / UI69 + Mac 0.1.2",
+  "full_local_checks": {
+    "passed": true,
+    "tests": 259,
+    "verified_light_files": 32
+  },
+  "no_assets_checks": {
+    "passed": true,
+    "tests": 246
+  },
+  "mac_native_ui": {
+    "platform": "cocoa",
+    "screens": 2,
+    "dpr": 2.0,
+    "errors": [],
+    "checks": {
+      "normal": true,
+      "report": true,
+      "settings": true,
+      "chat": true,
+      "modes": true
+    },
+    "native_level": 3,
+    "collection_behavior": 337,
+    "passed": true
+  },
+  "mac_keyboard_focus": {
+    "passed": true,
+    "checks": {
+      "pet_rejects_keyboard": true,
+      "status_rejects_keyboard": true,
+      "report_rejects_keyboard": true,
+      "settings_accepts_keyboard": true,
+      "chat_accepts_keyboard": true,
+      "status_rejects_keyboard_again": true,
+      "background_never_key": true,
+      "startup_keeps_external_foreground": true
+    },
+    "native": {
+      "pet_rejects_keyboard": {
+        "can_key": false,
+        "key": false
+      },
+      "status_rejects_keyboard": {
+        "can_key": false,
+        "key": false
+      },
+      "report_rejects_keyboard": {
+        "can_key": false,
+        "key": false
+      },
+      "settings_accepts_keyboard": {
+        "can_key": true,
+        "key": true
+      },
+      "chat_accepts_keyboard": {
+        "can_key": true,
+        "key": true
+      },
+      "status_rejects_keyboard_again": {
+        "can_key": false,
+        "key": false
+      }
+    },
+    "passive_samples": 140,
+    "passive_key_samples": 0,
+    "foreground_not_stolen_at_start": true
+  },
+  "windows_native_desktop_tested": false,
+  "limitations": [
+    "Windows native desktop and browser video playback require separate real-device acceptance.",
+    "Mac Codex launch watcher remains Windows-only; Mac login autostart is available.",
+    "No release installers or animation archives are included in this source change."
+  ]
+}

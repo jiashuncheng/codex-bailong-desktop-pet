@@ -11,7 +11,7 @@ import psutil
 POLL_SECONDS=2
 WATCH_FLAG='--watch-codex'
 
-def data_dir():return Path(os.environ['LOCALAPPDATA'])/'BailongEnhanced'
+def data_dir():return __import__('platform_support').data_dir()
 def install_root():return Path(os.environ['LOCALAPPDATA'])/'Programs/BailongEnhanced'
 def preference_path():return data_dir()/'codex-startup.json'
 def startup_path():return Path(os.environ['APPDATA'])/'Microsoft/Windows/Start Menu/Programs/Startup/BailongCodexSync.vbs'
@@ -27,7 +27,7 @@ def enabled():return read_json(preference_path()).get('enabled') is True
 
 def app_command():
     if getattr(sys,'frozen',False):return [sys.executable]
-    return [str(Path(sys.executable).with_name('pythonw.exe')),str(Path(__file__).with_name('enhanced.py'))]
+    return [str(Path(sys.executable).with_name('pythonw.exe')),str(Path(__file__).resolve().parents[1]/'run_source.py')]
 
 def supports_watcher(exe):
     try:return tuple(map(int,Path(exe).parent.name.split('-')[0].split('.'))) >= (0,8,1)

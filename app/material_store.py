@@ -28,7 +28,7 @@ def hash_file(path,cancel=lambda:False):
 class MaterialStore:
     def __init__(self,app_root,state_dir):
         self.app_root=Path(app_root);self.state=Path(state_dir);self.base=self.app_root/'outputs/白龙桌宠素材'
-        self.cache=self.state/'materials';self.preference=self.state/'material-preferences.json'
+        self.cache=(self.app_root/'materials' if (self.app_root/'portable-materials.json').is_file() else self.state/'materials');self.preference=self.state/'material-preferences.json'
         catalog_path=self.app_root/'app/material_catalog.json'
         self.catalog=json.loads(catalog_path.read_text(encoding='utf-8')) if catalog_path.is_file() else None
         if self.catalog:
@@ -40,20 +40,44 @@ class MaterialStore:
                     if not 0<f['bytes']<2**31 or len(f['sha256'])!=64:raise MaterialError('素材校验信息无效')
         try:self.preferred=json.loads(self.preference.read_text(encoding='utf-8'))['tier']
         except (OSError,ValueError,KeyError):self.preferred='light'
-        if self.preferred not in ('light','hd'):self.preferred='light'
+        if self.preferred not in ('light','hd','local_hd'):self.preferred='light'
         self.current='light' if self.catalog else 'hd';self.root=self.base
         # Development assets are originals; frozen base is always the light tier.
         self.development=not getattr(__import__('sys'),'frozen',False) and (self.app_root/'build/materials/light/素材清单.json').is_file()
         if self.development:self.root=self.app_root/'build/materials/light'
         if self.catalog and self.preferred=='hd' and self.available('hd'):
             self.root=self.tier_root('hd');self.current='hd'
+        if self.catalog and self.preferred=='local_hd' and self.available('local_hd'):
+            self.root=self.tier_root('local_hd');self.current='local_hd'
+
+    def local_hd_info(self):
+        try:
+            info=json.loads((self.cache/'local-hd.json').read_text(encoding='utf-8'))
+            if info['id']!=self.catalog['tiers']['hd']['id']:return {}
+            checked(self.cache,info['root'])
+            return info
+        except (OSError,ValueError,KeyError,TypeError):return {}
 
     def tier_root(self,tier):
         if tier=='light':return self.app_root/'build/materials/light' if self.development else self.base
+        if tier=='local_hd':
+            info=self.local_hd_info()
+            if not info:raise MaterialError('尚未导入本地高清素材')
+            return checked(self.cache,info['root'])
         return checked(self.cache,'hd/'+self.catalog['tiers']['hd']['id'])
 
     def available(self,tier):
         if not self.catalog:return tier=='hd'
+        if tier=='local_hd':
+            try:
+                info=self.local_hd_info();root=self.tier_root(tier)
+                expected={f['path'] for f in self.catalog['tiers']['light']['files']}
+                if set(info['files'])!=expected:return False
+                for name,record in info['files'].items():
+                    s=checked(root,name).stat()
+                    if record['stat']!=[s.st_size,s.st_mtime_ns]:return False
+                return True
+            except (OSError,ValueError,KeyError,TypeError):return False
         root=self.tier_root(tier)
         if tier=='light':return (root/'素材清单.json').is_file()
         try:
@@ -66,12 +90,61 @@ class MaterialStore:
         except (OSError,ValueError,KeyError):return False
 
     def verify(self,root,tier,cancel=lambda:False,progress=lambda n,t,p:None):
-        files=self.catalog['tiers'][tier]['files'];total=sum(f['bytes'] for f in files);done=0
+        if tier=='local_hd':
+            info=self.local_hd_info()
+            files=[f for t in ('light','hd') for f in self.catalog['tiers'][t]['files'] if info.get('files',{}).get(f['path'],{}).get('tier')==t]
+            if len(files)!=len(self.catalog['tiers']['light']['files']):raise MaterialError('本地素材清单不完整')
+        else:files=self.catalog['tiers'][tier]['files']
+        total=sum(f['bytes'] for f in files);done=0
         for f in files:
             cancelled(cancel);p=checked(root,f['path'])
             if p.stat().st_size!=f['bytes'] or hash_file(p,cancel)!=f['sha256']:raise MaterialError('素材校验失败：'+f['path'])
             done+=f['bytes'];progress(done,total,'verifying')
         return True
+
+    def import_local_hd(self,source,cancel=lambda:False,progress=lambda n,t,p:None):
+        """Build an immutable snapshot: verified HD where present, light otherwise."""
+        source=Path(source).expanduser().resolve()
+        if not source.is_dir():raise MaterialError('本地高清目录不存在')
+        light={f['path']:f for f in self.catalog['tiers']['light']['files']}
+        selected=[]
+        for hd in self.catalog['tiers']['hd']['files']:
+            cancelled(cancel);src=checked(source,hd['path'])
+            tier='hd' if src.is_file() else 'light'
+            spec=hd if tier=='hd' else light[hd['path']]
+            if tier=='light':src=checked(self.tier_root('light'),hd['path'])
+            if src.stat().st_size!=spec['bytes'] or hash_file(src,cancel)!=spec['sha256']:
+                raise MaterialError('素材校验失败：'+hd['path'])
+            selected.append((tier,spec,src))
+        if not any(t=='hd' and f['path'].endswith('.webp') for t,f,p in selected):
+            raise MaterialError('目录内尚无可用的高清动画')
+        identity=hashlib.sha256(json.dumps([(t,f['path'],f['sha256']) for t,f,p in selected]).encode()).hexdigest()[:24]
+        relative='local-hd/'+self.catalog['tiers']['hd']['id']+'/'+identity
+        target=checked(self.cache,relative);self.cache.mkdir(parents=True,exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='local-import-',dir=self.cache) as temp:
+            stage=Path(temp)/'snapshot';stage.mkdir();records={};done=0;total=sum(f['bytes'] for t,f,p in selected)
+            for tier,spec,src in selected:
+                cancelled(cancel);dst=checked(stage,spec['path']);dst.parent.mkdir(parents=True,exist_ok=True)
+                # Keep the active snapshot independent from the syncing source.
+                shutil.copy2(src,dst)
+                if dst.stat().st_size!=spec['bytes'] or hash_file(dst,cancel)!=spec['sha256']:
+                    raise MaterialError('复制后素材校验失败：'+spec['path'])
+                s=dst.stat();records[spec['path']]=dict(tier=tier,stat=[s.st_size,s.st_mtime_ns])
+                done+=spec['bytes'];progress(done,total,'verifying')
+            cancelled(cancel)
+            # Reuse an unchanged snapshot only after checking its actual contents.
+            if target.exists():
+                for tier,spec,src in selected:
+                    dst=checked(target,spec['path'])
+                    if dst.stat().st_size!=spec['bytes'] or hash_file(dst,cancel)!=spec['sha256']:
+                        raise MaterialError('已有本地素材缓存损坏，请保留当前画质并联系维护')
+                    s=dst.stat();records[spec['path']]['stat']=[s.st_size,s.st_mtime_ns]
+            else:
+                target.parent.mkdir(parents=True,exist_ok=True);stage.replace(target)
+            info=dict(schema=1,id=self.catalog['tiers']['hd']['id'],root=relative,source=str(source),files=records,
+                      hd_files=[f['path'] for t,f,p in selected if t=='hd'],fallback_files=[f['path'] for t,f,p in selected if t=='light'])
+            atomic_json(self.cache/'local-hd.json',info)
+        return target
 
     def _receipt(self,root,tier):
         files={}
@@ -107,6 +180,7 @@ class MaterialStore:
         if not self.catalog:raise MaterialError('当前版本没有可切换的素材目录')
         root=self.tier_root(tier)
         if self.available(tier):self.verify(root,tier,cancel,progress);return root
+        if tier=='local_hd':raise MaterialError('本地高清缓存不可用，请运行更新本地高清素材脚本')
         if tier=='light':raise MaterialError('内置轻量素材缺失，请修复安装')
         spec=self.catalog['tiers']['hd'];url=spec['url']
         expected=f"https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/download/materials-{spec['id']}/bailong-hd-{spec['id']}.zip"

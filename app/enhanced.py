@@ -26,7 +26,8 @@ from reset_watch import ResetTracker, fetch_feed, schedule_text, account_reset_t
 from token_calendar import TokenUsageIndex
 from refresh_flow import RefreshCoordinator, RefreshRuns
 
-STATE_DIR=Path(os.environ.get('LOCALAPPDATA',str(ROOT)))/'BailongEnhanced'
+from platform_support import data_dir,server_name as local_server_name
+STATE_DIR=data_dir()
 STATE_DIR.mkdir(parents=True,exist_ok=True)
 CONFIG=STATE_DIR/'settings.json'
 
@@ -208,7 +209,7 @@ class EnhancedPet(Pet):
         except (OSError,ValueError):self.settings={}
         self.enhanced_ready=False
         super().__init__()
-        self.setWindowTitle('白龙桌宠增强版')
+        self.setWindowTitle('白龙桌宠 Mac' if sys.platform=='darwin' else '白龙桌宠增强版')
         self.bubble.close()
         self.bubble.deleteLater()
         self.bubble=HeadBubble(self)
@@ -328,7 +329,7 @@ class EnhancedPet(Pet):
         reserve=self.bubble.report.reserved_height()+6 if self.bubble.report and self.bubble.report.requested else 0
         y=max(area.top()+reserve,min(y,area.bottom()-self.bubble.height()+1))
         self.bubble.move(x,y)
-        if self.bubble.enabled and self.isVisible() and self.windowFlags()&Qt.WindowType.WindowStaysOnTopHint and self.can_raise_bubble():
+        if sys.platform!='darwin' and self.bubble.enabled and self.isVisible() and self.windowFlags()&Qt.WindowType.WindowStaysOnTopHint and self.can_raise_bubble():
             self.bubble.raise_()
 
     def can_raise_bubble(self):
@@ -634,7 +635,8 @@ class EnhancedPet(Pet):
                 self.silent_notifier.show(title,clean_text(text,120))
             except (OSError,ValueError):
                 pass  # the head bubble remains the guaranteed visible reminder
-        else:self.tray.showMessage(title,clean_text(text,120),QSystemTrayIcon.MessageIcon.Information,10000)
+        elif sys.platform!='darwin':self.tray.showMessage(title,clean_text(text,120),QSystemTrayIcon.MessageIcon.Information,10000)
+        # macOS completion stays in the persistent card and menu-bar icon, silently.
 
     def toggle_bubble(self):
         self.bubble.enabled=not self.bubble.enabled
@@ -768,10 +770,13 @@ def main():
                 destination=Path(sys.argv[index+1]);destination.parent.mkdir(parents=True,exist_ok=True);save_json(destination,report)
         return 0
     app=QApplication(sys.argv)
+    if sys.platform=='darwin':
+        from mac_native import prepare_application
+        prepare_application(app)
     from typography import install_ui_font
     install_ui_font(app)
     app.setQuitOnLastWindowClosed(False)
-    server_name='bailong-enhanced-local-v1'
+    server_name=local_server_name()
     if '--smoke-test' in sys.argv:server_name+='-smoke-'+str(os.getpid())
     socket=QLocalSocket()
     socket.connectToServer(server_name)
@@ -784,6 +789,13 @@ def main():
     if not server.listen(server_name):return 1
     from desktop import DesktopPet
     pet=DesktopPet(monitor=not any(arg in sys.argv for arg in ('--preview','--smoke-test')))
+    if sys.platform=='darwin':
+        from mac_native import MacIntegration
+        pet.mac_integration=MacIntegration(pet)
+        if not any(arg in sys.argv for arg in ('--preview','--smoke-test')):
+            from mac_video import MacVideoYield
+            pet.video_yield=MacVideoYield(pet)
+    QTimer.singleShot(250,pet.record_state)
     connections=[]
     def incoming():
         peer=server.nextPendingConnection();connections.append(peer)
@@ -806,7 +818,7 @@ def main():
     pet.position_bubble()
     from deployment_state import write_ready_receipt
     QTimer.singleShot(250,lambda:write_ready_receipt(pet,server))
-    if not any(arg in sys.argv for arg in ('--preview','--smoke-test')):
+    if sys.platform=='win32' and not any(arg in sys.argv for arg in ('--preview','--smoke-test')):
         from codex_startup import ensure_watcher
         QTimer.singleShot(1600,ensure_watcher)
     if '--settings' in sys.argv:pet.open_settings()

@@ -6,7 +6,7 @@ from pathlib import Path
 from PySide6.QtGui import QFont,QFontDatabase,QGuiApplication
 
 LATIN_FAMILY='Chakra Petch'
-FONT_FAMILIES=[LATIN_FAMILY,'Microsoft YaHei UI','Microsoft YaHei','Segoe UI','sans-serif']
+FONT_FAMILIES=[LATIN_FAMILY,'PingFang SC','Hiragino Sans GB','Helvetica Neue','sans-serif'] if sys.platform=='darwin' else [LATIN_FAMILY,'Microsoft YaHei UI','Microsoft YaHei','Segoe UI','sans-serif']
 FONT_CSS='font-family:'+','.join('"'+name+'"' for name in FONT_FAMILIES)+';font-weight:600;'
 ROOT=Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else Path(__file__).resolve().parents[1]
 FONT_FILE=ROOT/'app/fonts/ChakraPetch-Regular.ttf'
@@ -22,6 +22,9 @@ def register_font():
         system_fonts=Path(os.environ.get('WINDIR','C:/Windows'))/'Fonts'
         for name in ('msyh.ttc','msyhbd.ttc'):
             if (system_fonts/name).is_file():QFontDatabase.addApplicationFont(str(system_fonts/name))
+        if sys.platform=='darwin':
+            for path in ('/System/Library/Fonts/PingFang.ttc','/System/Library/Fonts/Supplemental/Arial Unicode.ttf'):
+                if Path(path).is_file():QFontDatabase.addApplicationFont(path)
         _font_id=QFontDatabase.addApplicationFont(str(FONT_FILE))
         _font_loaded=LATIN_FAMILY in QFontDatabase.applicationFontFamilies(_font_id)
     return _font_loaded

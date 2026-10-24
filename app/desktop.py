@@ -299,7 +299,7 @@ class DesktopPet(EnhancedPet):
 
     def single_click(self):
         self.last_click=None;self.press_feedback=time.monotonic()
-        pool=self.manifest.get('clickAnimations') or [v for v in self.variants if v['id'] in ('01','08','09','10','11','17','20','26') ] or self.variants or self.idles
+        pool=all_items(self.manifest) or self.idles
         self.choose(random.choice(pool),interactive=True)
 
     def say(self,text,ms=4000):
@@ -475,6 +475,8 @@ class DesktopPet(EnhancedPet):
         if hasattr(self,'updates'):self.updates.configure(self.settings['update_checks'])
         for attr in ('wandering','random_actions','commentary','sound'):setattr(self,attr,self.settings[attr])
         self.bubble.enabled=self.settings['bubble'];self.bubble.show_quota=self.settings['quota_visible']
+        self.bubble.conversation_auto_scroll=self.settings['conversation_auto_scroll']
+        self.bubble.conversation_timer.setInterval(round(self.settings['conversation_scroll_seconds']*1000))
         self.bubble.bubble_mode=self.settings['bubble_mode']
         self.bubble.capsule_action=self.settings['capsule_action']
         if 'bubble_mode' in values and self.bubble._editor_origin is not None:
@@ -630,6 +632,7 @@ class DesktopPet(EnhancedPet):
             # First activation can synchronously polish the native editor and
             # take a full frame. Do it before the snapshot animation starts so
             # the visible morph has an uninterrupted clock.
+            if sys.platform=='darwin':self.bubble._editing_flags(True)
             self.bubble.raise_();self.bubble.activateWindow()
             if self.bubble.windowHandle():self.bubble.windowHandle().requestActivate()
             QApplication.setActiveWindow(self.bubble)
@@ -758,6 +761,9 @@ class DesktopPet(EnhancedPet):
         text='白龙桌宠 '+VERSION+(' · 有更新 '+state['latest'] if state['phase']=='available' else ' · 点击恢复 / 右键设置')
         if self.tray.toolTip()!=text:self.tray.setToolTip(text)
     def install_app_update(self,path):
+        if sys.platform=='darwin' or not getattr(sys,'frozen',False):
+            self.say('源码版请使用同步更新脚本，随后重新启动；设置和统计会保留。',6000)
+            return
         import subprocess
         from app_updates import cache_paths,UpdateError
         try:
@@ -846,6 +852,7 @@ class DesktopPet(EnhancedPet):
         value=json.loads((STATE_DIR/'runtime.json').read_text(encoding='utf-8'))
         value['asset_count']=len(all_items(self.manifest));value['decode_error']=self.decode_error
         value['work_animation_count']=len([v for v in self.manifest.get('workAnimations',[]) if v]);value['semantic_work_actions']=True;value['explicit_task_arrival_animation']=True
+        if sys.platform=='darwin':value.update(in_app_updates=False,program_only_updates=False,source_updates=True,installation_ready_receipt=False,video_firefox_backend='macOS AX',video_backend='macOS Accessibility')
         atomic_json(path,value);self.say('诊断已保存：'+path.name,6000)
     def backup_settings(self):
         path=STATE_DIR/('settings-backup-'+time.strftime('%Y%m%d-%H%M%S')+'.json');self.save_settings();shutil.copy2(CONFIG,path)
@@ -864,8 +871,9 @@ class DesktopPet(EnhancedPet):
             decode_runtime=STATS.snapshot(),animation_wakeups=self.animation_wakeups,movement_wakeups=self.movement_wakeups,decode_error=self.decode_error)
         value.update(material_tiers=True,material_default='light',material_current=self.material_store.current,
             program_only_updates=True,program_update_material_verification=True,program_update_full_fallback=True,
-            material_resolution=720 if self.material_store.current=='hd' else 512,material_hd_cached=self.material_store.available('hd'),
-            material_content_id=self.material_store.catalog['tiers'][self.material_store.current]['id'] if self.material_store.catalog else None,
+            material_resolution='512/720' if self.material_store.current=='local_hd' else (720 if self.material_store.current=='hd' else 512),material_hd_cached=self.material_store.available('hd'),
+            material_local_hd_cached=self.material_store.available('local_hd'),material_fallback_files=self.material_store.local_hd_info().get('fallback_files',[]) if self.material_store.current=='local_hd' else [],
+            material_content_id=self.material_store.catalog['tiers']['hd' if self.material_store.current=='local_hd' else self.material_store.current]['id'] if self.material_store.catalog else None,
             material_switch_pending=bool(self._pending_material))
         value.update(native_client_hit_testing=True,shared_paint_hit_transform=True,lost_mouse_grab_recovery=True,character_switch_keeps_navigation=True,
             independent_card_surface=True,character_visible=self.settings['character_visible'],minimal_quota_mode=True,hidden_character_decoder_paused=not self.settings['character_visible'] and not self.tick.isActive(),
@@ -880,6 +888,9 @@ class DesktopPet(EnhancedPet):
             in_app_updates=True,update_phase=self.updates.state['phase'] if hasattr(self,'updates') else 'idle',update_checks_enabled=self.settings.get('update_checks',True),
             last_reaction_kind=self.last_reaction.kind if self.last_reaction else None,
             pending_task_greetings=len(self.reactions.openings),animation_decoder_queue=self.player.frames.qsize() if self.player else 0)
+        if sys.platform=='darwin':
+            from platform_support import MAC_VERSION
+            value.update(platform='macOS',mac_version=MAC_VERSION,program_only_updates=False,in_app_updates=False,source_updates=True)
         import psutil
         process=psutil.Process();mem=process.memory_info()
         snapshot=self.bubble.token_snapshot or {}
@@ -887,7 +898,7 @@ class DesktopPet(EnhancedPet):
         from typography import LATIN_FAMILY,register_font
         report=self.bubble.report
         report_data=snapshot.get('report') or {}
-        value.update(ui_revision=73,reset_countdown_format='hours_minutes',read_terminal_turn_acknowledgement=True,reset_countdown_priority=True,customizable_capsule_shortcut=True,capsule_shortcut=self.settings['capsule_action'],codex_startup_supported=True,hourly_token_entry='today_tokens',unified_refresh=True,icon_only_header_actions=True,refresh_icon_style='single_arc',icon_motion_speed=1.2,busy_icon_style='orbit_rings',status_icon_morph=True,status_waiting_live_flags=True,island_quota_segmented=False,island_quota_style='open_arc',island_quota_numeric_only=True,native_shrink_landing=True,shrink_preserves_chart_progress=True,native_landing_hold_ms=34,cached_chart_layers=True,stable_report_scrollbar=True,animated_deck_tabs=True,incremental_deck_switch=True,prewarmed_transition_landing=True,monotone_container_motion=True,status_updates_preserve_surface=True,capsule_pixel_handoff=True,atomic_transition_handoff=True,clean_report_dismiss=True,stable_disclosure_gutter=True,unified_card_motion=True,report_continuous_shape=True,animated_disclosures=True,week_quota_palette=True,continuous_surface_morph=True,shared_status_glyph=True,apple_island_reference=True,panel_shrink_spring=True,panel_dismiss_spring=True,panel_shrink_ms=440,panel_dismiss_ms=360,lossless_asset_pack=self.material_store.current=='hd',lossless_asset_encoding=True,lightweight_resampling=self.material_store.current=='light',lightweight_maintenance=True,optional_webm_converter=True,shared_version_assets=True,fair_activity_targets=True,persistent_completion_ledger=True,cached_log_discovery=True,chat_incremental_stream=True,installation_ready_receipt=True,semantic_controls=True,labeled_header_actions=False,editor_keyboard_save=True,capability_health=True,connection_path_picker=True,report_scope_groups=True,report_model_filter_explicit=True,settings_draft_merge=True,settings_dirty_fields_only=True,context_menu_root_items=8,tray_recovery_menu=True,editor_returns_to_origin=True,chat_destructive_confirmation=True,quota_query_silent=True,subagent_completion_filter=True,ring_persistent_legend=False,quota_display_layout='labeled_bars',quota_reset_per_window=True,today_tokens_direct_value=True,book_reference_count=27,island_click_opens_normal=True,conversation_name_pointer_feedback=True,context_compaction_tracking=True,conversation_name_navigation=True,codex_live_status_connected=bool(self.activity and self.activity.live_reader and self.activity.live_reader.connected),daily_report_incremental_updates=True,daily_report_chart_start_after_show=True,quota_source_header_visible=False,incremental_status_refresh=True,skip_unchanged_log_reads=True,single_runtime_write=True,read_acknowledgement_history=True,read_acknowledgement_settle_seconds=4,conversation_names_visible=True,completed_conversation_background=True,independent_conversation_scroll=True,operation_status_summary=True,session_read_tracking=True,conversation_status_limit=2,codex_connection_diagnostics=True,portable_codex_discovery=True,island_bubble=True,island_quota_priority=True,bubble_mode=self.bubble.bubble_mode,bubble_auto_compact=self.bubble.auto_compact,island_visible=self.bubble.is_island(),panel_transition_stable_canvas=True,panel_transition_content_blend=True,chart_entry_animation=True,daily_report=True,daily_report_stable_surface=True,token_scan_background=True,token_models=len({r['model'] for r in report_data.get('daily_models',[])}),token_report_hours=len(report_data.get('hours',[])),daily_report_visible=bool(report and report.isVisible()),daily_report_aligned=not report or not report.isVisible() or (report.content_geometry().width()==self.bubble.width() and report.content_geometry().x()==self.bubble.x() and report.content_geometry().bottom()+1==self.bubble.y()-6),ring_center_y=None,daily_report_open=bool(self.bubble.report and self.bubble.report.requested),inline_explanations_only=True,version=VERSION,status_icon_animated=True,status_icon_unread=len(self.bubble.status_indicator.unread),status_icon_acknowledgement=True,status_icon_state=self.bubble.status_indicator.visual(),status_icon_timer=self.bubble.status_indicator.timer.isActive(),panel_transition_no_fade=True,panel_transition_staged_layout=True,panel_transition_ms=480,idle_cache_mb=round(idle_cache['bytes']/1048576,2),idle_cache_limit_mb=idle_cache['limit']/1048576,idle_cache_hits=idle_cache['hits'],integrated_panels=True,panel_page=self.bubble.panel_page,separate_panel_windows=sum(bool(p and p.isWindow()) for p in (self.settings_dialog,self.chat_window)),expanded_details_grouped=True,latin_font=LATIN_FAMILY,latin_font_loaded=register_font(),status_height_transition_ms=300,status_transition_synchronized=True,token_chart_range=self.bubble.token_range,
+        value.update(ui_revision=74,reset_countdown_format='hours_minutes',read_terminal_turn_acknowledgement=True,reset_countdown_priority=True,customizable_capsule_shortcut=True,capsule_shortcut=self.settings['capsule_action'],codex_startup_supported=sys.platform=='win32',hourly_token_entry='today_tokens',unified_refresh=True,icon_only_header_actions=True,refresh_icon_style='single_arc',icon_motion_speed=1.2,busy_icon_style='orbit_rings',status_icon_morph=True,status_waiting_live_flags=True,island_quota_segmented=False,island_quota_style='open_arc',island_quota_numeric_only=True,native_shrink_landing=True,shrink_preserves_chart_progress=True,native_landing_hold_ms=34,cached_chart_layers=True,stable_report_scrollbar=True,animated_deck_tabs=True,incremental_deck_switch=True,prewarmed_transition_landing=True,monotone_container_motion=True,status_updates_preserve_surface=True,capsule_pixel_handoff=True,atomic_transition_handoff=True,clean_report_dismiss=True,stable_disclosure_gutter=True,unified_card_motion=True,report_continuous_shape=True,animated_disclosures=True,week_quota_palette=True,continuous_surface_morph=True,shared_status_glyph=True,apple_island_reference=True,panel_shrink_spring=True,panel_dismiss_spring=True,panel_shrink_ms=440,panel_dismiss_ms=360,lossless_asset_pack=self.material_store.current=='hd',lossless_asset_encoding=True,lightweight_resampling=self.material_store.current=='light',lightweight_maintenance=True,optional_webm_converter=True,shared_version_assets=True,fair_activity_targets=True,persistent_completion_ledger=True,cached_log_discovery=True,chat_incremental_stream=True,installation_ready_receipt=True,semantic_controls=True,labeled_header_actions=False,editor_keyboard_save=True,capability_health=True,connection_path_picker=True,report_scope_groups=True,report_model_filter_explicit=True,settings_draft_merge=True,settings_dirty_fields_only=True,context_menu_root_items=8,tray_recovery_menu=True,editor_returns_to_origin=True,chat_destructive_confirmation=True,quota_query_silent=True,subagent_completion_filter=True,ring_persistent_legend=False,quota_display_layout='labeled_bars',quota_reset_per_window=True,today_tokens_direct_value=True,book_reference_count=27,island_click_opens_normal=True,conversation_name_pointer_feedback=True,context_compaction_tracking=True,conversation_name_navigation=True,codex_live_status_connected=bool(self.activity and self.activity.live_reader and self.activity.live_reader.connected),daily_report_incremental_updates=True,daily_report_chart_start_after_show=True,quota_source_header_visible=False,incremental_status_refresh=True,skip_unchanged_log_reads=True,single_runtime_write=True,read_acknowledgement_history=True,read_acknowledgement_settle_seconds=4,conversation_names_visible=True,completed_conversation_background=True,independent_conversation_scroll=True,operation_status_summary=True,session_read_tracking=True,conversation_status_limit=2,source_run=not getattr(sys,"frozen",False),conversation_scroll_page=self.bubble.roster.page,conversation_extra_count=self.bubble.status_view.extra,conversation_auto_scroll=self.bubble.conversation_auto_scroll,conversation_scroll_seconds=self.bubble.conversation_timer.interval()/1000,codex_connection_diagnostics=True,portable_codex_discovery=True,island_bubble=True,island_quota_priority=True,bubble_mode=self.bubble.bubble_mode,bubble_auto_compact=self.bubble.auto_compact,island_visible=self.bubble.is_island(),panel_transition_stable_canvas=True,panel_transition_content_blend=True,chart_entry_animation=True,daily_report=True,daily_report_stable_surface=True,token_scan_background=True,token_models=len({r['model'] for r in report_data.get('daily_models',[])}),token_report_hours=len(report_data.get('hours',[])),daily_report_visible=bool(report and report.isVisible()),daily_report_aligned=not report or not report.isVisible() or (report.content_geometry().width()==self.bubble.width() and report.content_geometry().x()==self.bubble.x() and report.content_geometry().bottom()+1==self.bubble.y()-6),ring_center_y=None,daily_report_open=bool(self.bubble.report and self.bubble.report.requested),inline_explanations_only=True,version=VERSION,status_icon_animated=True,status_icon_unread=len(self.bubble.status_indicator.unread),status_icon_acknowledgement=True,status_icon_state=self.bubble.status_indicator.visual(),status_icon_timer=self.bubble.status_indicator.timer.isActive(),panel_transition_no_fade=True,panel_transition_staged_layout=True,panel_transition_ms=480,idle_cache_mb=round(idle_cache['bytes']/1048576,2),idle_cache_limit_mb=idle_cache['limit']/1048576,idle_cache_hits=idle_cache['hits'],integrated_panels=True,panel_page=self.bubble.panel_page,separate_panel_windows=sum(bool(p and p.isWindow()) for p in (self.settings_dialog,self.chat_window)),expanded_details_grouped=True,latin_font=LATIN_FAMILY,latin_font_loaded=register_font(),status_height_transition_ms=300,status_transition_synchronized=True,token_chart_range=self.bubble.token_range,
             token_history_days=len(snapshot.get('history_days',{})),token_hour_slots=len(snapshot.get('hours',[])),
             mode=self.mode,action_state=self.gate.state,mouse_through=self.settings['mouse_through'],scale=self.settings['scale'],
             facing=self.walk_direction,decoder_queue=self.player.frames.qsize() if self.player else 0,first_frame_cache=len(self.player.first) if self.player else 0,
@@ -914,8 +925,10 @@ class DesktopPet(EnhancedPet):
             self.recently_visited={sid:t for sid,t in getattr(self,'recently_visited',{}).items() if time.monotonic()-t<120}
             self.activity.set_context(self.bubble.roster.pinned,self.recently_visited)
         if self.settings_dialog and self.settings_dialog.isVisible():self.connectionHealthChanged.emit(value['connection_health'])
+        if sys.platform=='darwin':value.update(in_app_updates=False,program_only_updates=False,source_updates=True,installation_ready_receipt=False,video_firefox_backend='macOS AX',video_backend='macOS Accessibility')
         atomic_json(path,value)
     def closeEvent(self,event):
+        if hasattr(self,'mac_integration'):self.mac_integration.shutdown()
         if hasattr(self,'materials') and not self.materials.shutdown():
             if not self._material_exit_pending:self._material_exit_pending=True;self.materials.idle.connect(self.close)
             event.ignore();return

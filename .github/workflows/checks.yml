@@ -3,6 +3,29 @@ on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
 jobs:
+  source:
+    name: Source runtime (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-source.txt
+      - run: python -m pip install -r requirements-source.txt
+      - if: runner.os == 'Windows'
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/windows.ps1 -Action setup
+      - if: runner.os == 'macOS'
+        run: bash tools/mac.sh setup
+      - if: runner.os == 'Windows'
+        run: .venv/Scripts/python.exe tools/check_source.py --without-assets
+      - if: runner.os == 'macOS'
+        run: .venv/bin/python tools/check_source.py --without-assets
   windows:
     runs-on: windows-latest
     env:

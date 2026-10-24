@@ -14,6 +14,7 @@ from typography import FONT_CSS
 ROOT=Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else Path(__file__).resolve().parents[1]
 ASSETS=ROOT/'outputs/白龙桌宠素材'
 FLAGS=Qt.WindowType.FramelessWindowHint|Qt.WindowType.WindowStaysOnTopHint|Qt.WindowType.Tool
+if sys.platform=='darwin':FLAGS|=Qt.WindowType.WindowDoesNotAcceptFocus
 
 def clamp_position(position,size,area):
     """Keep the full pet window inside one monitor's usable rectangle."""
@@ -218,6 +219,14 @@ class Pet(QWidget):
         self.bubble.hide()
         if self.mode=='quota':self.idle()
     def play_click_sound(self):
+        if sys.platform=='darwin':
+            from AppKit import NSSound
+            sound=ROOT/'app/sounds/click.wav'
+            if sound.is_file():
+                if getattr(self,'_click_sound',None):self._click_sound.stop()
+                self._click_sound=NSSound.alloc().initWithContentsOfFile_byReference_(str(sound),True)
+                if self._click_sound:self._click_sound.play()
+            return
         if sys.platform=='win32':
             import winsound
             sound=ROOT/'app/sounds/click.wav'

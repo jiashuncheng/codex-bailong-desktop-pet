@@ -153,6 +153,7 @@ class DailyReport(QWidget):
     PAD=8
     def __init__(self,bubble):
         flags=Qt.WindowType.Tool|Qt.WindowType.FramelessWindowHint
+        if __import__('sys').platform=='darwin':flags|=Qt.WindowType.WindowDoesNotAcceptFocus
         if bubble.windowFlags()&Qt.WindowType.WindowStaysOnTopHint:flags|=Qt.WindowType.WindowStaysOnTopHint
         super().__init__(bubble,flags);self.bubble=bubble;self.requested=False;self.page='overview';self.period='all';self.selected_model=None
         self.snapshot={};self.natural_height=412;self._overview_height=412;self.fraction=0.;self._building=False

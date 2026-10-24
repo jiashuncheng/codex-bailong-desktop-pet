@@ -11,7 +11,7 @@ DEFAULTS=dict(schema=2,scale=1.0,playback_speed=1.0,action_gap=2.0,
     random_interval=25.0,move_speed=55.0,move_range=0.75,drag_physics=True,
     on_top=True,video_fullscreen_yield=True,no_move=False,mouse_through=False,wandering=True,random_actions=True,
     commentary=True,sound=True,bubble=True,quota_visible=True,self_talk=False,character_visible=True,card_anchor=None,
-    status_actions=True,status_action_interval=12.,status_response_revision=2,update_checks=True,token_chart_range='all',bubble_mode='auto',
+    conversation_auto_scroll=True,conversation_scroll_seconds=6.,status_actions=True,status_action_interval=12.,status_response_revision=2,update_checks=True,token_chart_range='all',bubble_mode='auto',
     capsule_action='chatgpt',capsule_website='',talk_min=30.0,talk_max=90.0,talk_quiet=True,
     talk_lines=['忙完记得休息一下。','我在这里陪着你。','今天也一起把小事做好吧。'],
     facing=1,character='builtin',character_preferences={},chat_follow=False)
@@ -30,7 +30,7 @@ def normalized(raw):
     out['status_response_revision']=2
     for k,lo,hi in [('scale',.4,2.5),('playback_speed',.25,3),('action_gap',0,60),
         ('random_interval',3,600),('move_speed',10,300),('move_range',.1,1),
-        ('talk_min',5,3600),('talk_max',5,7200),('status_action_interval',8,120)]:
+        ('talk_min',5,3600),('talk_max',5,7200),('status_action_interval',8,120),('conversation_scroll_seconds',2,120)]:
         try:v=float(out[k]);out[k]=min(hi,max(lo,v)) if math.isfinite(v) else DEFAULTS[k]
         except (TypeError,ValueError):out[k]=DEFAULTS[k]
     for k,v in DEFAULTS.items():

@@ -1,5 +1,6 @@
 """Non-modal settings, live controls and character diagnostics."""
 import copy
+import sys
 import threading
 from PySide6.QtCore import Qt,QThread,Signal
 from PySide6.QtGui import QShortcut,QKeySequence
@@ -49,13 +50,15 @@ class SettingsDialog(QDialog):
         self.field_tabs={};self.field_titles={};self.factors={};self._writing_widgets=True;self.draft=None;self.path_job=None
         if embedded:self.setWindowFlags(Qt.WindowType.Widget)
         self.setWindowTitle('白龙桌宠 · 设置');self.resize(590,680)
-        outer=QVBoxLayout(self);self.tabs=QTabWidget();outer.addWidget(self.tabs,1)
+        outer=QVBoxLayout(self);self.tabs=QTabWidget();self.tabs.tabBar().setElideMode(Qt.TextElideMode.ElideNone);outer.addWidget(self.tabs,1)
         appearance=self.tab('常规与外观')
         self.section(appearance,'桌面与显示','这里的偏好点击“应用”后生效；切页会保留草稿。')
-        self.startup=QCheckBox('登录 Windows 时启动');appearance.addRow(self.startup)
+        self.startup=QCheckBox('登录 macOS 时启动' if sys.platform=='darwin' else '登录 Windows 时启动');appearance.addRow(self.startup)
         self.field_tabs['startup']=self.tabs.count()-1;self.field_titles['startup']='开机启动'
         self.startup.toggled.connect(lambda:self.edited('startup'))
         self.codex_startup=QCheckBox('打开 Codex 时自动启动桌宠');appearance.addRow(self.codex_startup)
+        if sys.platform!='win32':
+            self.codex_startup.setEnabled(False);self.codex_startup.setToolTip('此启动监听目前仅支持 Windows；Mac 可使用登录启动。')
         self.field_tabs['codex_startup']=0;self.field_titles['codex_startup']='随 Codex 启动'
         self.codex_startup.toggled.connect(lambda:self.edited('codex_startup'))
         note=QLabel('登录时运行轻量监听；识别 Codex 桌面端，不依赖 Codex++。手动退出桌宠后，本次 Codex 使用期间不再拉起。关闭 Codex 不会强制退出桌宠。');note.setWordWrap(True);note.setStyleSheet(f'font-size:10px;color:{MUTED};');appearance.addRow(note)
@@ -63,8 +66,10 @@ class SettingsDialog(QDialog):
         for key,title in [('character_visible','显示人物（关闭后仅保留独立卡片）'),('on_top','始终置顶'),('video_fullscreen_yield','视频全屏时临时取消置顶（完成提醒优先）'),('mouse_through','鼠标穿透（从托盘找回）'),('bubble','显示状态卡片'),('quota_visible','显示额度和重置时间'),('commentary','展示 Codex 回复摘要')]:
             self.check(appearance,key,title)
             if key=='video_fullscreen_yield':
-                note=QLabel('完成提醒确认后，视频仍全屏则继续让位；退出全屏恢复当前置顶设置。')
+                note=QLabel('完成提醒确认后继续让位。Mac 浏览器识别需在系统设置中授予运行此程序的 Python 辅助功能权限；不读取标题或网址。' if sys.platform=='darwin' else '完成提醒确认后，视频仍全屏则继续让位；退出全屏恢复当前置顶设置。')
                 note.setWordWrap(True);note.setStyleSheet(f'font-size:10px;color:{MUTED};');appearance.addRow(note)
+        self.check(appearance,'conversation_auto_scroll','自动轮换状态会话（保留两条，悬停时暂停）')
+        self.number(appearance,'conversation_scroll_seconds','会话轮换间隔（秒）',2,120,1)
         self.mode=QComboBox();self.mode.addItem('自动：正常卡片 / 闲置时胶囊','auto');self.mode.addItem('胶囊：状态和快捷圆','mini');self.mode.addItem('极简：仅额度百分比','minimal')
         appearance.addRow('卡片显示模式',self.mode);self.fields['bubble_mode']=self.mode;self.field_tabs['bubble_mode']=0;self.field_titles['bubble_mode']='卡片显示模式'
         self.mode.currentIndexChanged.connect(lambda:self.edited('bubble_mode'))
@@ -109,6 +114,10 @@ class SettingsDialog(QDialog):
         for key,title,slot in [('quota','刷新额度',pet.refresh_quota),('reset','刷新重置消息',pet.refresh_reset_feed),('token','刷新 Token',pet.refresh_tokens)]:
             button=QPushButton(title);button.clicked.connect(slot);buttons.addWidget(button);self.refresh_buttons[key]=(button,title)
         connection.addRow(row)
+        if not getattr(sys,'frozen',False):
+            from mac_bridge import BridgeSettingsPanel
+            self.section(connection,'SSH 远程会话','填写本机已配置且可免交互连接的 SSH 别名。')
+            connection.addRow(BridgeSettingsPanel())
         self.section(connection,'白龙聊天服务','与 Codex 的只读联动独立；仅主动发送时调用。')
         button=QPushButton('配置白龙聊天服务…');button.clicked.connect(pet.open_chat_service);connection.addRow(button)
         self.path_toggle=QPushButton('连接路径与检测报告');self.path_toggle.setCheckable(True);connection.addRow(self.path_toggle)
@@ -143,11 +152,16 @@ class SettingsDialog(QDialog):
         button=QPushButton('检查所有素材');button.clicked.connect(self.validate);library.addRow(button)
         self.library_status=QLabel();self.library_status.setWordWrap(True);library.addRow(self.library_status)
         maintenance=self.tab('维护与数据')
-        self.section(maintenance,'软件更新','检查 GitHub 公开稳定版；下载和安装由你主动发起。')
-        self.check(maintenance,'update_checks','自动检查更新（不自动下载）')
-        if hasattr(pet,'updates'):
-            from update_widgets import UpdatePanel
-            self.update_panel=UpdatePanel(pet.updates);maintenance.addRow(self.update_panel)
+        if not getattr(sys,'frozen',False) or sys.platform=='darwin':
+            from mac_maintenance import SourceMaintenancePanel
+            self.section(maintenance,'源码维护','修改后重新启动即可生效；设置、聊天和统计独立保存。')
+            maintenance.addRow(SourceMaintenancePanel(pet))
+        else:
+            self.section(maintenance,'软件更新','检查 GitHub 公开稳定版；下载和安装由你主动发起。')
+            self.check(maintenance,'update_checks','自动检查更新（不自动下载）')
+            if hasattr(pet,'updates'):
+                from update_widgets import UpdatePanel
+                self.update_panel=UpdatePanel(pet.updates);maintenance.addRow(self.update_panel)
         self.section(maintenance,'诊断与数据','维护操作立即执行；不属于设置草稿。')
         for title,slot in [('打开配置与聊天记录目录',pet.open_data),('导出诊断报告（不含对话和密钥）',pet.export_diagnostics),('备份设置（不含密钥与对话）',pet.backup_settings),('恢复设置备份',pet.restore_settings)]:
             button=QPushButton(title);button.clicked.connect(slot);maintenance.addRow(button)
@@ -161,7 +175,7 @@ class SettingsDialog(QDialog):
         button=QPushButton('返回' if embedded else '关闭');button.clicked.connect(self.dismiss);row.addWidget(button)
         for control in self.findChildren(QPushButton):control.setAutoDefault(False)
         self.apply_button.setProperty('role','primary');self.apply_button.setAutoDefault(True);self.apply_button.setDefault(True)
-        self.save_shortcut=QShortcut(QKeySequence('Ctrl+S'),self);self.save_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut);self.save_shortcut.activated.connect(self.apply)
+        self.save_shortcut=QShortcut(QKeySequence(QKeySequence.StandardKey.Save),self);self.save_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut);self.save_shortcut.activated.connect(self.apply)
         self.tabs.tabBar().setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         outer.addLayout(row);self.tabs.currentChanged.connect(self.update_draft_state);self.reload()
         if hasattr(pet,'settingsChanged'):pet.settingsChanged.connect(self.sync_from_pet)
@@ -172,7 +186,7 @@ class SettingsDialog(QDialog):
         label=QLabel(note);label.setWordWrap(True);label.setStyleSheet(f'font-size:10px;color:{MUTED};margin-bottom:3px;');form.addRow(label)
     def choose_path(self,key):
         if key=='home':value=QFileDialog.getExistingDirectory(self,'选择 Codex 数据目录',self.path_fields[key].text())
-        else:value,_=QFileDialog.getOpenFileName(self,'选择 Codex CLI（不是桌面主程序）',self.path_fields[key].text(),'程序 (*.exe);;所有文件 (*)')
+        else:value,_=QFileDialog.getOpenFileName(self,'选择 Codex CLI（不是桌面主程序）',self.path_fields[key].text(),'所有文件 (*)' if sys.platform=='darwin' else '程序 (*.exe);;所有文件 (*)')
         if value:self.path_fields[key].setText(value)
     def validate_paths(self):
         if self.path_job and self.path_job.isRunning():return
@@ -253,7 +267,8 @@ class SettingsDialog(QDialog):
         if self.draft is None:return
         self.website.setEnabled(self.shortcut.currentData()=='website')
         count=len(self.draft.dirty);self.apply_button.setEnabled(bool(count));self.discard_button.setEnabled(bool(count))
-        text=f'有 {count} 项未保存修改 · Ctrl+S 应用 · 切页保留草稿' if count else '设置已保存 · Ctrl+S 应用修改'
+        shortcut='⌘S' if sys.platform=='darwin' else 'Ctrl+S'
+        text=f'有 {count} 项未保存修改 · {shortcut} 应用 · 切页保留草稿' if count else f'设置已保存 · {shortcut} 应用修改'
         if self.draft.conflicts:
             names='、'.join(self.field_titles[k] for k in sorted(self.draft.conflicts))
             text+='\n外部也修改了：'+names+'。应用将采用此处草稿；放弃修改将采用当前值。'
@@ -303,7 +318,7 @@ class SettingsDialog(QDialog):
         if item:self.pet.choose(item,interactive=False,manual=True)
     def select_converter(self):
         if self.job and self.job.isRunning():self.library_status.setText('正在检查或导入，请稍等…');return
-        path,_=QFileDialog.getOpenFileName(self,'选择 FFmpeg 转换工具（仅导入 WebM 时使用）','','FFmpeg (ffmpeg*.exe);;所有文件 (*)')
+        path,_=QFileDialog.getOpenFileName(self,'选择 FFmpeg 转换工具（仅导入 WebM 时使用）','','所有文件 (*)' if sys.platform=='darwin' else 'FFmpeg (ffmpeg*.exe);;所有文件 (*)')
         if not path:return
         self.library_status.setText('正在后台验证转换工具…')
         self.job=ConverterJob(path,None,self)

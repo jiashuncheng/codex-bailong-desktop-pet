@@ -2,11 +2,19 @@
 
 ![文章海报](docs/media/cover.png)
 
-一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前版本 **v0.8.3 / UI73**。
+一只陪你使用 Codex 的 Windows / macOS 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前跨平台开发版 **v0.8.4 / UI74**（基于 fork v0.8.3，保留个性化修改）。
 
 **[下载安装包](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest)** · [快速部署](docs/快速部署说明.txt) · [全部新增功能](docs/新增功能说明.txt) · [开发说明](docs/DEVELOPMENT.md) · [迭代历史](docs/迭代历史.txt)
 
 ## 桌面上可以做什么
+
+本分支维护 Windows 和 Mac 共用源码，保留会话自动轮换、SSH 回传名称、点击人物随机动作，以及 fork v0.8.3 的快捷功能、重置倒计时和已读修复。
+
+Windows 双击 `一键启动.cmd`，Mac 双击 `一键启动.command`。首次自动准备独立 `.venv`；需要 Python 3.12 / 3.13。首次无动画时选择已有完整高清素材目录；Git 不保存大型动画。
+
+在一台机器提交并推送修改，另一台运行 `同步更新源码.cmd` / `.command`。只允许干净工作区上从个人 fork 快进更新，本机环境、设置、认证和素材缓存各自保存。
+
+详见 [跨平台源码使用](docs/跨平台源码使用.md)。下方 Windows 安装器及历史发行说明用于上游追溯，不代表本跨平台源码分支已有对应安装包。
 
 | 功能 | 实际表现 |
 | --- | --- |

@@ -50,6 +50,6 @@ class ConversationRoster:
             kept=[v for sid in self.pinned for v in active if v['session']==sid and v not in waiting]
             chosen=(waiting+kept+[v for v in active if v not in kept and v not in waiting])[:2]
         else:chosen=done[:2]
-        self.pinned=[v['session'] for v in chosen]
+        if not self.page:self.pinned=[v['session'] for v in chosen]
         return chosen,max(0,len(pool)-len(chosen))
-    def cycle(self):self.page+=1
+    def cycle(self,direction=1):self.page+=direction

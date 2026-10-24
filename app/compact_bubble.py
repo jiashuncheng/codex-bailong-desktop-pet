@@ -432,10 +432,10 @@ class CompactBubble(Bubble):
         self.status_view.scrollRequested.connect(self.cycle_conversations)
         self.conversation_auto_scroll=True
         self.conversation_timer=QTimer(self)
-        self.conversation_timer.setInterval(6000)
+        self.conversation_timer.setInterval(3000)
         self.conversation_timer.timeout.connect(self._auto_cycle_conversations)
         self.conversation_timer.start()
-        self.status_view.setToolTip('每隔 6 秒轮换会话；悬停暂停，滚轮可手动切换')
+        self.status_view.setToolTip('每隔 3 秒轮换会话；悬停暂停，滚轮可手动切换')
         self.status_view.heightChanged.connect(self._status_height_changed)
         self.status_view.animation.finished.connect(self._status_height_finished)
         self.setWindowTitle('白龙增强版 · 状态气泡');self.redraw()

@@ -512,6 +512,7 @@ class DesktopPet(EnhancedPet):
         self.bubble.enabled=self.settings['bubble'];self.bubble.show_quota=self.settings['quota_visible']
         self.bubble.conversation_auto_scroll=self.settings['conversation_auto_scroll']
         self.bubble.conversation_timer.setInterval(round(self.settings['conversation_scroll_seconds']*1000))
+        self.bubble.status_view.setToolTip(f"每隔 {self.settings['conversation_scroll_seconds']:g} 秒轮换会话；悬停暂停，滚轮可手动切换")
         self.bubble.bubble_mode=self.settings['bubble_mode']
         self.bubble.capsule_action=self.settings['capsule_action']
         if 'bubble_mode' in values and self.bubble._editor_origin is not None:

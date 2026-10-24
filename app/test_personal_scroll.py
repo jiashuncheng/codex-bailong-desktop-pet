@@ -50,10 +50,15 @@ class ScrollTests(unittest.TestCase):
         sid='11111111-2222-4333-8444-000000000004'
         self.b.roster.observe(dict(session=sid,state='waiting',display='等待操作'))
         self.b.refresh_status();self.assertIn(sid,self.b.status_view.rows)
-    def test_interval_is_bounded_and_default_is_six(self):
-        self.assertEqual(normalized({})['conversation_scroll_seconds'],6)
+    def test_interval_is_bounded_and_default_is_three(self):
+        self.assertEqual(normalized({})['conversation_scroll_seconds'],3)
         for value in [float('nan'),None,'invalid']:
-            self.assertEqual(normalized({'conversation_scroll_seconds':value})['conversation_scroll_seconds'],6)
+            self.assertEqual(normalized({'conversation_scroll_seconds':value})['conversation_scroll_seconds'],3)
         self.assertEqual(normalized({'conversation_scroll_seconds':0})['conversation_scroll_seconds'],2)
+        migrated=normalized({'conversation_scroll_seconds':6})
+        self.assertEqual(migrated['conversation_scroll_seconds'],3)
+        self.assertEqual(normalized({'conversation_scroll_seconds':4})['conversation_scroll_seconds'],4)
+        migrated['conversation_scroll_seconds']=6
+        self.assertEqual(normalized(migrated)['conversation_scroll_seconds'],6)
 
 if __name__=='__main__':unittest.main()

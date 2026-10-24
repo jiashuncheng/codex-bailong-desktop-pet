@@ -11,7 +11,7 @@ def title_keywords(title):
     return re.split(r'[，。！？\n]',text,maxsplit=1)[0].strip(' ：:') or str(title)
 
 class ConversationRoster:
-    def __init__(self):self.items={};self.serial=0;self.page=0;self.pinned=[];self.names={};self.pending=set()
+    def __init__(self):self.items={};self.serial=0;self.page=0;self.pinned=[];self.names={};self.pending=set();self.rotating=None;self.next_slot=0;self.cursor=None;self.candidates=[]
     def update_names(self,names):
         changed=False
         for sid,title in names.items():
@@ -32,17 +32,32 @@ class ConversationRoster:
         start=old.get('start',self.serial) if old.get('state') in ACTIVE else self.serial
         detail=event.get('display') or {'thinking':'正在思考','working':'正在处理任务','responding':'正在整理回复','waiting':'等待你的操作','complete':'任务已完成','interrupted':'任务已中断'}.get(state,'等待新任务')
         self.items[sid]=dict(session=sid,state=state,compacting=bool(event.get('compacting')),waiting_reason=event.get('waiting_reason','') if state=='waiting' else '',title=self.names.get(sid) or event.get('conversation_name') or event.get('title') or old.get('title') or '会话 '+sid[-4:],text=detail,turn=event.get('turn',''),start=start,updated=self.serial)
-        if state in ('complete','waiting'):self.page=0
+        if state in ('complete','waiting') and (old.get('state')!=state or old.get('turn')!=event.get('turn','')):
+            self.page=0;self.rotating=None;self.next_slot=0;self.cursor=None
         # Bound old in-memory details; pending IDs remain available separately.
         disposable=sorted((s for s,v in self.items.items() if v['state'] not in ACTIVE and s not in self.pending),key=lambda s:self.items[s]['updated'],reverse=True)
         for sid in disposable[64:]:self.items.pop(sid,None)
     def selection(self,unread):
-        pending=list(dict.fromkeys(session_id(s) for s,t in reversed(unread)));self.pending=set(pending)
+        pending=list(dict.fromkeys(session_id(s) for s,t in reversed(unread)))
+        if set(pending)-self.pending:
+            self.page=0;self.rotating=None;self.next_slot=0;self.cursor=None
+        self.pending=set(pending)
         done=[dict(self.items.get(sid,dict(session=sid,title=self.names.get(sid) or '会话 '+sid[-4:],text='')),state='complete') for sid in pending]
         active=sorted([v for v in self.items.values() if v['state'] in ACTIVE and v['session'] not in pending],key=lambda v:(v['state']!='waiting',v['start'],v['session']))
         waiting=[v for v in active if v['state']=='waiting']
         pool=done+active
-        if self.page and pool:
+        self.candidates=[v['session'] for v in pool]
+        if self.rotating is not None:
+            lookup={v['session']:v for v in pool}
+            slots=[sid if sid in lookup else None for sid in self.rotating]
+            available=iter(sid for sid in self.candidates if sid not in slots)
+            slots=[sid if sid is not None else next(available,None) for sid in slots]
+            slots=[sid for sid in slots if sid is not None]
+            for sid in available:
+                if len(slots)>=2:break
+                slots.append(sid)
+            self.rotating=slots;chosen=[lookup[sid] for sid in slots]
+        elif self.page and pool:
             start=(self.page*2)%len(pool);chosen=(pool+pool)[start:start+min(2,len(pool))]
         elif done and active:
             keep=waiting[0] if waiting else next((v for sid in self.pinned for v in active if v['session']==sid),active[0]);chosen=[done[0],keep]
@@ -50,6 +65,21 @@ class ConversationRoster:
             kept=[v for sid in self.pinned for v in active if v['session']==sid and v not in waiting]
             chosen=(waiting+kept+[v for v in active if v not in kept and v not in waiting])[:2]
         else:chosen=done[:2]
-        if not self.page:self.pinned=[v['session'] for v in chosen]
+        if not self.page or self.rotating is not None:self.pinned=[v['session'] for v in chosen]
         return chosen,max(0,len(pool)-len(chosen))
-    def cycle(self,direction=1):self.page+=direction
+    def rotate_one(self,unread):
+        chosen,_=self.selection(unread)
+        slots=[v['session'] for v in chosen]
+        if len(self.candidates)<=len(slots):return False
+        if self.rotating is None:
+            self.next_slot=0;self.cursor=slots[-1] if slots else None
+        start=self.candidates.index(self.cursor)+1 if self.cursor in self.candidates else 0
+        incoming=next(self.candidates[(start+offset)%len(self.candidates)]
+                      for offset in range(len(self.candidates))
+                      if self.candidates[(start+offset)%len(self.candidates)] not in slots)
+        slot=self.next_slot%len(slots)
+        slots[slot]=incoming
+        self.rotating=slots;self.next_slot=(slot+1)%len(slots);self.cursor=incoming;self.page+=1
+        return True
+    def cycle(self,direction=1):
+        self.rotating=None;self.next_slot=0;self.cursor=None;self.page+=direction

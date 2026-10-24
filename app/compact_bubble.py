@@ -227,7 +227,8 @@ class StatusScroller(QLabel):
         if old_keys!=keys or changed_mode or not self.isVisible():
             self.animation.stop();self.row_positions={sid:(start[sid],index*self.line_height) for index,sid in enumerate(keys)}
             self._from_height=self.height();self._to_height=target
-            if self.isVisible() and not changed_mode:
+            moving=self.height()!=target or any(start[sid]!=index*self.line_height for index,sid in enumerate(keys))
+            if self.isVisible() and not changed_mode and moving:
                 self.progress=0.;self.animation.start()
             else:self._advance(1.)
         self.overflow.raise_();self.update()
@@ -435,7 +436,7 @@ class CompactBubble(Bubble):
         self.conversation_timer.setInterval(3000)
         self.conversation_timer.timeout.connect(self._auto_cycle_conversations)
         self.conversation_timer.start()
-        self.status_view.setToolTip('每隔 3 秒轮换会话；悬停暂停，滚轮可手动切换')
+        self.status_view.setToolTip('每隔 3 秒只替换一条会话；另一条保持原位，悬停暂停，滚轮可手动切换')
         self.status_view.heightChanged.connect(self._status_height_changed)
         self.status_view.animation.finished.connect(self._status_height_finished)
         self.setWindowTitle('白龙增强版 · 状态气泡');self.redraw()
@@ -794,7 +795,7 @@ class CompactBubble(Bubble):
         if self.panel_page!='status' or self.size_transition.running:return
         from PySide6.QtGui import QCursor
         if self.status_view.rect().contains(self.status_view.mapFromGlobal(QCursor.pos())):return
-        self.cycle_conversations()
+        if self.roster.rotate_one(self.status_indicator.unread):self.refresh_status()
     def cycle_conversations(self,direction=1):
         self.roster.cycle(direction);self.refresh_status()
         self.conversation_timer.start()

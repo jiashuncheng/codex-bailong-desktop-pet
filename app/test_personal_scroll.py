@@ -20,9 +20,21 @@ class ScrollTests(unittest.TestCase):
     def test_rotation_covers_all_five_with_two_rows(self):
         seen=set(self.b.status_view.rows)
         with patch('PySide6.QtGui.QCursor.pos',return_value=QPoint(-10000,-10000)):
+            changed_slots=[]
             for _ in range(5):
-                self.b._auto_cycle_conversations();seen.update(self.b.status_view.rows)
-                self.assertEqual(len(self.b.status_view.rows),2)
+                before=list(self.b.status_view.rows);widgets=dict(self.b.status_view.rows)
+                self.b.status_view.animation.setCurrentTime(300)
+                self.b._auto_cycle_conversations();after=list(self.b.status_view.rows);seen.update(after)
+                self.assertEqual(len(after),2)
+                changed=[i for i in range(2) if before[i]!=after[i]]
+                self.assertEqual(len(changed),1);changed_slots.extend(changed)
+                stable=after[1-changed[0]]
+                self.assertIs(self.b.status_view.rows[stable],widgets[stable])
+                from PySide6.QtCore import QAbstractAnimation
+                self.assertNotEqual(self.b.status_view.animation.state(),QAbstractAnimation.State.Running)
+                self.b.status_view.animation.setCurrentTime(300)
+                self.assertEqual(widgets[stable].y(),(1-changed[0])*self.b.status_view.line_height)
+            self.assertEqual(changed_slots,[0,1,0,1,0])
         self.assertEqual(len(seen),5)
     def test_timer_rotates_and_hover_and_disabled_pause(self):
         first=list(self.b.status_view.rows)
@@ -50,6 +62,36 @@ class ScrollTests(unittest.TestCase):
         sid='11111111-2222-4333-8444-000000000004'
         self.b.roster.observe(dict(session=sid,state='waiting',display='等待操作'))
         self.b.refresh_status();self.assertIn(sid,self.b.status_view.rows)
+    def test_background_refreshes_and_repeated_waiting_do_not_reset_rotation(self):
+        sid=list(self.b.roster.items)[-1]
+        self.b.roster.observe(dict(session=sid,state='waiting',display='等待操作'))
+        self.b.refresh_status()
+        with patch('PySide6.QtGui.QCursor.pos',return_value=QPoint(-10000,-10000)):
+            for _ in range(2):self.b._auto_cycle_conversations()
+        before=list(self.b.status_view.rows);page=self.b.roster.page
+        self.b.roster.observe(dict(session=sid,state='waiting',display='等待操作'))
+        self.b.refresh_status();self.b.refresh_status()
+        self.assertEqual(list(self.b.status_view.rows),before);self.assertEqual(self.b.roster.page,page)
+
+    def test_removed_session_replaces_only_its_slot_and_new_unread_is_prioritized(self):
+        from conversation_roster import ConversationRoster
+        r=ConversationRoster()
+        for sid in 'abcde':r.observe(dict(session=sid,state='working',title=sid))
+        r.rotate_one([]);before=[v['session'] for v in r.selection([])[0]]
+        r.observe(dict(session=before[0],state='idle'))
+        after=[v['session'] for v in r.selection([])[0]]
+        self.assertEqual(after[1],before[1]);self.assertNotIn(before[0],after);self.assertEqual(len(set(after)),2)
+        r.observe(dict(session='new',kind='complete'))
+        self.assertIn('new',[v['session'] for v in r.selection([('new','turn')])[0]])
+
+    def test_two_or_fewer_sessions_do_not_rotate(self):
+        from conversation_roster import ConversationRoster
+        r=ConversationRoster()
+        self.assertFalse(r.rotate_one([]))
+        for sid in 'ab':
+            r.observe(dict(session=sid,state='working'));before=r.selection([])
+            self.assertFalse(r.rotate_one([]));self.assertEqual(r.selection([]),before)
+
     def test_interval_is_bounded_and_default_is_three(self):
         self.assertEqual(normalized({})['conversation_scroll_seconds'],3)
         for value in [float('nan'),None,'invalid']:

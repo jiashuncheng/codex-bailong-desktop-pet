@@ -10,7 +10,7 @@
   },
   "no_assets_checks": {
     "passed": true,
-    "tests": 246
+    "tests": 249
   },
   "mac_native_ui": {
     "platform": "cocoa",

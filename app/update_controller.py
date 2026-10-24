@@ -45,7 +45,7 @@ class UpdateController(QObject):
     def publish(self,**changes):self.state.update(changes);self.changed.emit(self.snapshot())
     def configure(self,enabled):
         import sys
-        if sys.platform=='darwin' or not getattr(sys,'frozen',False):
+        if sys.platform=='darwin':
             self.enabled=False;self.initial.stop();self.timer.stop();return
         enabled=bool(enabled) and self.allow_auto and not self.closing
         if enabled and not self.enabled:self.initial.start();self.timer.start()

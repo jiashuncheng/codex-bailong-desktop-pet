@@ -62,7 +62,7 @@ class DesktopPet(EnhancedPet):
         self.codex_navigation=CodexNavigation(lambda session:open_codex(session),self)
         self.codex_navigation.error.connect(lambda text:self.say(text,6000))
         from update_controller import UpdateController
-        self.updates=UpdateController(VERSION,STATE_DIR/'updates',self,allow_auto=monitor)
+        self.updates=UpdateController(VERSION,STATE_DIR/'updates',self,allow_auto=monitor and getattr(sys,'frozen',False))
         self.updates.installerReady.connect(self.install_app_update)
         self.updates.changed.connect(self.app_update_state)
         self._update_exit_pending=False

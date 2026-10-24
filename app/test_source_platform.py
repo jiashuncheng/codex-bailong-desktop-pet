@@ -2,6 +2,9 @@
 from importlib.util import spec_from_file_location,module_from_spec
 from pathlib import Path
 from subprocess import CompletedProcess
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -11,6 +14,13 @@ def load_tool(name,path):
     spec=spec_from_file_location(name,ROOT/path);module=module_from_spec(spec);spec.loader.exec_module(module);return module
 
 class SourcePlatformTests(unittest.TestCase):
+    def test_bootstrap_outputs_chinese_with_an_english_console_encoding(self):
+        code="import runpy;runpy.run_path('launch.py',run_name='bootstrap_probe');print('\\u4e2d\\u6587')"
+        env=dict(os.environ,PYTHONIOENCODING='cp1252',PYTHONUTF8='0')
+        result=subprocess.run([sys.executable,'-c',code],cwd=ROOT,env=env,capture_output=True,timeout=10)
+        self.assertEqual(result.returncode,0,result.stderr.decode('utf-8','replace'))
+        self.assertEqual(result.stdout.decode('utf-8').strip(),'中文')
+
     def test_fresh_checkout_can_reuse_hd_when_light_preference_has_no_files(self):
         from test_material_store import MaterialStoreTests
         fixture=MaterialStoreTests('test_fresh_default_light_and_missing_hd_preference_falls_back');fixture.setUp()

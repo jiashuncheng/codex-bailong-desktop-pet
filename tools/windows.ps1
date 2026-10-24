@@ -1,5 +1,7 @@
 ﻿param([ValidateSet('start','stop','settings','setup','check','diagnose','local-hd','update')][string]$Action='start')
 $ErrorActionPreference='Stop'
+$env:PYTHONUTF8='1'
+$env:PYTHONIOENCODING='utf-8'
 $sourceRoot=Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $sourceRoot
 $candidatePaths=@($env:BAILONG_PYTHON,(Join-Path $sourceRoot '.venv\Scripts\python.exe'),(Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'))

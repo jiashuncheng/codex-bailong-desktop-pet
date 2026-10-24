@@ -11,7 +11,9 @@ APP=QApplication.instance() or QApplication([])
 
 def until(check):
     end=time.monotonic()+5
-    while not check() and time.monotonic()<end:QTest.qWait(10)
+    # Pump Qt and explicitly yield the Python interpreter to the QThread job.
+    # A tight sequence of Qt waits can starve Python workers on hosted macOS.
+    while not check() and time.monotonic()<end:APP.processEvents();time.sleep(.005)
     return check()
 
 class MaterialControllerTests(unittest.TestCase):

@@ -55,13 +55,16 @@ class SegmentTests(unittest.TestCase):
             _,done=self.s.boundary(self.p,16);self.assertFalse(done);self.assertEqual(self.s.phase,'seam');drain(self.p)
             _,done=self.s.boundary(self.p,16);self.assertFalse(done);self.assertEqual(self.s.phase,'body')
             self.assertEqual(self.p.frame_index,3);self.assertEqual([i for _,_,i in drain(self.p)],[4,5,6])
+        self.assertTrue(self.s.tail.ready.wait(4))
         self.s.request(False);self.s.boundary(self.p,16);self.assertEqual(self.s.phase,'exit');self.assertEqual(self.p.frame_index,7)
         self.assertEqual([i for _,_,i in drain(self.p)],[8,9]);self.assertTrue(self.s.boundary(self.p,16)[1]);self.assertFalse(self.s.active)
         self.assertGreater(self.p.loop_cache.stats()['hits'],8);self.assertLessEqual(self.p.loop_cache.stats()['bytes'],self.p.loop_cache.limit)
     def test_exit_requested_during_seam_returns_to_body_before_tail(self):
         self.s.begin(self.p,self.profile,self.owner,16);drain(self.p);self.s.boundary(self.p,16)
         self.s.request(False);drain(self.p);self.s.boundary(self.p,16)
-        self.assertEqual(self.s.phase,'body');drain(self.p);self.s.boundary(self.p,16);self.assertEqual(self.s.phase,'exit')
+        self.assertEqual(self.s.phase,'body');drain(self.p)
+        self.assertTrue(self.s.tail.ready.wait(4))
+        self.s.boundary(self.p,16);self.assertEqual(self.s.phase,'exit')
     def test_cancel_stops_worker_without_retaining_owner(self):
         self.s.begin(self.p,self.profile,self.owner,32);self.s.cancel()
         self.assertFalse(self.s.active);self.assertIsNone(self.s.owner);self.assertIsNone(self.s.warmer)
@@ -96,6 +99,7 @@ class SegmentTests(unittest.TestCase):
             self.assertEqual(self.s.speed_factor(self.p),1.)
             self.p.playhead=(7-start)/48;self.assertAlmostEqual(self.s.speed_factor(self.p),self.s.cycle_speed)
         self.assertEqual(set(seen),{0,1,2});self.assertTrue(all(a!=b for a,b in zip(seen,seen[1:])));self.assertLessEqual(self.p.loop_cache.stats()['bytes'],self.p.loop_cache.limit)
+        self.assertTrue(self.s.tail.ready.wait(4))
         self.s.request(False);self.s.boundary(self.p,16);self.assertEqual(self.s.phase,'exit');self.assertEqual(self.p.frame_index,7);drain(self.p)
     def test_unprepared_variant_is_not_selected_and_range_must_share_tail(self):
         self.item['sustained']['variants']=[dict(start=2,end=5,seamFile='seam.webp',seamFrames=2)]

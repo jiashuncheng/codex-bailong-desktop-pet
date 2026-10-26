@@ -58,7 +58,9 @@ def destination(path,kind,source=None):
     if source:
         old=plain(source)
         if p==old or p.is_relative_to(old) or old.is_relative_to(p):raise ValueError('新旧目录不能相同或相互包含')
-    state=plain(data_dir())
+    # The platform data adapter may use macOS's /var -> /private/var alias.
+    # Canonicalize this trusted location; user source/target links stay rejected.
+    state=plain(data_dir().resolve())
     if kind=='program' and (p.is_relative_to(state) or state.is_relative_to(p)):raise ValueError('程序目录不能包含用户数据目录')
     if p.exists() and any(p.iterdir()):
         try:marker=json.loads((p/MARKER).read_text(encoding='utf-8'))

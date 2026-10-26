@@ -1,5 +1,5 @@
 """Fork features remain valid with upstream cached validation and relocation."""
-import json,unittest
+import json,unittest,sys
 from unittest.mock import patch
 from pathlib import Path
 from material_store import MaterialStore
@@ -26,3 +26,11 @@ class MergeCompatibilityTests(unittest.TestCase):
         from storage_locations import data_dir
         with patch('platform_support.data_dir',return_value=self.fixture.root/'platform-private'):
             self.assertEqual(data_dir(),self.fixture.root/'platform-private')
+    @unittest.skipUnless(sys.platform=='darwin','macOS system temporary-directory alias')
+    def test_mac_system_data_alias_does_not_block_material_relocation(self):
+        from storage_locations import destination
+        state=self.fixture.state
+        if not state.is_relative_to('/private/var'):self.skipTest('temporary root is outside /private/var')
+        alias=Path('/var')/state.relative_to('/private/var')
+        with patch('platform_support.data_dir',return_value=alias):
+            self.assertEqual(destination(self.fixture.root/'new-materials','materials',self.fixture.store.cache),self.fixture.root/'new-materials')

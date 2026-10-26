@@ -4,7 +4,7 @@
 
 在 Windows 和 Mac 上使用同一份 Python 源码，查看 Codex 任务状态、接收完成提醒、统计额度与 Token，并与白龙互动。保留源码和一键执行脚本，方便后续修改、更新及两端同步。
 
-**当前源码版本：v0.10.0 / UI88**。已合入 [Wunsch2048 增强版](https://github.com/Wunsch2048/codex-bailong-desktop-pet) 的 **v1.1.0**（`0b36eb8`），保留本仓库的 Windows/macOS 适配、Token 同步、SSH、会话轮换和随机动作。角色与原始桌宠来自 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet)。
+**当前源码版本：v0.10.1 / UI88**。已合入 [Wunsch2048 增强版](https://github.com/Wunsch2048/codex-bailong-desktop-pet) 的 **v1.1.0**（`0b36eb8`），保留本仓库的 Windows/macOS 适配、Token 同步、SSH、会话轮换和随机动作。角色与原始桌宠来自 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet)。
 
 [源码使用与更新](docs/跨平台源码使用.md) · [上游 v1.1.0 更新](docs/releases/v1.1.0.md) · [来源与授权](NOTICE.md) · [反馈问题](https://github.com/jiashuncheng/codex-bailong-desktop-pet/issues)
 

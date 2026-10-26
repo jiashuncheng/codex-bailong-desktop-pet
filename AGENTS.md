@@ -1,6 +1,6 @@
 # 项目协作
 
-这是 Windows/macOS 共用的白龙桌宠个性化源码工程。当前 v0.10.0 / UI88，合入上游 v1.1.0（0b36eb8），保留个人 Windows 修改与 Mac 适配。先阅读 README.md、NOTICE.md、docs/DEVELOPMENT.md 与 docs/迭代历史.txt。
+这是 Windows/macOS 共用的白龙桌宠个性化源码工程。当前 v0.10.1 / UI88，合入上游 v1.1.0（0b36eb8），保留个人 Windows 修改与 Mac 适配。先阅读 README.md、NOTICE.md、docs/DEVELOPMENT.md 与 docs/迭代历史.txt。
 
 - 保持原角色比例、清晰度和动画播放边界；自动动作不发声。
 - 未读完成提醒优先于视频全屏让位；手动关闭置顶不得自动重开。

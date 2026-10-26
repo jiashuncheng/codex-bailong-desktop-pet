@@ -113,6 +113,14 @@ def bridge_action(python, stop=False):
                          stdout=output, stderr=output, **background_options())
 
 
+def started_source_is_ready(state, process, python):
+    if not state.get('source_run'):
+        return False
+    # Windows venv python.exe can retain its own PID while the actual Python
+    # child writes runtime.json. Verify this project's real source process.
+    return state.get('pid') == process.pid or is_running(state, python)
+
+
 def start_pet(python, autostart=False):
     if autostart and is_running(read_runtime(), python):
         return
@@ -129,7 +137,7 @@ def start_pet(python, autostart=False):
     end = time.monotonic() + 35
     while time.monotonic() < end:
         state = read_runtime()
-        if state.get('pid') == process.pid and state.get('source_run'):
+        if started_source_is_ready(state, process, python):
             print('白龙桌宠源码版已启动。修改源码后，再次双击“一键启动”即可重启生效。')
             print('菜单栏白龙图标可打开设置、找回人物或退出。')
             return

@@ -14,6 +14,20 @@ def load_tool(name,path):
     spec=spec_from_file_location(name,ROOT/path);module=module_from_spec(spec);spec.loader.exec_module(module);return module
 
 class SourcePlatformTests(unittest.TestCase):
+    def test_source_readiness_handles_real_venv_child_pid(self):
+        import json,time
+        tool=load_tool('source_launcher_ready','launch.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder).resolve();state_file=root/'ready.json';entry=root/'run_source.py'
+            entry.write_text('import os,json,time\nfrom pathlib import Path\nPath('+repr(str(state_file))+').write_text(json.dumps(dict(pid=os.getpid(),source_run=True)))\ntime.sleep(3)\n',encoding='utf-8')
+            process=subprocess.Popen([sys.executable,str(entry)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            try:
+                deadline=time.monotonic()+5
+                while not state_file.exists() and time.monotonic()<deadline:time.sleep(.01)
+                state=json.loads(state_file.read_text())
+                with patch.object(tool,'ROOT',root):self.assertTrue(tool.started_source_is_ready(state,process,Path(sys.executable)))
+            finally:process.wait(timeout=6)
+
     def test_bootstrap_outputs_chinese_with_an_english_console_encoding(self):
         code="import runpy;runpy.run_path('launch.py',run_name='bootstrap_probe');print('\\u4e2d\\u6587')"
         env=dict(os.environ,PYTHONIOENCODING='cp1252',PYTHONUTF8='0')

@@ -38,6 +38,14 @@ class Release:
     program_info_url:str=''
     fallback:object=None
     reason:str=''
+    optional_materials:bool=False
+    animation_info_name:str=''
+    animation_info_url:str=''
+    animation_info_sha:str=''
+    animation_info_size:int=0
+    animation_catalog:object=None
+    animation_tier:str=''
+    minimum_program_version:str=''
     @property
     def url(self):return release_url(self.tag)
 
@@ -50,16 +58,24 @@ def parse_release(data):
     program_name=f'bailong-desktop-pet-{version}-program.zip';info_name=f'bailong-desktop-pet-{version}-program.json'
     program=next((a for a in assets if a.get('name')==program_name and a.get('state')=='uploaded'),None)
     info=next((a for a in assets if a.get('name')==info_name and a.get('state')=='uploaded' and type(a.get('size')) is int and 0<a['size']<=65536),None)
-    if not asset and not (program and info):raise UpdateError('该版本尚未提供完整 Windows 安装包')
+    animation_name=f'bailong-desktop-pet-{version}-animation.json'
+    animation=next((a for a in assets if a.get('name')==animation_name and a.get('state')=='uploaded' and type(a.get('size')) is int and 0<a['size']<=131072),None)
+    if not asset and not (program and info) and not animation:raise UpdateError('该版本尚未提供可安装的更新包')
     if program and info:asset=program
+    elif animation:asset=animation
     size=asset.get('size')
     if type(size) is not int or not 0<size<=MAX_PACKAGE:raise UpdateError('更新文件大小异常')
     digest=str(asset.get('digest') or '').lower();sha=digest[7:] if re.fullmatch(r'sha256:[0-9a-f]{64}',digest) else ''
     checksum=next((a for a in assets if a.get('name')=='SHA256SUMS.txt' and a.get('state')=='uploaded' and 0<a.get('size',0)<=65536),None)
     result=Release(version,tag,asset['name'],asset_url(asset.get('browser_download_url'),tag,asset['name']),size,sha,str(data.get('body') or '')[:20000],str(data.get('published_at') or ''),asset_url(checksum['browser_download_url'],tag,'SHA256SUMS.txt') if checksum else '')
     if program and info:
-        fallback=parse_release(dict(data,assets=[a for a in assets if a is not program and a is not info])) if full_asset else None
+        fallback=parse_release(dict(data,assets=[a for a in assets if a is not program and a is not info and a is not animation])) if full_asset else None
         result=replace(result,kind='program',program_info_url=asset_url(info['browser_download_url'],tag,info_name),fallback=fallback)
+    elif animation:result=replace(result,kind='animation')
+    if animation:
+        digest=str(animation.get('digest') or '')
+        result=replace(result,animation_info_name=animation_name,animation_info_url=asset_url(animation.get('browser_download_url'),tag,animation_name),
+            animation_info_sha=digest[7:] if re.fullmatch('sha256:[0-9a-f]{64}',digest) else '',animation_info_size=animation['size'])
     return result
 
 def allowed_redirect(url):
@@ -103,6 +119,8 @@ def release_without_api(opener=open_url,cancel=lambda:False):
     for line in sums.splitlines():
         match=re.fullmatch(r'([0-9a-fA-F]{64})\s+\*?(bailong-desktop-pet-(\d+\.\d+\.\d+)-windows-x64\.zip)',line)
         if match:candidates.append((match[1].lower(),match[2],match[3]))
+    if not candidates:
+        return patch_without_api(sums,opener,cancel)
     if len(candidates)!=1:raise UpdateError('备用通道缺少唯一完整包校验值')
     sha,name,version=candidates[0];version='.'.join(map(str,version_tuple(version)));tag='v'+version
     base='https://github.com/'+REPOSITORY+'/releases/download/'+tag+'/'
@@ -116,6 +134,7 @@ def release_without_api(opener=open_url,cancel=lambda:False):
     full=Release(version,tag,name,asset_url(base+name,tag,name),size,sha,
         '通过 GitHub 下载通道核验更新。完整更新说明请点击“在 GitHub 查看”。',checksum_url=base+'SHA256SUMS.txt',reason='GitHub API 暂不可用，已通过下载通道核验更新')
     records={m[2]:m[1].lower() for line in sums.splitlines() if (m:=re.fullmatch(r'([0-9a-fA-F]{64})\s+\*?(.+)',line))}
+    if f'bailong-desktop-pet-{version}-animation.json' in records:return patch_without_api(sums,opener,cancel)
     program=f'bailong-desktop-pet-{version}-program.zip';info=f'bailong-desktop-pet-{version}-program.json'
     if program in records and info in records:
         try:
@@ -131,7 +150,31 @@ def release_without_api(opener=open_url,cancel=lambda:False):
         except (UpdateError,OSError,ValueError):pass
     return full
 
-def prepare_release(release,current,opener,cancel,app_root):
+def patch_without_api(sums,opener,cancel):
+    records={m[2]:m[1].lower() for line in sums.splitlines() if (m:=re.fullmatch(r'([0-9a-fA-F]{64})\s+\*?(.+)',line))}
+    versions={m[1] for name in records if (m:=re.fullmatch(r'bailong-desktop-pet-(\d+\.\d+\.\d+)-(?:program|animation)\.json',name))}
+    if len(versions)!=1:raise UpdateError('备用通道补丁版本不明确')
+    version=versions.pop();version_tuple(version);tag='v'+version
+    base='https://github.com/'+REPOSITORY+'/releases/download/'+tag+'/'
+    assets=[]
+    for suffix in ('program.json','animation.json'):
+        name=f'bailong-desktop-pet-{version}-{suffix}'
+        if name not in records:continue
+        raw=read_small(base+name,131072,opener,cancel)
+        if hashlib.sha256(raw).hexdigest()!=records[name]:raise UpdateError('备用通道补丁描述校验失败')
+        assets.append(dict(name=name,size=len(raw),state='uploaded',browser_download_url=base+name,digest='sha256:'+records[name]))
+    name=f'bailong-desktop-pet-{version}-program.zip'
+    if name in records:
+        check_cancel(cancel)
+        with opener(base+name,{'Range':'bytes=0-0'}) as response:
+            match=re.fullmatch(r'bytes 0-\d+/(\d+)',response.headers.get('Content-Range',''))
+            if getattr(response,'status',200)==206 and not match:raise UpdateError('程序包大小响应无效')
+            size=int(match[1]) if match else int(response.headers.get('Content-Length','0'))
+        assets.append(dict(name=name,size=size,state='uploaded',browser_download_url=base+name,digest='sha256:'+records[name]))
+    assets.append(dict(name='SHA256SUMS.txt',size=len(sums.encode()),state='uploaded',browser_download_url=base+'SHA256SUMS.txt'))
+    return replace(parse_release(dict(tag_name=tag,assets=assets,body='补丁内容请在 GitHub 查看。')),reason='已通过 GitHub 下载通道核验补丁')
+
+def prepare_release(release,current,opener,cancel,app_root,state_dir=None,program_version=None):
     if version_tuple(release.version)>version_tuple(current):
         if release.kind=='program':
             from program_updates import local_materials,MaterialMismatch
@@ -139,23 +182,28 @@ def prepare_release(release,current,opener,cancel,app_root):
             try:
                 info=json.loads(read_small(release.program_info_url,65536,opener,cancel))
                 if info.get('schema')!=1 or info.get('kind')!='program' or info.get('version')!=release.version or not re.fullmatch('[0-9a-f]{24}',str(info.get('materialId',''))):raise MaterialMismatch('纯程序包说明不匹配')
-                local_materials(app_root or ROOT,info['materialId'],cancel)
-                release=ensure_checksum(replace(release,material_id=info['materialId']),opener,cancel)
+                optional=info.get('optionalMaterials') is True
+                if not optional:local_materials(app_root or ROOT,info['materialId'],cancel)
+                release=ensure_checksum(replace(release,material_id=info['materialId'],optional_materials=optional),opener,cancel)
             except UpdateCancelled:raise
             except (UpdateError,OSError,ValueError,KeyError,AttributeError) as exc:
                 if not release.fallback:raise UpdateError('本机暂不能使用该纯程序包，且该版本未提供完整包') from exc
                 release=replace(release.fallback,reason='本地素材不兼容或程序包说明不可用，改用完整安装包')
+        if release.animation_info_url:
+            from animation_updates import prepare
+            state_dir=state_dir or Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'BailongEnhanced'
+            release=prepare(release,release.version if release.kind=='program' else (program_version or current),state_dir,opener,cancel)
         release=ensure_checksum(release,opener,cancel)
     return release
 
-def check_release(current,opener=open_url,cancel=lambda:False,app_root=None):
+def check_release(current,opener=open_url,cancel=lambda:False,app_root=None,state_dir=None,program_version=None):
     try:
         release=parse_release(json.loads(read_small(API,2_000_000,opener,cancel)))
-        return prepare_release(release,current,opener,cancel,app_root)
+        return prepare_release(release,current,opener,cancel,app_root,state_dir,program_version)
     except urllib.error.HTTPError as exc:
         if exc.code==404:raise NoRelease('暂无公开稳定版本') from None
         if exc.code in (403,429):
-            try:return prepare_release(release_without_api(opener,cancel),current,opener,cancel,app_root)
+            try:return prepare_release(release_without_api(opener,cancel),current,opener,cancel,app_root,state_dir,program_version)
             except UpdateCancelled:raise
             except (UpdateError,OSError,ValueError,AttributeError,UnicodeError):
                 limited=exc.code==429 or exc.headers and exc.headers.get('X-RateLimit-Remaining')=='0'
@@ -244,7 +292,9 @@ def prune_completed(root,current):
     prune_program_cache(root,current)
     root=Path(root)
     if not root.is_dir() or root.is_symlink() or root.is_junction():return
-    for base in root.iterdir():
+    try:entries=tuple(root.iterdir())
+    except OSError:return
+    for base in entries:
         if not base.is_dir() or base.is_symlink() or base.is_junction():continue
         try:
             if version_tuple(base.name)>version_tuple(current):continue

@@ -38,12 +38,16 @@ def scan_file(index,db,path,stop):
     row=db.execute('SELECT offset,highwater,session,model,turn,input_water,output_water FROM files WHERE path=?',(key,)).fetchone()
     offset,previous,sid,model,turn,pi,po=row or (0,0,path.stem,UNKNOWN,'',0,0)
     if size<offset:offset,previous,sid,model,turn,pi,po=0,0,path.stem,UNKNOWN,'',0,0;index.format_known.pop(key,None)
+    # The saved offset survives a restart; the in-memory format cache does not.
+    # A newly appended tail may contain only progress/completion events that
+    # the token scanner deliberately skips. Validate the header independently
+    # of whether the file grew, and retry a previous negative after it settles.
+    if not index.format_known.get(key):
+        try:
+            with path.open('rb') as header:meta=json.loads(header.readline(4*1024*1024))
+            index.format_known[key]=isinstance(meta,dict) and meta.get('type') in ('session_meta','event_msg','response_item','turn_context')
+        except (ValueError,UnicodeError):index.format_known[key]=False
     if size==offset and row:
-        if key not in index.format_known:
-            try:
-                with path.open('rb') as header:meta=json.loads(header.readline(4*1024*1024))
-                index.format_known[key]=isinstance(meta,dict) and meta.get('type') in ('session_meta','event_msg','response_item','turn_context')
-            except (ValueError,UnicodeError):index.format_known[key]=False
         return index.format_known[key]
     recognized=index.format_known.get(key,False)
     if not sid:sid=path.stem

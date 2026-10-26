@@ -1,7 +1,7 @@
 """Run from the downloaded verified program, using the existing install transaction."""
 import os,sys
 from pathlib import Path
-from PySide6.QtCore import QThread,Signal,QLockFile
+from PySide6.QtCore import QThread,Signal,QLockFile,QTimer
 from PySide6.QtWidgets import QApplication
 from installer import Installer,DATA,ROOT,startup_preference
 from program_updates import verify_ready
@@ -26,7 +26,9 @@ class ProgramApplyJob(QThread):
         except Exception as exc:self.failed.emit(str(exc)[:300])
 
 class ProgramInstaller(Installer):
-    def __init__(self,source):self.source=source;super().__init__(quick=True)
+    def __init__(self,source):
+        self.source=source;super().__init__(quick=True);self.browse.setEnabled(False)
+        if not self.existing:QTimer.singleShot(0,self.start)
     def start(self):
         if self.job and self.job.isRunning():return
         self.install_button.setEnabled(False);self.status.setText('正在更新程序，复用本地动画素材…')

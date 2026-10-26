@@ -19,6 +19,17 @@ class CoreTests(unittest.TestCase):
         r.apply('a',event('task_started',turn_id='2'))
         self.assertEqual(sum(e['kind']=='complete' for e in r.apply('a',event('task_complete'))),1)
 
+    def test_ipc_terminal_turn_rejects_late_log_and_compaction(self):
+        r=ActivityReducer();r.apply('s',event('task_started',turn_id='old'))
+        self.assertEqual(r.terminate('s','interrupted','old')[-1]['state'],'interrupted')
+        self.assertEqual(r.apply('s',{'type':'response_item','payload':{'type':'message','role':'assistant','content':[{'text':'late'}]}}),[])
+        self.assertEqual(r.apply('s',event('task_complete')),[])
+        self.assertEqual(r.set_compacting('s',True,'old'),[])
+        self.assertEqual(r.sessions['s'].state,'interrupted')
+        self.assertEqual(r.apply('s',event('task_started',turn_id='old')),[])
+        self.assertEqual(r.apply('s',event('task_started',turn_id='new'))[-1]['state'],'thinking')
+        self.assertEqual(r.sessions['s'].closed_turn,'')
+
     def test_final_message_does_not_falsely_claim_task_complete(self):
         r=ActivityReducer()
         r.apply('s',event('task_started'))

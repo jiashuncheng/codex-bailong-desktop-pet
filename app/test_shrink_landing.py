@@ -74,8 +74,9 @@ class ShrinkLandingTests(unittest.TestCase):
         plot=b.deck.content.plot
         self.assertEqual(normal.values['quota:一周'],.73);self.assertEqual(plot.reveal.progress,1.);self.assertFalse(plot.reveal.pending)
         t.complete();QTest.qWait(70);self.assertEqual(normal.values['quota:一周'],.73)
-        b.set_mode('mini');satellite=b.island.parentWidget().findChild(QuotaSatellite);self.assertEqual(satellite.reveal.progress,1.);self.assertFalse(satellite.reveal.pending)
-        t.complete();QTest.qWait(70);self.assertEqual(satellite.reveal.progress,1.)
+        b.set_mode('mini');satellite=b.island.parentWidget().findChild(QuotaSatellite)
+        self.assertEqual(satellite.reveal.progress,0.);self.assertTrue(satellite.reveal.pending)
+        t.complete();QTest.qWait(700);self.assertEqual(satellite.reveal.progress,1.)
     def test_shrink_content_has_no_empty_interval_between_both_views(self):
         b=self.b;self.expand()
         for action in (b.toggle_details,lambda:b.set_mode('mini')):

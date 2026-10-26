@@ -164,6 +164,8 @@ def build(legacy_formats=False,application_only=True):
         subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--windowed','--icon',str(ROOT/'app/branding/bailong.ico'),'--onefile','--name',f'白龙桌宠-{VERSION}-安装程序','--distpath','release','--workpath','build/installer','--specpath','build','--exclude-module','imageio_ffmpeg',*tls_data,'--add-data',str(payload)+';.','app/installer.py'],cwd=ROOT,check=True)
     subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--windowed','--icon',str(ROOT/'app/branding/bailong.ico'),'--onefile','--name',f'白龙桌宠-{VERSION}-一键部署','--distpath','release','--workpath','build/quick-installer','--specpath','build','--exclude-module','imageio_ffmpeg',*tls_data,'--add-data',str(payload.resolve())+';.','app/installer.py'],cwd=ROOT,check=True)
     build_windows_bundle(VERSION)
+    from build_card_only import package as package_cards
+    package_cards(release,ROOT/'release')
     files={}
     for p in (ROOT/'release').iterdir():
         if p.is_file() and p.name!='SHA256.json':

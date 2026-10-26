@@ -10,6 +10,8 @@ from PySide6.QtGui import QTextCursor,QDesktopServices
 from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QComboBox,QPushButton,
     QPlainTextEdit,QLabel,QCheckBox,QMessageBox,QDialog,QFormLayout,QLineEdit,QSpinBox,QStackedWidget,QScrollArea,QMenu)
 from desktop_core import atomic_json
+from choice_controls import ChoiceCombo as QComboBox
+from number_controls import IntegerField as QSpinBox
 from inline_confirmation import InlineConfirmation
 from chat_config import (CHAT_DEFAULT,load_chat_config,save_chat_config,load_provider_key,
     provider_key_present,clear_provider_key,delete_chat_provider)

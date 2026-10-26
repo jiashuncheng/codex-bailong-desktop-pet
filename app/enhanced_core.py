@@ -8,7 +8,7 @@ from dataclasses import dataclass,field
 from datetime import datetime
 from pathlib import Path
 from status_reactions import tool_activity
-from session_read_state import session_id,is_subagent_metadata
+from session_read_state import session_id,is_subagent_metadata,rollout_alias
 
 
 def clean_text(text, limit=180):
@@ -80,8 +80,11 @@ def windows_from_limits(limits):
         if not isinstance(minutes, (int, float)) or minutes <= 0:
             continue
         name = {300: '5小时', 10080: '一周'}.get(minutes, f'{minutes:g}分钟')
-        windows.append({'name': name, 'remaining': round(100-used, 1),
-                        'resetsAt': item.get('resetsAt', item.get('resets_at'))})
+        window={'name': name, 'remaining': round(100-used, 1),
+                'resetsAt': item.get('resetsAt', item.get('resets_at'))}
+        plan=limits.get('planType',limits.get('plan_type'))
+        if plan:window['plan']=str(plan).lower()[:40]
+        windows.append(window)
     return windows
 
 
@@ -91,6 +94,7 @@ class Session:
     state: str = 'idle'
     message: str = '等待新的 Codex 消息'
     turn: str = ''
+    closed_turn: str = ''
     done: bool = True
     source_subagent: bool = False
     provenance_known: bool = False
@@ -118,7 +122,7 @@ class ActivityReducer:
     def terminate(self,sid,status,turn):
         s=self.sessions.get(sid)
         if not s or s.source_subagent or s.done or not turn or s.turn!=turn or status not in ('completed','failed','interrupted'):return []
-        s.done=True;s.compacting=False;s.waiting_reason=''
+        s.done=True;s.closed_turn=turn;s.compacting=False;s.waiting_reason=''
         s.state='complete' if status=='completed' else 'interrupted'
         s.message=s.display={'completed':'任务已完成','failed':'任务执行失败','interrupted':'任务已中断'}[status]
         events=[]
@@ -136,8 +140,9 @@ class ActivityReducer:
     def set_compacting(self,sid,value,turn=''):
         s=self.sessions.setdefault(sid,Session())
         if s.source_subagent or bool(value)==s.compacting:return []
+        if value and s.done and (not turn or turn==s.closed_turn or turn==s.turn):return []
         if turn and s.turn and turn!=s.turn and not s.done:return []
-        if turn and (not s.turn or s.done):s.turn=turn
+        if turn and (not s.turn or s.done):s.turn=turn;s.closed_turn=''
         s.compacting=bool(value)
         return [self._status(sid,s)]
 
@@ -169,6 +174,10 @@ class ActivityReducer:
             if not historical:
                 events.append(self.last_quota)
         typ = p.get('type')
+        if s.closed_turn and s.turn==s.closed_turn:
+            new_turn=str(p.get('turn_id') or '') if kind=='event_msg' and typ in ('task_started','turn_started') else ''
+            if new_turn and new_turn!=s.closed_turn:s.closed_turn=''
+            else:return events
         changed = False
         user_message = False
         if kind=='compacted':
@@ -287,7 +296,7 @@ class RolloutTail:
         self.home=__import__('codex_connection').data_home(home);self.reducer=ActivityReducer()
         self.catalog=LogCatalog(self.home);self.files={};self.last_scan=0;self.seeded=False
         self.health=dict(state='unknown',code='starting');self.pins=set();self.generation=None
-        self.discovered=set();self.queue=[];self.by_id={}
+        self.discovered=set();self.file_ids={};self.queue=[];self.by_id={}
     def set_pins(self,ids):self.pins={session_id(s) for s in ids}
     def poll(self):
         from performance_metrics import METRICS
@@ -295,13 +304,14 @@ class RolloutTail:
         if self.last_scan==0:self.catalog.last_check=-1e9
         paths=self.catalog.discover();self.last_scan=now;errors+=self.catalog.errors
         if self.generation!=self.catalog.revision:
+            self.file_ids={p:rollout_alias(p) for p in paths}
             self.generation=self.catalog.revision;new=paths-self.discovered
             def modified(p):
                 try:return p.stat().st_mtime
                 except OSError:return 0
             ordered=sorted(new,key=modified,reverse=True)
             self.queue.extend((p,self.seeded) for p in (ordered if self.seeded else ordered[:16]))
-            self.discovered=set(paths);self.by_id={session_id(p.stem):p for p in sorted(paths,key=lambda p:(self.home/'sessions') in p.parents)}
+            self.discovered=set(paths);self.by_id={session_id(self.file_ids[p]):p for p in sorted(paths,key=lambda p:(self.home/'sessions') in p.parents)}
         active={session_id(sid) for sid,s in self.reducer.sessions.items() if not s.source_subagent and (not s.done or s.compacting)}
         important=active|self.pins
         # DB-active/unread/displayed identities are read even if their log has
@@ -311,20 +321,20 @@ class RolloutTail:
         live_new={p for p,is_new in self.queue+candidates if is_new}
         for path,is_new in candidates:
             if path in self.files:continue
-            previous=next((p for p in self.files if session_id(p.stem)==session_id(path.stem) and p not in paths),None)
+            previous=next((p for p in self.files if session_id(self.files[p]['sid'])==session_id(self.file_ids[path]) and p not in paths),None)
             if previous is not None:self.files[path]=self.files.pop(previous);continue
-            canonical=session_id(path.stem)
+            sid=self.file_ids[path];canonical=session_id(sid)
             is_new=path in live_new and (self.home/'sessions') in path.parents
-            if canonical!=path.stem and canonical in self.reducer.sessions and path.stem not in self.reducer.sessions:
-                self.reducer.sessions[path.stem]=self.reducer.sessions.pop(canonical)
+            if canonical!=sid and canonical in self.reducer.sessions and sid not in self.reducer.sessions:
+                self.reducer.sessions[sid]=self.reducer.sessions.pop(canonical)
             try:
                 st=path.stat();recognized=False
                 with path.open('rb') as header:meta=json.loads(header.readline(4*1024*1024))
                 if isinstance(meta,dict) and meta.get('type')=='session_meta':
-                    self.reducer.apply(path.stem,meta,historical=True);recognized=True
+                    self.reducer.apply(sid,meta,historical=True);recognized=True
             except (ValueError,UnicodeError):recognized=False
             except OSError:errors+=1;continue
-            self.files[path]=dict(offset=0 if is_new else max(0,st.st_size-512000),buffer=b'',history=not is_new,
+            self.files[path]=dict(sid=sid,offset=0 if is_new else max(0,st.st_size-512000),buffer=b'',history=not is_new,
                 skip=not is_new and st.st_size>512000,recognized=recognized,touched=now,discovery_cutoff=st.st_ctime if is_new else None)
         for path,state in list(self.files.items()):
             if path not in paths:
@@ -342,7 +352,7 @@ class RolloutTail:
             lines=(state['buffer']+raw).split(b'\n');state['buffer']=lines.pop()
             if len(state['buffer'])>4*1024*1024:state['buffer']=b'';state['skip']=True
             if state['skip'] and lines:lines.pop(0);state['skip']=False
-            sid=path.stem
+            sid=state['sid']
             # A DB seed can use UUID while the log has a rollout-* alias.
             canonical=session_id(sid)
             if canonical!=sid and canonical in self.reducer.sessions and sid not in self.reducer.sessions:
@@ -359,7 +369,7 @@ class RolloutTail:
         active={session_id(sid) for sid,s in self.reducer.sessions.items() if not s.source_subagent and (not s.done or s.compacting)}
         important|=active
         recent=sorted(self.files,key=lambda p:self.files[p]['touched'],reverse=True)[:32]
-        self.files={p:v for p,v in self.files.items() if p in recent or session_id(p.stem) in important}
+        self.files={p:v for p,v in self.files.items() if p in recent or session_id(v['sid']) in important}
         protected={p.stem for p in self.files}|important
         disposable=sorted((sid for sid,s in self.reducer.sessions.items() if sid not in protected and session_id(sid) not in important and s.done),key=lambda sid:self.reducer.sessions[sid].updated,reverse=True)
         for sid in disposable[256:]:self.reducer.sessions.pop(sid,None)

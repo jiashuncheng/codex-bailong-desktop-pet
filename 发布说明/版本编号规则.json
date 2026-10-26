@@ -1,9 +1,40 @@
 {
-  "effectiveVersion": "0.7.0",
-  "effectiveDate": "2026-10-21",
-  "patchRange": [0, 9],
-  "carry": "第三段从9继续递增时，第二段加1，第三段归0；第二段不限制为单个数字",
-  "examples": ["0.7.8 → 0.7.9", "0.7.9 → 0.8.0", "0.9.9 → 0.10.0"],
+  "schema": 2,
+  "scheme": "Semantic Versioning 2.0.0",
+  "effectiveFrom": "下一次新版本递增起生效；既有版本与回退目录名不变",
+  "stableFormat": "MAJOR.MINOR.PATCH",
+  "numericRules": {
+    "minimum": 0,
+    "leadingZeros": false,
+    "digitCount": "不限制位数"
+  },
+  "bumpRules": {
+    "patch": "修复问题、性能优化及不改变现有功能兼容性的调整；PATCH 加 1",
+    "minor": "增加向下兼容的新功能；MINOR 加 1，PATCH 归零",
+    "major": "包含不兼容变更；MAJOR 加 1，MINOR 与 PATCH 归零"
+  },
+  "examples": [
+    { "change": "patch", "from": "1.0.8", "to": "1.0.9" },
+    { "change": "patch", "from": "1.0.9", "to": "1.0.10" },
+    { "change": "minor", "from": "1.0.10", "to": "1.1.0" },
+    { "change": "major", "from": "1.9.9", "to": "2.0.0" }
+  ],
+  "suffixPolicy": {
+    "standardAllowsPrereleaseAndBuildMetadata": true,
+    "projectStatus": "桌宠稳定更新流程当前只接受纯 X.Y.Z；启用后缀前须先实现并验收更新比较、标签和资产名支持"
+  },
+  "localPublicTracks": {
+    "independent": true,
+    "localBaseline": "当前本地稳定版",
+    "publicBaseline": "上一个 GitHub 公开稳定版",
+    "publicAssets": "程序补丁与动画补丁共用公开序列，同一 Release 的附件使用相同版本；按改动兼容级别选择 major/minor/patch，包类型不决定版本级别"
+  },
+  "patchDisplayNames": {
+    "program": "程序补丁包 {version}",
+    "animation": "动画补丁包 {version}"
+  },
+  "releaseGate": "python GitHub发布/check_public_version.py <candidate> --change <major|minor|patch> --version-file <path>",
+  "helper": "release_version.py",
   "legacyVersionsPreserved": true,
-  "helper": "release_version.py"
+  "assetNaming": "用户可见名称使用补丁类型和稳定版号；底层下载文件名保持更新器兼容格式，动画内容 ID 仅用于素材校验。"
 }

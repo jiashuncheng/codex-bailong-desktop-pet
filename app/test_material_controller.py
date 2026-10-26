@@ -3,6 +3,7 @@ os.environ['QT_QPA_PLATFORM']='offscreen'
 import time,unittest
 from unittest.mock import patch
 from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QEventLoop,QTimer
 from PySide6.QtTest import QTest
 import test_material_store as fixtures
 from material_controller import MaterialController,MaterialPanel
@@ -17,6 +18,12 @@ def until(check):
     return check()
 
 class MaterialControllerTests(unittest.TestCase):
+    def test_ui_snapshots_and_progress_never_rescan_material_files(self):
+        with patch.object(self.store,'available',side_effect=AssertionError('UI performed disk scan')):
+            for _ in range(12):
+                self.assertTrue(self.c.snapshot()['hdCached'])
+                self.c._progress(1,2,'verifying')
+                self.panel.refresh(self.c.snapshot())
     def test_unstarted_player_resize_during_hidden_material_switch(self):
         from stream_player import StreamPlayer
         player=StreamPlayer();self.assertIsNone(player.resize(308));player.close()
@@ -42,6 +49,24 @@ class MaterialControllerTests(unittest.TestCase):
         self.assertIn('本地高清',panel.summary.text())
         self.assertFalse(panel.action.isEnabled())
         panel.close();panel.deleteLater()
+    def test_material_location_move_cleans_old_cache_and_survives_restart(self):
+        from material_store import MaterialStore
+        old=self.store.cache;target=self.fixture.root/'external/BailongMaterials'
+        self.assertTrue(self.c.move_location(target))
+        self.assertTrue(until(lambda:self.c.job is None and self.c.state['phase']=='idle'))
+        self.assertFalse(old.exists());self.assertEqual(self.store.cache,target)
+        restarted=MaterialStore(self.fixture.app,self.fixture.state)
+        self.assertEqual(restarted.cache,target);self.assertTrue(restarted.available('hd'))
+        self.assertEqual(self.store.current,'light')
+    def test_failed_active_material_handoff_retains_original_location(self):
+        from storage_locations import material_root
+        self.store.activate('hd',self.store.tier_root('hd'))
+        old=self.store.cache;old_root=self.store.root;target=self.fixture.root/'external/BailongMaterials'
+        self.c.ready.connect(lambda *args:self.c.failed('entry frame failed'))
+        self.assertTrue(self.c.move_location(target));self.assertTrue(until(lambda:self.c.job is None))
+        self.assertEqual(self.c.state['phase'],'error');self.assertEqual(self.store.cache,old)
+        self.assertEqual(self.store.root,old_root);self.assertTrue(old_root.exists())
+        self.assertEqual(material_root(self.store.state),old)
     def test_failed_download_keeps_current_and_allows_retry(self):
         with patch.object(self.store,'ensure',side_effect=MaterialError('尚未公开发布')):
             self.c.request('hd');self.assertTrue(until(lambda:self.c.job is None))

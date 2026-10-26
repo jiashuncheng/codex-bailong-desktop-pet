@@ -27,10 +27,13 @@ def quota_color(item):
 class QuotaSummary(QWidget):
     expand=Signal()
     resetDue=Signal(float)
-    def __init__(self,windows,caption='',parent=None,progress_cache=None,clock=None):
+    def __init__(self,windows,caption='',parent=None,progress_cache=None,clock=None,anomaly=None):
         super().__init__(parent);self.setObjectName('quota_summary');self.setFixedHeight(HEIGHT);self.setMinimumWidth(106)
         self.windows=[dict(w) for w in windows];self.caption=caption;self.clock=clock or time.time
         self.items=quota_items(self.windows,self.clock());self.cache=progress_cache if progress_cache is not None else {}
+        self.anomaly=anomaly;self.week_index=next((i for i,w in enumerate(self.items) if w['name']=='一周'),None)
+        self.alert_height=20 if anomaly and self.week_index is not None else 0
+        self.setFixedHeight(HEIGHT+self.alert_height)
         self.active=None;self.pressed=False;self.values={};self.starts={};self.targets={};self._due_sent=set()
         self._static_key=None;self._revision=0;self.layer_builds=0
         self.setMouseTracking(True);self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -42,12 +45,16 @@ class QuotaSummary(QWidget):
             self.targets[key]=target;self.starts[key]=self.cache.get(key,target) if item['progress'] is not None else 0.
             self.values[key]=self.starts[key]
         self._accessible();self.animate(0.)
-    def sizeHint(self):return QSize(121,HEIGHT)
+    def sizeHint(self):return QSize(121,HEIGHT+self.alert_height)
     def _accessible(self):
         text='\n'.join(i['description'] for i in self.items)+'\n'+self.caption
+        if self.alert_height:text+='\n'+self.anomaly['description']
         self.setAccessibleName('账户剩余额度；点击查看额度详情');self.setAccessibleDescription(text)
     def row_rect(self,index):
-        return QRectF(3,3,self.width()-6,96) if len(self.items)==1 else QRectF(3,3+index*48,self.width()-6,47)
+        shift=self.row_shift(index)
+        return QRectF(3,3+shift,self.width()-6,96) if len(self.items)==1 else QRectF(3,3+index*48+shift,self.width()-6,47)
+    def row_shift(self,index):return self.alert_height if self.week_index is not None and index>=self.week_index else 0
+    def alert_rect(self):return QRectF(7,(0 if len(self.items)==1 else (self.week_index or 0)*48)+3,self.width()-14,18)
     def _schedule(self):
         if not self.isVisible():return
         now=self.clock();future=[i['reset_at']-now for i in self.items if i['reset_at'] and i['reset_at']>now]
@@ -103,7 +110,7 @@ class QuotaSummary(QWidget):
         if item['progress'] is None:
             p.setPen(QPen(QColor('#8e819c'),1.3));p.drawLine(rect.center().toPoint()+QPoint(-3,0),rect.center().toPoint()+QPoint(3,0))
     def track_rect(self,index):
-        return QRectF(10,65 if len(self.items)==1 else index*48+29,self.width()-20,8 if len(self.items)==1 else 6)
+        return QRectF(10,(65 if len(self.items)==1 else index*48+29)+self.row_shift(index),self.width()-20,8 if len(self.items)==1 else 6)
     def reveal_region(self):
         rect=QRectF()
         for i in range(len(self.items)):rect=rect.united(self.track_rect(i))
@@ -114,17 +121,21 @@ class QuotaSummary(QWidget):
         image=QPixmap(max(1,int(self.width()*ratio+.5)),max(1,int(self.height()*ratio+.5)));image.setDevicePixelRatio(ratio);image.fill(Qt.GlobalColor.transparent)
         p=QPainter(image);p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor('#f5f2f7'));p.drawRoundedRect(QRectF(self.rect()),10,10)
+        if self.alert_height:
+            rect=self.alert_rect();p.setBrush(QColor('#eee0e5'));p.drawRoundedRect(rect,4,4)
+            p.setFont(font(10,True));p.setPen(QColor('#98566d'))
+            p.drawText(rect,Qt.AlignmentFlag.AlignCenter,self.anomaly['text'])
         single=len(self.items)==1
         for index,item in enumerate(self.items):
             rect=self.row_rect(index)
             if self.active==index:
                 p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor('#e6dcec' if self.pressed else '#ede7f2'));p.drawRoundedRect(rect,7,7)
-            y=0 if single else index*48
+            y=(0 if single else index*48)+self.row_shift(index)
             p.setFont(font(11,True));p.setPen(MUTED)
             label=item['label'];p.drawText(QRectF(10,y+7,self.width()-20,18),Qt.AlignmentFlag.AlignVCenter,label)
             value=item['display'];color=quota_color(item) if item['low'] else INK
             p.setPen(color);p.setFont(font(28 if single else 18,True))
-            value_rect=QRectF(10,26,self.width()-20,34) if single else QRectF(58,y+4,self.width()-68,24)
+            value_rect=QRectF(10,26+y,self.width()-20,34) if single else QRectF(58,y+4,self.width()-68,24)
             # Very long custom decimal percentages remain legible and contained.
             if QFontMetrics(p.font()).horizontalAdvance(value)>value_rect.width():p.setFont(font(22 if single else 14,True))
             p.drawText(value_rect,Qt.AlignmentFlag.AlignVCenter|(Qt.AlignmentFlag.AlignLeft if single else Qt.AlignmentFlag.AlignRight),value)
@@ -133,7 +144,7 @@ class QuotaSummary(QWidget):
             if self.active==index and item['reset_at'] and not item['expired']:text=local_time(item['reset_at'])+' 重置'
             p.setPen(QColor('#98566d') if item['expired'] else MUTED);p.setFont(font(10 if single else 9))
             text=QFontMetrics(p.font()).elidedText(text,Qt.TextElideMode.ElideRight,self.width()-20)
-            p.drawText(QRectF(10,80 if single else y+36,self.width()-20,15),Qt.AlignmentFlag.AlignVCenter,text)
+            p.drawText(QRectF(10,80+y if single else y+36,self.width()-20,15),Qt.AlignmentFlag.AlignVCenter,text)
         p.end();self._static=image;self._static_key=key;self.layer_builds+=1
     def paintEvent(self,event):
         self.ensure_static();p=QPainter(self);p.drawPixmap(0,0,self._static);p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setPen(Qt.PenStyle.NoPen)
@@ -169,6 +180,6 @@ class TodayTokens(QWidget):
         p.setBrush(QColor('#e6dcec' if self.pressed else '#e8def0' if self.selected else '#eee7f3' if self.hovered else '#f5f2f7'));p.drawRoundedRect(QRectF(self.rect()),6,6)
         p.setPen(MUTED);p.setFont(font(10));p.drawText(QRectF(8,0,69,self.height()),Qt.AlignmentFlag.AlignVCenter,'今日 Token')
         p.setFont(font(12,True));p.setPen(INK)
-        value=self.data['display']+(' · 部分' if self.data['partial'] else '')
+        value=self.data['display']+(' 部分' if self.data['partial'] else '')
         p.drawText(QRectF(77,0,self.width()-128,self.height()),Qt.AlignmentFlag.AlignVCenter,value)
         p.setPen(QColor('#75618d') if self.selected else MUTED);p.setFont(font(10,self.selected));p.drawText(QRectF(self.width()-45,0,37,self.height()),Qt.AlignmentFlag.AlignVCenter|Qt.AlignmentFlag.AlignRight,'24h ›')

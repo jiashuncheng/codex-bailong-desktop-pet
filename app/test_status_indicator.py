@@ -14,6 +14,19 @@ from compact_bubble import CompactBubble
 app=QApplication.instance() or QApplication([])
 
 class IndicatorTests(unittest.TestCase):
+    def test_precise_cadence_and_frames_do_not_repeat_semantic_ui_sync(self):
+        from unittest.mock import patch
+        self.assertEqual(self.icon.timer.timerType(),Qt.TimerType.PreciseTimer)
+        self.assertEqual(self.icon.timer.interval(),33)
+        self.icon.observe(dict(state='working',active=1))
+        self.assertEqual(self.icon.timer.interval(),16)
+        with patch.object(self.icon,'_sync',wraps=self.icon._sync) as sync:
+            for _ in range(50):self.now+=.016;self.icon._tick()
+            sync.assert_not_called()
+        self.icon.observe(dict(state='idle',active=0))
+        self.assertEqual(self.icon.timer.interval(),16)  # Complete the morph first.
+        self.now+=.6;self.icon._tick();self.assertEqual(self.icon.timer.interval(),33)
+        self.icon.hide();self.assertFalse(self.icon.timer.isActive())
     def setUp(self):
         self.now=100.
         self.icon=StatusIndicator(clock=lambda:self.now);self.icon.show();app.processEvents()
@@ -103,12 +116,16 @@ class IndicatorTests(unittest.TestCase):
             restored=StatusIndicator();restored.set_store(store,home)
             self.assertEqual(restored.unread,[('b','done')]);self.assertFalse(restored.notify_complete(dict(session='a',turn='old')))
             restored.deleteLater()
-    def test_hidden_and_idle_have_no_animation_timer(self):
-        self.assertFalse(self.icon.timer.isActive())
+    def test_visible_idle_rotates_and_hidden_still_has_no_animation_timer(self):
+        self.assertTrue(self.icon.timer.isActive())
+        pose=self.icon.motion.sample(self.icon._motion_now())
+        self.icon.hide();self.assertFalse(self.icon.timer.isActive())
+        self.now+=10;self.assertEqual(pose,self.icon.motion.sample(self.icon._motion_now()))
+        self.icon.show();self.assertTrue(self.icon.timer.isActive())
         self.icon.observe(dict(state='working',active=1));start=self.icon.busy_since
         self.icon.hide();self.assertFalse(self.icon.timer.isActive());self.now+=10
         self.icon.show();self.assertTrue(self.icon.timer.isActive());self.assertEqual(self.icon.busy_since,start)
-        self.icon.notify_complete(dict());self.icon.hide();self.now+=3;self.icon.show()
+        self.icon.notify_complete(dict(session='visible-task',turn='completed-turn'));self.icon.hide();self.now+=3;self.icon.show()
         self.assertEqual(self.icon.visual(),'attention');self.assertFalse(self.icon.timer.isActive())
     def test_only_actual_reply_in_matching_session_acknowledges(self):
         self.icon.notify_complete(dict(session='a',turn='1'))

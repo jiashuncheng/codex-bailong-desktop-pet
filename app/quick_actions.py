@@ -2,7 +2,7 @@
 from urllib.parse import urlsplit
 
 ACTIONS=(('chatgpt','GPT 网页','web'),('codex','打开 Codex','code'),
-         ('chat','白龙闲聊','chat'),('report','数据日报','report'),
+         ('chat','白龙闲聊','chat'),('report','数据面板','report'),
          ('refresh','刷新全部数据','refresh'),('settings','设置','settings'),
          ('website','自定义网页','web'))
 DEFAULT_ACTION='chatgpt'

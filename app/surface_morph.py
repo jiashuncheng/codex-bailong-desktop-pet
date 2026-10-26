@@ -98,6 +98,11 @@ class SurfaceMorph:
         self.start=start;self.end=end;self._landing=None
         self.shrinking=end.rect.width()*end.rect.height()<start.rect.width()*start.rect.height()
     def content_opacities(self,time):
+        if not self.start.island and not self.end.island and self.start.radius==PANEL_RADIUS and self.end.radius==PANEL_RADIUS:
+            # Normal/detail cards share a surface. Do not fade both contents
+            # to zero midway: that exposes a blank white card as a flash.
+            incoming=stage(time,.10,.72)
+            return 1.-incoming,incoming
         if self.shrinking:
             incoming=stage(time,.08,.42)
             return 1.-incoming,incoming

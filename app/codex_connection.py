@@ -12,14 +12,20 @@ def _saved_paths(filename):
     # after the editor saves new paths; the next app start adopts the file.
     try:
         value=json.loads(Path(filename).read_text(encoding='utf-8'))
-        return {key:str(value.get(key,'')) for key in ('home','cli')} if isinstance(value,dict) else {}
+        return {key:str(value.get(key,'')) for key in ('home','cli','source','wsl_distro','wsl_user','wsl_home','wsl_cli','wsl_path')} if isinstance(value,dict) else {}
     except (OSError,ValueError):return {}
 
 def saved_paths():return dict(_saved_paths(str(paths_file())))
 
 def validate_paths(values):
+    if values.get('source')=='wsl':
+        from wsl_codex import validate
+        return validate(values)
     result={key:str(values.get(key,'')).strip().strip('"') for key in ('home','cli')}
+    if 'source' in values:result.update({key:str(values.get(key,'')) for key in ('source','wsl_distro','wsl_user','wsl_home','wsl_cli','wsl_path')});result['source']='windows'
     if result['home']:
+        from wsl_codex import unc_parts
+        if unc_parts(result['home']):raise ValueError('这是 WSL 数据目录，请先将连接来源切换为 WSL。')
         home=Path(os.path.expandvars(result['home'])).expanduser().resolve()
         if not home.is_dir() or not any((home/name).exists() for name in ('sessions','archived_sessions','state_5.sqlite','.codex-global-state.json')):
             raise ValueError('请选择 Codex 数据目录，其中应包含 sessions、state_5.sqlite 或本地状态文件。')
@@ -51,11 +57,41 @@ def user_environment(name):
     except OSError:return ''
 
 def data_home(home=None):
+    saved=saved_paths()
+    if home is None and saved.get('source')=='wsl':
+        from wsl_codex import unc
+        try:return Path(unc(saved['wsl_distro'],saved['wsl_home']))
+        except (KeyError,ValueError):return Path(r'\\wsl$\Invalid-Bailong-Profile\__unconfigured__')
     value=home or os.environ.get('BAILONG_CODEX_HOME') or os.environ.get('CODEX_HOME') or saved_paths().get('home') or user_environment('CODEX_HOME') or Path.home()/'.codex'
+    from wsl_codex import unc_parts
+    if unc_parts(value):return Path(value)
     return Path(os.path.expandvars(str(value).strip().strip('"'))).expanduser().resolve()
 
+def is_wsl_source(home=None):
+    if home is None:return saved_paths().get('source')=='wsl'
+    from wsl_codex import unc_parts
+    return unc_parts(home) is not None
+
+def source_identity(home):
+    from wsl_codex import identity
+    return identity(home)
+
+def session_state_dir(default):
+    from wsl_codex import state_dir
+    return state_dir(default,data_home())
+
+def cli_command(executable,*args):
+    if is_wsl_source():
+        from wsl_codex import command
+        return command(saved_paths(),*args)
+    if is_wsl_source(data_home()):raise RuntimeError('检测到 WSL 目录，请在设置中选择 WSL 来源后重试。')
+    return [executable,*args]
+
 def child_environment():
-    env=dict(os.environ);env['CODEX_HOME']=str(data_home());return env
+    env=dict(os.environ)
+    if is_wsl_source():env.pop('CODEX_HOME',None)
+    else:env['CODEX_HOME']=str(data_home())
+    return env
 
 def packaged_roots():
     roots=set()
@@ -76,6 +112,9 @@ def packaged_roots():
     return roots
 
 def find_executable():
+    if is_wsl_source():
+        from wsl_codex import executable
+        return executable()
     override=(os.environ.get('BAILONG_CODEX') or saved_paths().get('cli','')).strip().strip('"')
     if override:
         path=Path(os.path.expandvars(override)).expanduser()
@@ -114,8 +153,16 @@ def check_connection(query_quota=True,cancel=None):
     from quota import read_quota,quota_windows
     from desktop_core import VERSION
     from connection_health import sample
-    home=data_home();read=read_tracking_probe(home)
+    home=data_home();wsl=is_wsl_source()
+    if wsl:
+        from wsl_codex import running
+        online=running(saved_paths().get('wsl_distro',''))
+        if not online:
+            report=dict(version=VERSION,checked=time.time(),source='wsl',wsl_distro=saved_paths().get('wsl_distro',''),wsl_running=False,codex_home=str(home),home_exists=False,session_log_found=False,cli_found=False,quota_read=False,capabilities={key:sample('unavailable','wsl_stopped') for key in ('tasks','completion','read','quota','tokens','compaction')})
+            report['summary']=connection_summary(report);return report
+    read=read_tracking_probe(home)
     report=dict(version=VERSION,checked=time.time(),desktop_open=codex_desktop_open(),codex_home=str(home),home_exists=home.is_dir(),sessions_exists=(home/'sessions').is_dir(),read_tracking_available=read['state']=='available',cli_found=False,quota_read=False,capabilities={'read':read})
+    report.update(source='wsl' if wsl else 'windows',wsl_distro=saved_paths().get('wsl_distro','') if wsl else '',wsl_running=wsl)
     if report['desktop_open'] is False and read['state']=='available':read.update(state='degraded',code='codex_closed')
     try:report['cli']=find_executable();report['cli_found']=True
     except RuntimeError as error:report['cli_error']=str(error)
@@ -133,7 +180,7 @@ def check_connection(query_quota=True,cancel=None):
             known=any(isinstance(w.get('remaining'),(int,float)) for w in report['quota_windows'])
             report['capabilities']['quota']=sample('available' if known else 'degraded','ok' if known else 'quota_unknown' if report['quota_windows'] else 'no_windows',time.time())
         except Exception as error:
-            code=getattr(error,'code','unavailable');code=code if code in ('authentication','network','timeout','cli_missing') else 'unavailable'
+            code=getattr(error,'code','unavailable');code=code if code in ('authentication','network','timeout','cli_missing','wsl_stopped') else 'unavailable'
             report['quota_error_code']=code;report['capabilities']['quota']=sample('unavailable',code)
     elif not report['cli_found']:report['capabilities']['quota']=sample('unavailable','cli_missing')
     root=__import__('platform_support').data_dir()
@@ -144,7 +191,7 @@ def check_connection(query_quota=True,cancel=None):
 
 def connection_summary(r):
     lines=['Codex 连接检查',
-           '桌面应用：'+('已运行' if r.get('desktop_open') is True else '未运行或权限暂不可确认'),
+           ('WSL：'+r.get('wsl_distro','')+('  运行中' if r.get('wsl_running') else '  未运行或不可用')) if r.get('source')=='wsl' else '桌面应用：'+('已运行' if r.get('desktop_open') is True else '未运行或权限暂不可确认'),
            'CLI：'+('已找到' if r.get('cli_found') else '未找到，请先打开 Codex'),
            '本机状态 / Token：'+('已找到会话日志' if r.get('session_log_found') else '尚无会话，请在 Codex 中发送一次消息'),
            '账户额度：'+('查询成功' if r.get('quota_read') else '暂不可用，请检查 Codex 登录、网络及 CLI'),

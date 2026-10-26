@@ -76,7 +76,7 @@ def run(destination):
                 b.set_mode('minimal');route+=1;return
             if route>len(routes):
                 if b.size_transition.running or b.size_transition.landing.image is not None:return
-                checks['minimalSingleReadableControl']=b.size().width()==68 and b.size().height()==68 and [w.objectName() for w in b.findChildren(QToolButton) if w.isVisible()]==['minimal_quota']
+                checks['minimalSingleReadableControl']=b.size().width()==54 and b.size().height()==54 and [w.objectName() for w in b.findChildren(QToolButton) if w.isVisible()]==['minimal_quota']
                 save('minimal-card-only');p.apply_settings(dict(character_visible=True));checks['characterRestores']=p.isVisible() and p.tick.isActive();finish();return
             name,action=routes[route]
             if not launched:action();launched=True;seen=False

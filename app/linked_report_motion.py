@@ -34,6 +34,7 @@ class LinkedReportMotion(QObject):
     def begin(self):
         r=self.report
         if not r.isVisible() or not r.requested or r._animating:return
+        if hasattr(r,'page_fade'):r.page_fade.clear()
         if self.active:self.cancel()
         self.release();self.active=True;self.committed=False;self.progress=0.
         self.status_tracking=False;self.tracked_rect=None

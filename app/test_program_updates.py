@@ -49,13 +49,27 @@ class ProgramUpdateTests(unittest.TestCase):
         self.assertEqual(r.kind,'program');self.assertEqual(r.material_id,self.light['id']);self.assertIsNotNone(r.fallback)
         self.assertEqual(len(calls),2);self.assertNotIn(self.release.download_url,calls);self.assertIn('测试内容',r.notes)
     def test_changed_or_corrupt_materials_select_full_before_download(self):
+        legacy_info=json.loads(self.info);legacy_info.pop('optionalMaterials',None)
         for kind in ('missing','changed-id'):
             with self.subTest(kind=kind):
                 if kind=='missing':(self.old/'outputs/白龙桌宠素材/idle.webp').write_bytes(b'bad')
                 else:
                     cat=json.loads((self.old/'app/material_catalog.json').read_text());cat['tiers']['light']['id']='f'*24;(self.old/'app/material_catalog.json').write_text(json.dumps(cat))
-                r=check_release('0.7.7',lambda url,*a:Response(json.dumps(self.release_data()).encode() if url==API else self.info),app_root=self.old)
+                r=check_release('0.7.7',lambda url,*a:Response(json.dumps(self.release_data()).encode() if url==API else json.dumps(legacy_info).encode()),app_root=self.old)
                 self.assertEqual(r.kind,'full');self.assertIn('完整',r.reason)
+    def test_card_only_program_update_needs_no_animation_download(self):
+        empty=self.root/'card-only';empty.mkdir()
+        r=check_release('0.7.7',lambda url,*a:Response(json.dumps(self.release_data()).encode() if url==API else self.info),app_root=empty)
+        self.assertEqual(r.kind,'program');self.assertTrue(r.optional_materials)
+        source=stage_program(r,self.cache,empty,opener=self.opener)
+        manifest=json.loads((source/'payload-manifest.json').read_text(encoding='utf-8'))
+        self.assertFalse(any(n.startswith('outputs/') for n in manifest['files']))
+        self.assertTrue((source/'BailongEnhanced.exe').is_file())
+    def test_standalone_card_payload_keeps_core_integrity_without_assets(self):
+        from build_card_only import prepare
+        target=prepare(self.source,self.root/'card-payload')
+        self.assertFalse((target/'outputs').exists())
+        self.assertTrue((target/'app/material_catalog.json').is_file())
     def test_bad_sidecar_without_full_package_never_downloads_or_installs(self):
         with self.assertRaises(UpdateError):check_release('0.7.7',lambda url,*a:Response(json.dumps(self.release_data(False)).encode() if url==API else b'{}'),app_root=self.old)
     def test_stage_reuses_only_matching_assets_and_replaces_all_program_files(self):

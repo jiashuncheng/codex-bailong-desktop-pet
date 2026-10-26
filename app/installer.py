@@ -10,9 +10,10 @@ import time
 import zipfile
 from pathlib import Path
 from PySide6.QtCore import QThread,Signal,QTimer,QLockFile
-from PySide6.QtWidgets import QApplication,QWidget,QVBoxLayout,QLabel,QPushButton,QCheckBox,QMessageBox
+from PySide6.QtWidgets import QApplication,QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QCheckBox,QMessageBox,QLineEdit,QFileDialog
 
-ROOT=Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'Programs/BailongEnhanced'
+from storage_locations import install_root
+ROOT=install_root()
 DATA=Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'BailongEnhanced'
 from desktop_core import VERSION
 def read_manifest(root=ROOT):
@@ -34,7 +35,7 @@ def shortcut_script(exe,paths):
     script+="foreach($p in $paths){[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($p))|Out-Null;$l=$s.CreateShortcut($p);$l.TargetPath="+ps_string(exe)+";$l.Arguments='';$l.WorkingDirectory="+ps_string(exe.parent)+";$l.IconLocation="+ps_string(str(exe)+',0')+";$l.WindowStyle=1;$l.Description='白龙桌宠增强版';$l.Save()}"
     return script
 
-def entry_script(exe,desktop_folder=None,startmenu_folder=None):
+def entry_script(exe,desktop_folder=None,startmenu_folder=None,previous_root=None):
     """Create the current named entries and retire only our managed old alias."""
     desktop_folder=desktop_folder or "([Environment]::GetFolderPath('Desktop'))"
     startmenu_folder=startmenu_folder or "(Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs')"
@@ -43,12 +44,15 @@ def entry_script(exe,desktop_folder=None,startmenu_folder=None):
     script=shortcut_script(exe,[desktop,startmenu])
     old="(Join-Path "+desktop_folder+" '白龙桌宠.lnk')"
     script+="\n$old="+old+";if(Test-Path -LiteralPath $old){$t=$s.CreateShortcut($old).TargetPath;$base="+ps_string(str(exe.parent.parent)+os.sep)+";if($t.StartsWith($base,[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($t) -ieq 'BailongEnhanced.exe'){Remove-Item -LiteralPath $old}}"
+    if previous_root:
+        script+="\n$old="+old+";if(Test-Path -LiteralPath $old){$t=$s.CreateShortcut($old).TargetPath;$base="+ps_string(str(Path(previous_root)/'versions')+os.sep)+";if($t.StartsWith($base,[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($t) -ieq 'BailongEnhanced.exe'){Remove-Item -LiteralPath $old}}"
     return script
 
 def register(exe,maintenance,startup):
     import winreg
     root=exe.parent
-    script=entry_script(exe)
+    from storage_locations import registered_install_root
+    script=entry_script(exe,previous_root=registered_install_root())
     result=subprocess.run(['powershell.exe','-NoProfile','-Command',script],capture_output=True,creationflags=0x08000000)
     if result.returncode:raise OSError('创建快捷方式失败')
     startup_dir=Path(os.environ['APPDATA'])/'Microsoft/Windows/Start Menu/Programs/Startup'
@@ -60,12 +64,12 @@ def register(exe,maintenance,startup):
     from codex_startup import register as register_codex_startup
     register_codex_startup(exe)
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER,r'Software\Microsoft\Windows\CurrentVersion\Uninstall\BailongEnhanced') as key:
-        for name,value in dict(DisplayName='白龙桌宠增强版',DisplayVersion=exe.parent.name.split('-')[0],Publisher='本地白龙桌宠项目',InstallLocation=str(ROOT),UninstallString='"'+str(maintenance)+'" --manage').items():winreg.SetValueEx(key,name,0,winreg.REG_SZ,value)
+        for name,value in dict(DisplayName='白龙桌宠增强版',DisplayVersion=exe.parent.name.split('-')[0],Publisher='本地白龙桌宠项目',InstallLocation=str(exe.parent.parent.parent),DataLocation=str(DATA),UninstallString='"'+str(maintenance)+'" --manage').items():winreg.SetValueEx(key,name,0,winreg.REG_SZ,value)
         winreg.SetValueEx(key,'NoModify',0,winreg.REG_DWORD,1)
 
-def install(payload,root=ROOT,startup=True,copy_installer=True,before_commit=None,old_running=None,populate=None,data_backup=None,data_root=None):
+def install(payload,root=ROOT,startup=True,copy_installer=True,before_commit=None,old_running=None,populate=None,data_backup=None,data_root=None,system=None):
     from deployment_state import capture_entries,restore_entries,owned_destination,atomic,recover,verify_payload,stop_version
-    root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True);system=root==ROOT.resolve()
+    root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True);system=root==ROOT.resolve() if system is None else system
     recover(root,system)
     name=VERSION+'-'+time.strftime('%Y%m%d-%H%M%S')
     if (root/'versions'/name).exists():name+='-'+str(time.time_ns())
@@ -151,11 +155,12 @@ def stop_existing(root=ROOT):
     if alive:raise OSError('旧桌宠尚未退出，请退出后重试；已有文件和设置未改动。')
     return old
 
-def deploy(payload,startup,root=ROOT,progress=lambda text:None,populate=None,after_stop=None,data_root=None):
+def deploy(payload,startup,root=ROOT,progress=lambda text:None,populate=None,after_stop=None,data_root=None,system=None):
     from deployment_state import recover,atomic,wait_ready
     root=Path(root).resolve()
+    system=root==ROOT.resolve() if system is None else system
     if (root/'uninstall-pending.json').exists():raise OSError('卸载尚未结束，请先关闭维护窗口，等待清理后重新安装')
-    recover(root,root==ROOT.resolve())
+    recover(root,system)
     progress('正在关闭旧桌宠…');old=stop_existing(root)
     data_root=Path(data_root or (DATA if root==ROOT.resolve() else root/'user-data'))
     data_backup=None;ready_receipt=None
@@ -177,11 +182,11 @@ def deploy(payload,startup,root=ROOT,progress=lambda text:None,populate=None,aft
             from directory_deploy import backup_data
             data_backup=backup_data(data_root,root,read_manifest(root).get('current',''))
         options=dict(populate=populate) if populate is not None else {}
-        return install(payload,root=root,startup=startup,before_commit=launch_and_confirm,old_running=old,data_backup=data_backup,data_root=data_root,**options)
+        return install(payload,root=root,startup=startup,before_commit=launch_and_confirm,old_running=old,data_backup=data_backup,data_root=data_root,system=system,**options)
     except Exception as error:
         restarted=False
         if (root/'deployment-journal.json').exists():
-            try:recover(root,root==ROOT.resolve());restarted=True
+            try:recover(root,system);restarted=True
             except Exception as recovery_error:raise OSError('用户数据或入口尚未恢复，旧版暂不启动；请保留备份并重试安装：'+str(recovery_error)) from error
         if old and not restarted:
             try:subprocess.Popen([str(old)],cwd=str(old.parent),creationflags=0x08000000)
@@ -193,13 +198,13 @@ def quick_mode(arguments,executable):
 
 class InstallJob(QThread):
     done=Signal(str);failed=Signal(str);progress=Signal(str)
-    def __init__(self,payload,startup,parent=None,quick=False):super().__init__(parent);self.payload=payload;self.startup=startup;self.quick=quick
+    def __init__(self,payload,startup,parent=None,quick=False,root=None):super().__init__(parent);self.payload=payload;self.startup=startup;self.quick=quick;self.root=Path(root or ROOT)
     def run(self):
         lock=None
         try:
             DATA.mkdir(parents=True,exist_ok=True);lock=QLockFile(str(DATA/'deployment.lock'))
             if not lock.tryLock(0):raise OSError('另一个安装程序正在运行，请等待完成后再试。')
-            self.done.emit(str(deploy(self.payload,self.startup,progress=self.progress.emit)))
+            self.done.emit(str(deploy(self.payload,self.startup,root=self.root,data_root=DATA,system=True,progress=self.progress.emit)))
         except Exception as error:self.failed.emit(str(error))
         finally:
             if lock and lock.isLocked():lock.unlock()
@@ -208,6 +213,10 @@ class Installer(QWidget):
     def __init__(self,quick=False,maintenance=False):
         super().__init__();self.quick=quick;self.maintenance=maintenance;self.setWindowTitle('白龙桌宠增强版 · '+('一键部署' if quick else '安装与维护'));self.resize(510,220 if quick else 340);layout=QVBoxLayout(self)
         self.status=QLabel('安装版本 '+VERSION+'\n安装到当前用户，无需管理员权限。\n每次升级保留上一版本；设置和聊天记录放在独立用户目录。');self.status.setWordWrap(True);layout.addWidget(self.status)
+        self.current_root=ROOT;self.existing=bool(read_manifest().get('current'))
+        location=QHBoxLayout();self.location=QLineEdit(str(ROOT));self.location.setReadOnly(True);self.location.setAccessibleName('程序安装目录');location.addWidget(self.location,1)
+        self.browse=QPushButton('选择位置');self.browse.clicked.connect(self.choose_location);location.addWidget(self.browse);layout.addLayout(location)
+        self.browse.setEnabled(maintenance or not self.existing)
         self.startup=QCheckBox('登录 Windows 时自动启动');self.startup.setChecked(startup_preference());layout.addWidget(self.startup);self.startup.setVisible(not quick)
         self.install_button=QPushButton('安装 / 升级');self.install_button.clicked.connect(self.start);layout.addWidget(self.install_button)
         self.maintenance_buttons=[]
@@ -216,16 +225,50 @@ class Installer(QWidget):
         self.job=None;self.exe=None
         if maintenance:
             self.install_button.hide();self.status.setText('白龙桌宠 '+VERSION+' · 轻量维护\n可回退或卸载；升级请运行下载的一键部署程序。\n设置、聊天记录与账号数据保存在独立用户目录。')
+            self.move_button=QPushButton('迁移程序目录');self.move_button.clicked.connect(self.move_location);layout.addWidget(self.move_button);self.maintenance_buttons.append(self.move_button)
         if quick:
-            self.status.setText('正在准备一键部署 '+VERSION+'…\n将自动安装或升级并启动桌宠，已有设置和记录保留。')
-            self.install_button.setEnabled(False);QTimer.singleShot(0,self.start)
+            if self.existing:
+                self.status.setText('正在准备一键部署 '+VERSION+'…\n将沿用现有安装位置，已有设置和记录保留。')
+                self.install_button.setEnabled(False);QTimer.singleShot(0,self.start)
+            else:self.status.setText('选择程序安装位置，然后安装并启动。');self.install_button.setText('安装并启动')
+    def choose_location(self):
+        chosen=QFileDialog.getExistingDirectory(self,'选择程序安装位置',str(Path(self.location.text()).parent))
+        if not chosen:return
+        target=Path(chosen)
+        if target.name.casefold()!='bailongenhanced':target=target/'BailongEnhanced'
+        try:
+            from storage_locations import destination
+            destination(target,'program',self.current_root if self.maintenance else None)
+            self.location.setText(str(target))
+        except (OSError,ValueError) as exc:self.status.setText(str(exc))
+    def move_location(self):
+        target=Path(self.location.text())
+        if target==self.current_root:self.status.setText('请先选择新的程序位置');return
+        text='迁移程序、已安装的回退版本及安装备份到：\n'+str(target)+'\n\n校验成功后更新快捷方式与启动入口；关闭此维护窗口后清理原程序目录。设置、聊天和统计数据仍保存在用户数据目录。'
+        if QMessageBox.question(self,'迁移程序目录',text)!=QMessageBox.StandardButton.Yes:return
+        from program_location import ProgramMoveJob
+        for button in self.maintenance_buttons:button.setEnabled(False)
+        self.browse.setEnabled(False)
+        self.job=ProgramMoveJob(self.current_root,target,self.startup.isChecked(),self)
+        self.job.progress.connect(self.status.setText);self.job.failed.connect(self.failed)
+        self.job.done.connect(self.moved);self.job.start()
+    def moved(self,exe):
+        self.exe=exe;self.status.setText('迁移完成，程序已从新位置启动。关闭此窗口后清理原程序目录。')
+        self.install_button.show();self.install_button.setText('关闭');self.install_button.setEnabled(True)
+        self.install_button.clicked.disconnect();self.install_button.clicked.connect(self.close)
     def start(self):
         if self.job and self.job.isRunning():return
         payload=Path(getattr(sys,'_MEIPASS',Path(__file__).parent))/'payload.zip'
         if not payload.exists():self.status.setText('缺少安装载荷，请使用完整安装程序。');return
         for button in self.maintenance_buttons:button.setEnabled(False)
         self.install_button.setEnabled(False);self.status.setText('正在解压程序与素材，请稍等…')
-        self.job=InstallJob(payload,self.startup.isChecked(),self,quick=self.quick);self.job.progress.connect(self.status.setText);self.job.done.connect(self.finished);self.job.failed.connect(self.failed);self.job.start()
+        from storage_locations import destination
+        target=Path(self.location.text())
+        if target!=ROOT:
+            try:destination(target,'program')
+            except (OSError,ValueError) as exc:self.failed(str(exc));return
+        self.browse.setEnabled(False)
+        self.job=InstallJob(payload,self.startup.isChecked(),self,quick=self.quick,root=target);self.job.progress.connect(self.status.setText);self.job.done.connect(self.finished);self.job.failed.connect(self.failed);self.job.start()
     def finished(self,exe):
         for button in self.maintenance_buttons:button.setEnabled(True)
         if self.quick:
@@ -237,6 +280,7 @@ class Installer(QWidget):
     def failed(self,message):
         for button in self.maintenance_buttons:button.setEnabled(True)
         self.install_button.setEnabled(True);self.install_button.setText('重试部署' if self.quick else '安装 / 升级');self.status.setText('安装失败：'+message)
+        self.browse.setEnabled(self.maintenance or not self.existing)
     def maintenance_lock(self,allow_uninstall=False):
         if self.job and self.job.isRunning():raise OSError('安装正在运行，请等待完成')
         if not allow_uninstall and (ROOT/'uninstall-pending.json').exists():raise OSError('卸载尚未结束，请先关闭维护窗口')
@@ -276,6 +320,13 @@ class Installer(QWidget):
         lock=None
         try:
             lock=self.maintenance_lock(allow_uninstall=True)
+            from storage_locations import plain,registered_install_root,MARKER
+            expected=plain(ROOT);registered=registered_install_root()
+            default=Path(os.environ['LOCALAPPDATA'])/'Programs/BailongEnhanced'
+            marker={}
+            try:marker=json.loads((ROOT/MARKER).read_text(encoding='utf-8'))
+            except (OSError,ValueError):pass
+            if expected not in (default.resolve(),registered.resolve() if registered else None) and marker.get('kind')!='program':raise OSError('安装目录校验失败')
             from deployment_state import recover
             recover(ROOT,True)
             from codex_startup import configure,stop_watchers
@@ -307,8 +358,6 @@ class Installer(QWidget):
             except FileNotFoundError:pass
             # Cleanup waits for this maintenance process to exit. Its target is the
             # exact per-user install root, with the config directory outside it.
-            expected=Path(os.environ['LOCALAPPDATA'])/'Programs/BailongEnhanced'
-            if ROOT.resolve()!=expected.resolve() or ROOT.is_symlink():raise OSError('安装目录校验失败')
             from deployment_state import atomic
             atomic(ROOT/'uninstall-pending.json',dict(operation='uninstall',pid=os.getpid()))
             script='$ErrorActionPreference="Stop"; Wait-Process -Id '+str(os.getpid())+' -ErrorAction SilentlyContinue; $target='+ps_string(ROOT.resolve())+'; if([IO.Path]::GetFullPath($target) -eq '+ps_string(expected.resolve())+'){Remove-Item -LiteralPath $target -Recurse -Force}'

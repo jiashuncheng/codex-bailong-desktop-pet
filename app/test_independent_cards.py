@@ -39,14 +39,20 @@ class IndependentTests(unittest.TestCase):
         p.apply_settings(dict(character_visible=True));self.assertTrue(p.isVisible());self.assertTrue(p.tick.isActive());self.assertIsNotNone(p.player.thread)
     def test_modes_are_persistent_peers_and_minimal_has_only_one_button(self):
         p=self.pet;p.apply_settings(dict(character_visible=False));b=p.bubble
-        for mode,size in [('minimal',68),('mini',222),('minimal',68),('auto',268)]:
+        for mode,size in [('minimal',54),('mini',222),('minimal',54),('auto',268)]:
             b.set_mode(mode);self.finish();self.assertEqual(b.width(),size);self.assertEqual(p.settings['bubble_mode'],mode)
         b.set_mode('minimal');self.finish()
-        self.assertTrue(b.is_minimal());self.assertFalse(b.is_island());self.assertEqual(b.height(),68)
+        self.assertTrue(b.is_minimal());self.assertFalse(b.is_island());self.assertEqual(b.height(),54)
         visible=[w for w in b.findChildren(QToolButton) if w.isVisible()];self.assertEqual([w.objectName() for w in visible],['minimal_quota'])
         self.assertTrue(b.status_view.isHidden());self.assertTrue(b.status_indicator.isHidden())
         b.task_updated(dict(kind='status'));self.assertTrue(b.is_minimal())
         b.minimal_quota.click();self.finish();self.assertFalse(b.is_compact());self.assertFalse(b.expanded)
+        self.assertEqual(b.bubble_mode,'minimal');self.assertEqual(p.settings['bubble_mode'],'minimal')
+        compact=next(w for w in b.findChildren(QToolButton,'bubble_compact') if w.isVisible())
+        compact.click();self.finish();self.assertTrue(b.is_minimal());self.assertEqual(b.width(),54)
+        b.minimal_quota.click();self.finish();self.assertFalse(b.is_minimal())
+        b.evaluate_mode(b.last_task_update+91);self.finish();self.assertTrue(b.is_minimal())
+        self.assertEqual(p.settings['bubble_mode'],'minimal')
     def test_drag_preserves_mode_and_saved_anchor_across_sizes(self):
         p=self.pet;p.apply_settings(dict(character_visible=False));b=p.bubble;b.set_mode('minimal');self.finish()
         target=b.pos()+QPoint(-60,-80);p.move_card(target);center=b.geometry().center().x();bottom=b.geometry().bottom()

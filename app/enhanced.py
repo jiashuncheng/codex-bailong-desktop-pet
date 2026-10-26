@@ -11,6 +11,9 @@ import time
 from pathlib import Path
 
 # Companion watcher has no GUI, Qt initialization or animation resources.
+if __name__=='__main__' and '--cleanup-storage-migration' in sys.argv:
+    from storage_locations import cleanup_main
+    raise SystemExit(cleanup_main(sys.argv[sys.argv.index('--cleanup-storage-migration')+1]))
 if __name__=='__main__' and '--watch-codex' in sys.argv:
     from codex_startup import main as watch_codex
     raise SystemExit(watch_codex())
@@ -42,7 +45,11 @@ class ActivityThread(QThread):
         super().__init__(parent)
         self.stop=threading.Event()
         self.tail=RolloutTail(home)
+        from codex_connection import is_wsl_source
+        from wsl_codex import state_dir
+        self.wsl=is_wsl_source(self.tail.home);self.session_dir=state_dir(STATE_DIR,self.tail.home)
         self.token_index=TokenUsageIndex(STATE_DIR/'token-usage.sqlite3',home);self.last_token_scan=0;self.token_wake=threading.Event();self.token_reader=None
+        self.week_cycle=None
         self.token_runs=RefreshRuns()
         self.last_presence_scan=0;self.presence_reader=None;self.desktop_open=None;self.last_read_scan=0;self.seed_status_sent=False;self.last_name_scan=-10;self.conversation_names={}
         from session_read_state import ReadAcknowledgements
@@ -53,6 +60,9 @@ class ActivityThread(QThread):
         self.targets=ActivityTargets();self.context_lock=threading.Lock();self.displayed=();self.visited=();self.last_active_scan=-20
     def run(self):
         from codex_live_status import LiveStatusReader
+        if self.wsl:
+            from wsl_codex import LogOnlyLiveReader
+            LiveStatusReader=LogOnlyLiveReader
         self.live_reader=LiveStatusReader(self.stop,
             lambda sid,on,turn:self.live_events.put(('compacting',sid,on,turn)),
             lambda sid,reason,turn:self.live_events.put(('waiting',sid,reason,turn)),
@@ -60,6 +70,15 @@ class ActivityThread(QThread):
             lambda sid,status,turn:self.live_events.put(('terminal',sid,status,turn)))
         self.live_reader.start()
         while not self.stop.is_set():
+            if self.wsl:
+                from wsl_codex import running,unc_parts
+                if not running(unc_parts(self.tail.home)[0]):
+                    if time.monotonic()-self.last_health_scan>=10:
+                        self.last_health_scan=time.monotonic()
+                        self.event.emit(dict(kind='connection_health',capabilities={key:dict(state='unavailable',code='wsl_stopped') for key in ('tasks','completion','tokens','compaction')}))
+                    if self.token_wake.is_set() and (self.token_reader is None or not self.token_reader.is_alive()):
+                        self.token_wake.clear();self.token_reader=threading.Thread(target=self.read_tokens,name='BailongWslUnavailable',daemon=True);self.token_reader.start()
+                    self.stop.wait(1);continue
             if time.monotonic()-self.last_presence_scan>=5:
                 self.last_presence_scan=time.monotonic()
                 if self.presence_reader is None or not self.presence_reader.is_alive():
@@ -67,12 +86,12 @@ class ActivityThread(QThread):
             try:
                 from session_read_state import session_id,active_conversations,conversation_names
                 from enhanced_core import Session
-                try:pending=json.loads((STATE_DIR/'task-notifications.json').read_text(encoding='utf-8')).get('unread',[])
+                try:pending=json.loads((self.session_dir/'task-notifications.json').read_text(encoding='utf-8')).get('unread',[])
                 except (OSError,ValueError,AttributeError):pending=[]
                 pending=[k for k in pending if isinstance(k,list) and len(k)==2 and all(isinstance(v,str) for v in k)]
                 seeds=[]
                 if time.monotonic()-self.last_active_scan>=15:
-                    self.last_active_scan=time.monotonic();seeds=active_conversations(self.tail.home)
+                    self.last_active_scan=time.monotonic();seeds=[] if self.wsl else active_conversations(self.tail.home)
                     existing={session_id(s) for s in self.tail.reducer.sessions}
                     for e in seeds:
                         if session_id(e['session']) not in existing:
@@ -97,7 +116,7 @@ class ActivityThread(QThread):
                         batch.extend(apply(target,value,turn))
                 if time.monotonic()-self.last_name_scan>=3:
                     self.last_name_scan=time.monotonic()
-                    ids=self.targets.choose('names',128);names=conversation_names(self.tail.home,ids)
+                    ids=self.targets.choose('names',128);names={} if self.wsl else conversation_names(self.tail.home,ids)
                     if names:
                         self.conversation_names.update(names)
                         self.conversation_names={sid:name for sid,name in self.conversation_names.items() if sid in self.targets.entries}
@@ -134,6 +153,11 @@ class ActivityThread(QThread):
         if self.live_reader:self.live_reader.join(2)
     def set_context(self,displayed,visited=()):
         with self.context_lock:self.displayed=tuple(displayed);self.visited=tuple(visited)
+    def set_week_cycle(self,cycle):
+        with self.context_lock:
+            if self.week_cycle==cycle:return
+            self.week_cycle=cycle
+        self.token_wake.set()
     def read_presence(self):
         from desktop_services import codex_desktop_open
         try:value=codex_desktop_open()
@@ -145,7 +169,17 @@ class ActivityThread(QThread):
         self.event.emit({'kind':'token_busy','busy':True,'run_id':run})
         terminal=None;health=None
         try:
-            snapshot=self.token_index.poll(stop=self.stop.is_set)
+            if self.wsl:
+                from wsl_codex import running,unc_parts
+                if not running(unc_parts(self.tail.home)[0]):raise RuntimeError('WSL source unavailable')
+            with self.context_lock:cycle=self.week_cycle
+            options=dict(stop=self.stop.is_set)
+            if cycle:options['cycle']=cycle
+            snapshot=self.token_index.poll(**options)
+            if (snapshot.get('quota_history') or {}).get('pending'):
+                # Bound each import slice and allow the UI/status worker to run.
+                # Continue in five seconds without adding a GUI timer or scanner.
+                self.last_token_scan=min(self.last_token_scan,time.monotonic()-25)
             if not self.stop.is_set():
                 from token_sync import apply_sync
                 snapshot=apply_sync(snapshot,STATE_DIR,self.token_index.home,self.stop.is_set)
@@ -225,7 +259,9 @@ class EnhancedPet(Pet):
         self.bubble.close()
         self.bubble.deleteLater()
         self.bubble=HeadBubble(self)
-        self.bubble.status_indicator.set_store(CONFIG.with_name('task-notifications.json'))
+        from codex_connection import session_state_dir
+        self.session_dir=session_state_dir(STATE_DIR)
+        self.bubble.status_indicator.set_store(self.session_dir/'task-notifications.json')
         self.bubble.quotaRefreshRequested.connect(self.refresh_quota)
         self.bubble.resetRefreshRequested.connect(self.refresh_reset_feed)
         self.bubble.tokenRefreshRequested.connect(self.refresh_tokens)
@@ -240,7 +276,7 @@ class EnhancedPet(Pet):
         self.sound=self.settings.get('sound',True)
         self._interaction_sound=False
         self.silent_notifier=None
-        self.local_reset_evidence=LocalResetEvidence(STATE_DIR/'local-reset-evidence.json')
+        self.local_reset_evidence=LocalResetEvidence(self.session_dir/'local-reset-evidence.json')
         self.quota_windows=[]
         self.quota_observed=0
         self.quota_source=''
@@ -285,7 +321,7 @@ class EnhancedPet(Pet):
         self.diagnostic_timer.setInterval(10000)
         self.diagnostic_timer.timeout.connect(self.record_state)
         self.diagnostic_timer.start()
-        self.tray=QSystemTrayIcon(QIcon(self.frames[0]),self)
+        self.tray=QSystemTrayIcon(QIcon(str(ROOT/'app/branding/bailong.ico')),self)
         self.tray.setToolTip('白龙桌宠增强版 · 双击角色查额度')
         tray_menu=QMenu()
         tray_menu.addAction('显示 / 隐藏气泡',self.toggle_bubble)
@@ -482,7 +518,15 @@ class EnhancedPet(Pet):
 
     def update_quota(self,windows,observed,source):
         if source=='session' and observed<self.quota_observed:return
-        self.local_reset_evidence.observe(windows,observed,source)
+        if source=='live':self._recent_live_quota=([dict(w) for w in windows],observed)
+        elif source=='session':
+            from quota_history import inherit_live_plan
+            windows=inherit_live_plan(windows,getattr(self,'_recent_live_quota',None),observed)
+        self.local_reset_evidence.observe(windows,observed,source,self.bubble.reset_snapshot)
+        if source=='live' and self.activity:
+            from week_cycle import context
+            cycle=context(windows,self.local_reset_evidence.state,observed,source)
+            self.activity.set_week_cycle(cycle)
         self.bubble.reset_snapshot=self.local_reset_evidence.decorate(self.bubble.reset_snapshot)
         self.quota_windows=windows
         self.quota_observed=observed

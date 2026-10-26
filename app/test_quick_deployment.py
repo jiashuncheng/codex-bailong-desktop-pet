@@ -56,9 +56,14 @@ class QuickDeploymentTests(unittest.TestCase):
    job=installer.InstallJob(Path('payload.zip'),False);results=[];job.done.connect(results.append);job.run()
    quick.assert_called_once();install.assert_not_called();self.assertEqual(results,['installed.exe']);lock.unlock.assert_called_once()
  def test_quick_window_starts_automatically_and_preserves_preference(self):
-  with patch.object(installer,'startup_preference',return_value=False),patch.object(installer.QTimer,'singleShot') as schedule:
+  with patch.object(installer,'read_manifest',return_value={'current':'installed'}),patch.object(installer,'startup_preference',return_value=False),patch.object(installer.QTimer,'singleShot') as schedule:
    window=installer.Installer(quick=True)
    self.assertFalse(window.startup.isChecked());self.assertFalse(window.install_button.isEnabled());self.assertEqual(schedule.call_args.args[0],0)
+   window.close();window.deleteLater();APP.processEvents()
+ def test_fresh_quick_install_allows_directory_choice_before_start(self):
+  with patch.object(installer,'read_manifest',return_value={'current':''}),patch.object(installer,'startup_preference',return_value=False),patch.object(installer.QTimer,'singleShot') as schedule:
+   window=installer.Installer(quick=True)
+   self.assertTrue(window.install_button.isEnabled());self.assertTrue(window.browse.isEnabled());schedule.assert_not_called()
    window.close();window.deleteLater();APP.processEvents()
 
 if __name__=='__main__':unittest.main()

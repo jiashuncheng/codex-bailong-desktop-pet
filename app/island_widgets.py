@@ -136,7 +136,7 @@ class QuotaSatellite(QToolButton):
 class MinimalQuota(QuotaSatellite):
     """A single readable quota circle; dragging never expands the panel."""
     def __init__(self,windows,caption,parent=None):
-        super().__init__(windows,caption,parent);self.setObjectName('minimal_quota');self.setFixedSize(68,68)
+        super().__init__(windows,caption,parent);self.setObjectName('minimal_quota');self.setFixedSize(54,54)
         self.setAccessibleName(self.accessibleName().replace('展开详情','打开正常卡片')+'；可拖动；右键切换模式')
     def paintEvent(self,event):
         p=QPainter(self);p.scale(self.width()/40,self.height()/40);self.paint_dial(p)

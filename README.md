@@ -4,9 +4,9 @@
 
 在 Windows 和 Mac 上使用同一份 Python 源码，查看 Codex 任务状态、接收完成提醒、统计额度与 Token，并与白龙互动。保留源码和一键执行脚本，方便后续修改、更新及两端同步。
 
-**当前版本：v0.9.5 / UI84**。已合入 [Wunsch2048 增强版](https://github.com/Wunsch2048/codex-bailong-desktop-pet) 的 v0.9.3 及其后构建修复，基线提交 `76a2ee3`；同时保留本仓库的个性化功能和 Mac 适配。角色与原始桌宠来自 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet)。
+**当前源码版本：v0.10.0 / UI88**。已合入 [Wunsch2048 增强版](https://github.com/Wunsch2048/codex-bailong-desktop-pet) 的 **v1.1.0**（`0b36eb8`），保留本仓库的 Windows/macOS 适配、Token 同步、SSH、会话轮换和随机动作。角色与原始桌宠来自 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet)。
 
-[源码使用与更新](docs/跨平台源码使用.md) · [上游 v0.9.3 更新](docs/releases/v0.9.3.md) · [来源与授权](NOTICE.md) · [反馈问题](https://github.com/jiashuncheng/codex-bailong-desktop-pet/issues)
+[源码使用与更新](docs/跨平台源码使用.md) · [上游 v1.1.0 更新](docs/releases/v1.1.0.md) · [来源与授权](NOTICE.md) · [反馈问题](https://github.com/jiashuncheng/codex-bailong-desktop-pet/issues)
 
 ## 本仓库新增与保留的自定义功能
 
@@ -23,6 +23,9 @@
 | 安全同步源码 | 从本人的 fork 快进更新；工作区有未提交修改或历史分叉时停止，避免覆盖本地修改；更新后自动重启 |
 
 ## 已合入的上游新功能
+
+- **v1.1.0 累计程序改进**：程序与动画目录迁移、独立动画补丁、日志恢复及画质配置容错、额度周期对比修复和卡片过渡改进。WSL 连接只在 Windows 提供；Mac 保留本机与 SSH 接入。
+- 本 fork 仍交付可编辑源码；Windows 冻结安装器属于上游，不能直接覆盖跨平台源码。此次没有发布新的安装包，也没有重新执行 Mac 原生窗口实机验收。
 
 - **v0.9.3 状态图标**：三颗水球旋转、交错和短暂黏连；浅色卡片与深色胶囊使用适配配色，状态切换连续变形。
 - **持续工作动作改进**：修正循环期间笔记本反复开合，保留状态改变后的自然收尾。

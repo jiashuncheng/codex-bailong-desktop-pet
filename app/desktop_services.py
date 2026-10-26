@@ -202,6 +202,8 @@ def codex_desktop_open():
         from mac_services import codex_desktop_open as mac_codex_desktop_open
         return mac_codex_desktop_open()
     """Inspect package GUI processes on the monitor thread, never the UI loop."""
+    from codex_connection import is_wsl_source
+    if is_wsl_source():return None
     import psutil
     denied=False
     for process in psutil.process_iter(['name']):
@@ -227,6 +229,15 @@ def open_codex(session=None):
     if sys.platform=='darwin':
         from mac_services import open_codex as mac_open_codex
         return mac_open_codex(session)
+    from codex_connection import is_wsl_source,saved_paths
+    if is_wsl_source():
+        from wsl_codex import command
+        args=() if session is None else ('resume',codex_conversation_url(session).rsplit('/',1)[-1])
+        target=command(saved_paths(),*args)
+        terminal=shutil.which('wt.exe')
+        if terminal:subprocess.Popen([terminal,'new-tab','--title','Codex WSL',*target],creationflags=0x08000000 if os.name=='nt' else 0)
+        else:subprocess.Popen(target,creationflags=getattr(subprocess,'CREATE_NEW_CONSOLE',0))
+        return
     if session is not None:
         url=codex_conversation_url(session)
         try:os.startfile(url)

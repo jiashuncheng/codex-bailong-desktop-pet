@@ -40,10 +40,15 @@ class ResetCard(QWidget):
     def showEvent(self,event):super().showEvent(event);self.refresh_time()
     def hideEvent(self,event):self.timer.stop();self.hovered=False;self.pressed=False;super().hideEvent(event)
     def resizeEvent(self,event):
-        right=self.width()-22
-        for button in (self.source_button,self.refresh_button):
-            if button:button.move(max(0,right),0);right-=22
+        if self.source_button:self.source_button.move(max(0,self.width()-22),self.height()-22)
+        if self.refresh_button:self.refresh_button.move(max(0,self.width()-22),0)
         super().resizeEvent(event)
+    def note_layout(self):
+        left=5 if self.dense else 0
+        width=self.width()-left-(24 if self.source_button else 4 if self.dense else 0)
+        text=self.view['note']
+        if self.dense and self.view['phase']=='scheduled' and text.startswith('最晚 '):text=text[3:]
+        return text,QRectF(left,56 if self.dense else 73,max(1,width),18)
     def enterEvent(self,event):
         if self.dense:self.hovered=True;self.update()
         super().enterEvent(event)
@@ -85,16 +90,18 @@ class ResetCard(QWidget):
     def paintEvent(self,event):
         p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
         if self.dense and (self.hovered or self.pressed or self.focus_visible):
-            p.setPen(QPen(QColor(PRIMARY),1) if self.focus_visible else Qt.PenStyle.NoPen)
+            p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(SELECTED if self.pressed else PANEL));p.drawRoundedRect(QRectF(self.rect()).adjusted(.5,.5,-.5,-.5),7,7)
         v=self.view;left=5 if self.dense else 0;available=max(1,self.width()-left-(4 if self.dense else 0))
         p.setFont(ui_font(10 if self.dense else 11,True));p.setPen(QColor(MUTED))
-        reserved=22*sum(button is not None for button in (self.source_button,self.refresh_button))
-        eyebrow=QFontMetrics(p.font()).elidedText(v['eyebrow'],Qt.TextElideMode.ElideRight,int(available-reserved))
+        reserved=22 if self.refresh_button else 0
+        title='预计最晚还有' if self.dense and v['phase']=='scheduled' and v['eyebrow']=='预计还有' else v['eyebrow']
+        eyebrow=QFontMetrics(p.font()).elidedText(title,Qt.TextElideMode.ElideRight,int(available-reserved))
         p.drawText(QRectF(left,0,available-reserved,19),Qt.AlignmentFlag.AlignVCenter,eyebrow)
         p.setPen(QColor(DANGER if v['phase'] in ('pending','unavailable') else INK))
         for text,face,point in self.text_runs():p.setFont(face);p.drawText(point,text)
         p.setFont(ui_font(10 if self.dense else 11,True));p.setPen(QColor(MUTED))
-        detail_note=v['note']+(' · 北京时间' if not self.dense and v['phase']=='scheduled' else '')
-        note=QFontMetrics(p.font()).elidedText(detail_note,Qt.TextElideMode.ElideRight,int(available))
-        p.drawText(QRectF(left,56 if self.dense else 73,available,18),Qt.AlignmentFlag.AlignVCenter,note)
+        detail_note,note_rect=self.note_layout()
+        if not self.dense and v['phase']=='scheduled':detail_note+=' 北京时间'
+        note=QFontMetrics(p.font()).elidedText(detail_note,Qt.TextElideMode.ElideRight,int(note_rect.width()))
+        p.drawText(note_rect,Qt.AlignmentFlag.AlignVCenter,note)

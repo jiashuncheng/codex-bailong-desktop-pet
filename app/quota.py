@@ -50,11 +50,13 @@ def find_codex():
 
 def _read_quota_once(timeout=20, cancel=None):
     executable = find_codex()
-    from codex_connection import child_environment
+    from codex_connection import child_environment,cli_command
+    try:command=cli_command(executable,'app-server')
+    except RuntimeError as error:raise QuotaFailure(str(error),'wsl_stopped','discovery') from error
     frozen_windows=sys.platform=='win32' and getattr(sys,'frozen',False)
     if frozen_windows:ctypes.windll.kernel32.SetDllDirectoryW(None)
     try:
-        process = subprocess.Popen([executable, 'app-server'], stdin=subprocess.PIPE,
+        process = subprocess.Popen(command, stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf-8', env=child_environment(),
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     finally:
@@ -86,6 +88,13 @@ def _read_quota_once(timeout=20, cancel=None):
         send({'id':2,'method':'account/rateLimits/read'})
         return result(2)
     finally:
+        try:process.stdin.close()
+        except (OSError,ValueError):pass
+        # stdin EOF lets the Linux process exit before terminating its Windows
+        # launcher. Never use a distro-wide kill or shutdown for this request.
+        if process.poll() is None:
+            try:process.wait(timeout=.2)
+            except subprocess.TimeoutExpired:pass
         if process.poll() is None: process.terminate()
         try: process.wait(timeout=1)
         except subprocess.TimeoutExpired: process.kill();process.wait()
@@ -103,6 +112,8 @@ def quota_windows(data,allow_empty=False):
         name={300:'5小时',10080:'一周'}.get(minutes, f'{minutes}分钟' if minutes else '额度窗口')
         used=window.get('usedPercent')
         remaining=None if used is None else max(0,min(100,100-float(used)))
-        windows.append({'name':name,'remaining':remaining,'resetsAt':window.get('resetsAt')})
+        item={'name':name,'remaining':remaining,'resetsAt':window.get('resetsAt')}
+        if bucket.get('planType'):item['plan']=str(bucket['planType'])[:40].lower()
+        windows.append(item)
     if not windows and not allow_empty: raise RuntimeError('服务器暂未提供额度窗口。')
     return windows

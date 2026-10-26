@@ -25,6 +25,12 @@ class PanelTests(unittest.TestCase):
         self.assertTrue(b.layout.isEnabled())
         b.toggle_details();t.animation.setCurrentTime(70);self.assertTrue(small.width()<t.visible_geometry().width()<target.width())
         t.complete();self.assertEqual(b.size(),small)
+    def test_normal_detail_transition_never_exposes_blank_contents(self):
+        self.b.toggle_details();m=self.b.size_transition.morph
+        for i in range(101):
+            outgoing,incoming=m.content_opacities(i/100)
+            self.assertAlmostEqual(outgoing+incoming,1.)
+        self.b.size_transition.complete()
     def test_shrink_never_reverses_with_solid_content_and_fixed_canvas(self):
         b=self.b;b.show_page('settings',QWidget());b.size_transition.complete()
         b.show_status(False);t=b.size_transition;native=QRect(b.geometry());handle=int(b.winId());sizes=[]
@@ -66,8 +72,10 @@ class PanelTests(unittest.TestCase):
     def test_equal_sized_editor_pages_keep_widgets_and_have_no_resize(self):
         b=self.b;chat=QWidget();draft=QLineEdit(chat);draft.setText('draft')
         b.show_page('chat',chat);b.size_transition.complete();size=b.size()
-        b.show_page('settings',QWidget());self.assertFalse(b.size_transition.running);self.assertEqual(b.size(),size)
-        b.show_page('chat',chat);self.assertEqual(draft.text(),'draft')
+        b.show_page('settings',QWidget());self.assertTrue(b.size_transition.running);self.assertEqual(b.size(),size)
+        b.size_transition.complete();self.assertEqual(b.size(),size)
+        b.show_page('chat',chat);self.assertTrue(b.size_transition.running);self.assertEqual(b.size(),size)
+        b.size_transition.complete();self.assertEqual(draft.text(),'draft')
     def test_text_remains_dark_under_a_dark_system_palette(self):
         old=APP.palette();dark=QPalette(old)
         for role in (QPalette.ColorRole.WindowText,QPalette.ColorRole.Text,QPalette.ColorRole.ButtonText):dark.setColor(role,QColor('white'))

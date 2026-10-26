@@ -52,7 +52,7 @@ class MaterialControllerTests(unittest.TestCase):
     def test_material_location_move_cleans_old_cache_and_survives_restart(self):
         from material_store import MaterialStore
         old=self.store.cache;target=self.fixture.root/'external/BailongMaterials'
-        self.assertTrue(self.c.move_location(target))
+        self.assertTrue(self.c.move_location(target),self.c.state.get('message'))
         self.assertTrue(until(lambda:self.c.job is None and self.c.state['phase']=='idle'))
         self.assertFalse(old.exists());self.assertEqual(self.store.cache,target)
         restarted=MaterialStore(self.fixture.app,self.fixture.state)
@@ -63,7 +63,7 @@ class MaterialControllerTests(unittest.TestCase):
         self.store.activate('hd',self.store.tier_root('hd'))
         old=self.store.cache;old_root=self.store.root;target=self.fixture.root/'external/BailongMaterials'
         self.c.ready.connect(lambda *args:self.c.failed('entry frame failed'))
-        self.assertTrue(self.c.move_location(target));self.assertTrue(until(lambda:self.c.job is None))
+        self.assertTrue(self.c.move_location(target),self.c.state.get('message'));self.assertTrue(until(lambda:self.c.job is None))
         self.assertEqual(self.c.state['phase'],'error');self.assertEqual(self.store.cache,old)
         self.assertEqual(self.store.root,old_root);self.assertTrue(old_root.exists())
         self.assertEqual(material_root(self.store.state),old)

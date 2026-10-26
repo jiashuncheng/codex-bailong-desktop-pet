@@ -12,7 +12,7 @@ POLL_SECONDS=2
 WATCH_FLAG='--watch-codex'
 
 def data_dir():return __import__('platform_support').data_dir()
-def install_root():return Path(os.environ['LOCALAPPDATA'])/'Programs/BailongEnhanced'
+def install_root():return __import__('storage_locations').install_root()
 def preference_path():return data_dir()/'codex-startup.json'
 def startup_path():return Path(os.environ['APPDATA'])/'Microsoft/Windows/Start Menu/Programs/Startup/BailongCodexSync.vbs'
 def read_json(path):

@@ -10,7 +10,11 @@ from desktop_core import DEFAULTS,VERSION
 from desktop_services import autostart_enabled,set_autostart,import_character,validate_character,all_items
 from settings_draft import SettingsDraft
 from connection_widgets import CapabilityPanel
-from ui_theme import MUTED,PRIMARY,BORDER
+from ui_theme import MUTED,PRIMARY,BORDER,PANEL,SURFACE,SELECTED,INK,ACCENT,editor_stylesheet
+from typography import FONT_CSS
+from settings_controls import SwitchRow,SlidingSegments
+from choice_controls import ChoiceCombo as QComboBox
+from number_controls import DecimalField as QDoubleSpinBox
 from card_motion import AnimatedDisclosure
 
 class ConnectionJob(QThread):
@@ -41,16 +45,31 @@ class PathsJob(QThread):
     def __init__(self,values,parent=None):super().__init__(parent);self.values=values
     def run(self):
         from codex_connection import validate_paths
-        try:self.result.emit(validate_paths(self.values))
-        except (OSError,ValueError) as error:self.failed.emit(str(error))
+        try:
+            if self.values.get('operation')=='list_wsl':
+                from wsl_codex import distributions
+                self.result.emit(distributions())
+            else:self.result.emit(validate_paths(self.values))
+        except (OSError,ValueError,RuntimeError) as error:self.failed.emit(str(error))
 
 class SettingsDialog(QDialog):
     def __init__(self,pet,embedded=False,lazy=False):
         super().__init__(pet,Qt.WindowType.Widget if embedded else Qt.WindowType.Dialog);self.pet=pet;self.embedded=embedded;self.fields={};self.job=None;self.connection_job=None
         self.field_tabs={};self.field_titles={};self.factors={};self._writing_widgets=True;self.draft=None;self.path_job=None
         if embedded:self.setWindowFlags(Qt.WindowType.Widget)
-        self.setWindowTitle('白龙桌宠 · 设置');self.resize(590,680)
+        self.setWindowTitle('白龙桌宠设置');self.resize(590,680)
+        self.setStyleSheet(editor_stylesheet(FONT_CSS)+
+            f'QPushButton{{border:0;border-radius:7px;padding:6px 10px;}}'
+            f'QTabWidget::pane{{border:0;background:{PANEL};}}QTabBar::tab{{background:{SELECTED};color:{MUTED};border:0;border-radius:6px;padding:7px 10px;margin:2px;}}'
+            f'QTabBar::tab:selected{{background:{SURFACE};color:{INK};}}'
+            f'QScrollBar:vertical{{background:{SELECTED};width:12px;margin:0;border:0;border-radius:6px;}}'
+            f'QScrollBar::handle:vertical{{background:{ACCENT};border:2px solid {SELECTED};border-radius:6px;min-height:42px;}}'
+            f'QScrollBar::handle:vertical:hover{{background:{PRIMARY};}}QScrollBar::handle:vertical:pressed{{background:{INK};}}'
+            'QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;width:0;border:0;background:transparent;}'
+            'QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:transparent;}'
+            'QScrollBar:vertical:disabled,QScrollBar::handle:vertical:disabled{background:transparent;border-color:transparent;}')
         outer=QVBoxLayout(self);self.tabs=QTabWidget();outer.addWidget(self.tabs,1)
+        outer.setContentsMargins(10,8,10,8);outer.setSpacing(6);self.tabs.setDocumentMode(True);self.tabs.tabBar().setExpanding(True)
         self._page_forms={};self._built_pages=set();self._building_index=0;self.refresh_buttons={}
         for title in ['面板与显示', '人物与动作', 'Codex 联动', '角色与素材', '闲聊与台词', '更新与维护']:self.tab(title)
         self.build_page(0)
@@ -83,9 +102,9 @@ class SettingsDialog(QDialog):
     def build_page_0(self):
         pet=self.pet
         appearance=self.tab('面板与显示')
-        self.section(appearance,'显示哪些内容','勾选与数值点击“应用”后生效；切页保留草稿。')
-        self.check(appearance,'panel_detached','面板与人物分离（人物走动时面板固定，可单独拖动面板）')
-        for key,title in [('character_visible','显示人物（关闭后仅保留独立卡片）'),('on_top','始终置顶'),('video_fullscreen_yield','视频全屏时临时取消置顶（完成提醒优先）'),('mouse_through','鼠标穿透（从托盘找回）'),('bubble','显示面板（关闭后仅保留人物）'),('quota_visible','显示额度和重置时间')]:
+        self.section(appearance,'显示内容',None)
+        self.check(appearance,'panel_detached','面板与人物分别移动')
+        for key,title in [('character_visible','显示人物'),('on_top','始终置顶'),('video_fullscreen_yield','全屏视频时让位'),('mouse_through','鼠标穿透（可从托盘恢复）'),('bubble','显示面板'),('quota_visible','显示额度和重置时间')]:
             self.check(appearance,key,title)
             if key=='video_fullscreen_yield':
                 note=QLabel('完成提醒确认后继续让位。Mac 浏览器识别需在系统设置中授予运行此程序的 Python 辅助功能权限。' if sys.platform=='darwin' else '完成提醒确认后，视频仍全屏则继续让位；退出全屏恢复当前置顶设置。')
@@ -93,7 +112,7 @@ class SettingsDialog(QDialog):
         self.check(appearance,'conversation_auto_scroll','自动轮换状态会话（保留两条，悬停时暂停）')
         self.number(appearance,'conversation_scroll_seconds','会话轮换间隔（秒）',2,120,1)
         self.section(appearance,'卡片与快捷入口','自动模式闲置后收为胶囊；手动选择胶囊或极简后不会因新状态自动展开。')
-        self.mode=QComboBox();self.mode.addItem('自动：正常卡片 / 闲置时胶囊','auto');self.mode.addItem('胶囊：状态和快捷圆','mini');self.mode.addItem('极简：仅额度百分比','minimal')
+        self.mode=SlidingSegments([('自动','auto'),('胶囊','mini'),('极简','minimal')])
         appearance.addRow('卡片显示模式',self.mode);self.fields['bubble_mode']=self.mode;self.field_tabs['bubble_mode']=0;self.field_titles['bubble_mode']='卡片显示模式'
         self.mode.currentIndexChanged.connect(lambda:self.edited('bubble_mode'))
         from quick_actions import ACTIONS
@@ -109,19 +128,19 @@ class SettingsDialog(QDialog):
     def build_page_1(self):
         pet=self.pet
         behavior=self.tab('人物与动作')
-        self.section(behavior,'位置与移动','人物锁定仅限制人物；分离后的面板仍可独立拖动。')
+        self.section(behavior,'位置与移动',None)
         self.number(behavior,'scale','角色大小（倍）',.4,2.5,.1)
         self.check(behavior,'no_move','锁定人物位置（禁止拖动和自主走动）')
         self.check(behavior,'wandering','允许自主走动（不影响手动拖动）')
-        self.movement_note=QLabel();self.movement_note.setWordWrap(True);behavior.addRow(self.movement_note)
+        self.check(behavior,'wander_horizontal_only','自主走动仅水平')
+        self.number(behavior,'move_range','自主走动范围',.1,1,.1,factor=100,suffix='%')
         self.check(behavior,'drag_physics','松手后惯性滑行与反弹')
         self.section(behavior,'动作与声音','自动动作静音；只在你主动点击或手动播放时使用音效。')
         self.check(behavior,'random_actions','自动随机动作')
         self.check(behavior,'sound','主动点击人物或手动动作时播放音效')
         self.advanced_button=QPushButton('展开高级动作参数');self.advanced_button.setCheckable(True);behavior.addRow(self.advanced_button)
         advanced=QWidget();advanced_form=QFormLayout(advanced);advanced_form.setContentsMargins(0,0,0,0)
-        for key,title,lo,hi,step in [('playback_speed','播放速度（倍）',.25,3,.25),('action_gap','动作结束后等待（秒）',0,60,1),('random_interval','自主动作间隔（秒）',3,600,1),('move_speed','自主走动速度（像素/秒）',10,300,5)]:self.number(advanced_form,key,title,lo,hi,step)
-        self.number(advanced_form,'move_range','自主活动范围',.1,1,.1,factor=100,suffix='% 屏幕')
+        for key,title,lo,hi,step in [('playback_speed','播放速度（倍）',.25,3,.25),('action_gap','动作结束后等待（秒）',0,60,1),('random_interval','自主动作间隔（秒）',3,600,1),('move_speed','自主走动基础速度（像素/秒）',10,300,5)]:self.number(advanced_form,key,title,lo,hi,step)
         self.advanced_card=AnimatedDisclosure(advanced);behavior.addRow(self.advanced_card)
         self.advanced_button.toggled.connect(self.advanced_card.set_expanded)
         self.advanced_button.toggled.connect(lambda checked:self.advanced_button.setText('收起高级动作参数' if checked else '展开高级动作参数'))
@@ -129,11 +148,11 @@ class SettingsDialog(QDialog):
     def build_page_2(self):
         pet=self.pet
         connection=self.tab('Codex 联动')
-        self.section(connection,'启动与退出','登录启动与 Codex 联动相互独立；按需开启。Mac 当前支持登录启动。')
-        self.startup=QCheckBox('登录 macOS 时启动' if sys.platform=='darwin' else '登录 Windows 时启动');connection.addRow(self.startup)
+        self.section(connection,'启动与退出','登录启动与 Codex 联动相互独立；Mac 当前支持登录启动。')
+        self.startup=SwitchRow('登录 macOS 时启动' if sys.platform=='darwin' else '登录 Windows 时启动');connection.addRow(self.startup)
         self.field_tabs['startup']=self._building_index;self.field_titles['startup']='开机启动'
         self.startup.toggled.connect(lambda:self.edited('startup'))
-        self.codex_startup=QCheckBox('打开 Codex 时自动启动桌宠');connection.addRow(self.codex_startup)
+        self.codex_startup=SwitchRow('随 Windows Codex 桌面端启动');connection.addRow(self.codex_startup)
         self.field_tabs['codex_startup']=self._building_index;self.field_titles['codex_startup']='随 Codex 启动'
         self.codex_startup.toggled.connect(lambda:self.edited('codex_startup'))
         note=QLabel('登录时运行轻量监听；识别 Codex 桌面端，不依赖 Codex++。手动退出桌宠后，本次 Codex 使用期间不再拉起。可另行开启关闭联动。');note.setWordWrap(True);note.setStyleSheet(f'font-size:11px;color:{MUTED};');connection.addRow(note)
@@ -165,20 +184,33 @@ class SettingsDialog(QDialog):
         self.path_toggle=QPushButton('连接路径与检测报告');self.path_toggle.setCheckable(True);connection.addRow(self.path_toggle)
         path_body=QWidget();paths=QFormLayout(path_body);paths.setContentsMargins(0,4,0,4)
         from codex_connection import saved_paths,data_home
-        saved=saved_paths();self.path_fields={}
+        saved=saved_paths();self.path_fields={};self.native_path_rows=[];self.path_form=paths
+        source_choices=[('Windows','windows'),('WSL','wsl')] if sys.platform=='win32' else [('macOS','windows')]
+        self.path_source=SlidingSegments(source_choices);self.path_source.setCurrentIndex(self.path_source.findData(saved.get('source') or 'windows'),False);paths.addRow('连接来源',self.path_source)
         for key,title in [('home','Codex 数据目录'),('cli','Codex CLI 程序')]:
             row=QWidget();layout=QHBoxLayout(row);layout.setContentsMargins(0,0,0,0)
             field=QLineEdit(saved.get(key,''));field.setPlaceholderText('留空自动识别');field.setAccessibleName(title);self.path_fields[key]=field;layout.addWidget(field,1)
             browse=QPushButton('选择…');browse.clicked.connect(lambda checked=False,k=key:self.choose_path(k));layout.addWidget(browse);paths.addRow(title,row)
+            self.native_path_rows.append(row)
+        self.wsl_body=QWidget();wsl_form=QFormLayout(self.wsl_body);wsl_form.setContentsMargins(0,0,0,0)
+        distro_row=QWidget();distro_layout=QHBoxLayout(distro_row);distro_layout.setContentsMargins(0,0,0,0)
+        self.wsl_distro=QComboBox();self.wsl_distro.setAccessibleName('WSL 发行版')
+        self.wsl_distro.addItem(saved.get('wsl_distro') or '请刷新发行版',saved.get('wsl_distro',''));distro_layout.addWidget(self.wsl_distro,1)
+        self.wsl_refresh=QPushButton('刷新发行版');self.wsl_refresh.clicked.connect(self.refresh_wsl_sources);distro_layout.addWidget(self.wsl_refresh);wsl_form.addRow('发行版',distro_row)
+        self.wsl_fields={};self._wsl_path=saved.get('wsl_path','')
+        for key,title,hint in [('wsl_user','Linux 用户','留空使用默认用户'),('wsl_home','Linux 数据目录','留空识别 CODEX_HOME'),('wsl_cli','Linux CLI 路径','留空自动识别 codex')]:
+            field=QLineEdit(saved.get(key,''));field.setPlaceholderText(hint);field.setAccessibleName(title);self.wsl_fields[key]=field;wsl_form.addRow(title,field)
+        paths.addRow(self.wsl_body)
         self.active_path=QLabel('当前生效目录：'+str(data_home()));self.active_path.setWordWrap(True);self.active_path.setStyleSheet(f'font-size:11px;color:{MUTED};');paths.addRow(self.active_path)
-        note=QLabel('保存后重启桌宠生效；环境变量优先。只修改本桌宠的路径，不更改 Codex 或登录凭据。');note.setWordWrap(True);note.setStyleSheet(f'font-size:11px;color:{MUTED};');paths.addRow(note)
+        note=QLabel('保存后重启桌宠生效。WSL 验证会启动所选发行版；使用 Linux 登录，Windows 数据独立保留。' if sys.platform=='win32' else '保存后重启桌宠生效；使用本机 Codex 登录与数据。');note.setWordWrap(True);note.setStyleSheet(f'font-size:11px;color:{MUTED};');paths.addRow(note)
         row=QWidget();layout=QHBoxLayout(row);layout.setContentsMargins(0,0,0,0)
         self.save_paths_button=QPushButton('验证并保存路径');self.save_paths_button.clicked.connect(self.validate_paths);layout.addWidget(self.save_paths_button)
-        reset=QPushButton('改为自动识别');reset.clicked.connect(lambda:[field.clear() for field in self.path_fields.values()]);layout.addWidget(reset);paths.addRow(row)
+        reset=QPushButton('改为自动识别');reset.clicked.connect(self.clear_paths);layout.addWidget(reset);paths.addRow(row)
         self.path_status=QLabel();self.path_status.setWordWrap(True);paths.addRow(self.path_status)
         self.connection_text=QPlainTextEdit();self.connection_text.setReadOnly(True);self.connection_text.setMaximumHeight(140);self.connection_text.setAccessibleName('最近一次连接检测报告')
         self.connection_text.setPlainText('点击“检测连接与额度”生成只读报告；不会发送对话或消耗 Token。');paths.addRow(self.connection_text)
         self.paths_card=AnimatedDisclosure(path_body);connection.addRow(self.paths_card);self.path_toggle.toggled.connect(self.paths_card.set_expanded)
+        self.path_source.currentIndexChanged.connect(self.path_source_changed);self.path_source_changed()
 
     def build_page_3(self):
         pet=self.pet
@@ -223,44 +255,74 @@ class SettingsDialog(QDialog):
                 from update_widgets import UpdatePanel
                 self.update_panel=UpdatePanel(pet.updates);maintenance.addRow(self.update_panel)
         self.section(maintenance,'诊断与数据','维护操作立即执行；不属于设置草稿。')
+        if hasattr(pet,'open_install_manager'):
+            button=QPushButton('程序位置与安装管理');button.clicked.connect(pet.open_install_manager);maintenance.addRow(button)
         for title,slot in [('打开配置与聊天记录目录',pet.open_data),('导出诊断报告（不含对话和密钥）',pet.export_diagnostics),('备份设置（不含密钥与对话）',pet.backup_settings),('恢复设置备份',pet.restore_settings),('清理历史版本与备份（先预览）',pet.cleanup_installations)]:
             button=QPushButton(title);button.clicked.connect(slot);maintenance.addRow(button)
-        maintenance.addRow(QLabel('版本 '+VERSION+' · 旧配置自动迁移，退出后保存位置和朝向'))
+        maintenance.addRow(QLabel('当前版本 '+VERSION))
 
     def section(self,form,title,note):
-        name=QLabel(title);name.setStyleSheet(f'font-size:13px;font-weight:500;color:{PRIMARY};background:#eae3f0;border-radius:6px;padding:6px;margin-top:6px;');form.addRow(name)
-        label=QLabel(note);label.setWordWrap(True);label.setStyleSheet(f'font-size:11px;color:{MUTED};margin-bottom:3px;');form.addRow(label)
+        name=QLabel(title);name.setStyleSheet(f'font-size:13px;font-weight:500;color:{PRIMARY};background:transparent;padding:2px;margin-top:10px;');form.addRow(name)
+        if note:
+            label=QLabel(note);label.setWordWrap(True);label.setStyleSheet(f'font-size:11px;color:{MUTED};margin-bottom:3px;');form.addRow(label)
     def choose_path(self,key):
         if key=='home':value=QFileDialog.getExistingDirectory(self,'选择 Codex 数据目录',self.path_fields[key].text())
         else:value,_=QFileDialog.getOpenFileName(self,'选择 Codex CLI（不是桌面主程序）',self.path_fields[key].text(),'所有文件 (*)' if sys.platform=='darwin' else '程序 (*.exe);;所有文件 (*)')
         if value:self.path_fields[key].setText(value)
+    def path_source_changed(self,*args):
+        wsl=self.path_source.currentData()=='wsl'
+        if 'codex_exit' in self.fields:self.fields['codex_exit'].setEnabled(not wsl and sys.platform=='win32')
+        for row in self.native_path_rows:self.path_form.setRowVisible(row,not wsl)
+        self.wsl_body.setVisible(wsl)
+        if self.paths_card.expanded:self.paths_card.refresh_content()
+    def path_values(self):
+        values={key:field.text().strip().strip('"') for key,field in {**self.path_fields,**self.wsl_fields}.items()}
+        return dict(values,source=self.path_source.currentData(),wsl_distro=self.wsl_distro.currentData() or '',wsl_path=self._wsl_path)
+    def clear_paths(self):
+        fields=self.wsl_fields if self.path_source.currentData()=='wsl' else self.path_fields
+        for field in fields.values():field.clear()
+    def refresh_wsl_sources(self):
+        if self.path_job and self.path_job.isRunning():return
+        self.wsl_refresh.setEnabled(False);self.save_paths_button.setEnabled(False);self.path_status.setText('正在查找已安装的 WSL 发行版…')
+        self.path_job=PathsJob(dict(operation='list_wsl'),self);self.path_job.result.connect(self.wsl_sources_done);self.path_job.failed.connect(self.path_status.setText)
+        self.path_job.finished.connect(lambda:[self.wsl_refresh.setEnabled(True),self.save_paths_button.setEnabled(True)]);self.path_job.start()
+    def wsl_sources_done(self,names):
+        selected=self.wsl_distro.currentData();self.wsl_distro.clear()
+        for name in names:self.wsl_distro.addItem(name,name)
+        if selected in names:self.wsl_distro.setCurrentIndex(self.wsl_distro.findData(selected))
+        if not names:self.wsl_distro.addItem('未找到发行版','')
+        self.path_status.setText('请选择发行版，再验证并保存。' if names else '尚未安装 WSL 发行版。')
     def validate_paths(self):
         if self.path_job and self.path_job.isRunning():return
-        values={key:field.text().strip().strip('"') for key,field in self.path_fields.items()}
+        values=self.path_values()
         self.save_paths_button.setEnabled(False);self.path_status.setText('正在验证路径与 CLI 版本…')
         self.path_job=PathsJob(values,self);self.path_job.result.connect(self.paths_done);self.path_job.failed.connect(self.path_status.setText)
         self.path_job.finished.connect(lambda:self.save_paths_button.setEnabled(True));self.path_job.start()
     def paths_done(self,values):
-        if any(self.path_fields[key].text().strip().strip('"')!=self.path_job.values[key] for key in self.path_fields):
+        if self.path_values()!=self.path_job.values:
             self.path_status.setText('验证期间输入已改变，请重新验证；未保存。');return
         from desktop import STATE_DIR
         from codex_connection import save_paths
         try:save_paths(values,STATE_DIR/'connection-paths.json')
         except OSError:self.path_status.setText('路径保存失败，输入仍保留。');return
-        for key,value in values.items():self.path_fields[key].setText(value)
+        for key,field in {**self.path_fields,**self.wsl_fields}.items():field.setText(values.get(key,''))
+        self._wsl_path=values.get('wsl_path','')
         self.path_status.setText('已验证并保存，重启桌宠后生效；当前监测继续使用原路径。')
     def update_refresh_state(self,key,busy):
         if key not in self.refresh_buttons:return
         button,title=self.refresh_buttons[key];button.setEnabled(not busy);button.setText('查询中…' if busy else title)
     def tab(self,title):
         if title in self._page_forms:return self._page_forms[title]
-        widget=QWidget();form=QFormLayout(widget);form.setVerticalSpacing(9);form.setHorizontalSpacing(12)
+        widget=QWidget();form=QFormLayout(widget);form.setVerticalSpacing(5);form.setHorizontalSpacing(12);form.setContentsMargins(9,3,9,10)
         if self.embedded:
             widget.setObjectName('settings_category');widget.setStyleSheet('QWidget#settings_category{background:#f5f2f7;}')
             form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
             area=QScrollArea();area.setWidgetResizable(True)
+            area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             # Reserve the gutter so opening a disclosure cannot rewrap its body.
             area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn);area.setWidget(widget)
+            bar=area.verticalScrollBar();bar.setSingleStep(32)
+            bar.rangeChanged.connect(lambda low,high,b=bar:b.setEnabled(high>low))
             index=self.tabs.addTab(area,{'面板与显示':'面板','人物与动作':'人物','Codex 联动':'Codex','角色与素材':'素材','闲聊与台词':'闲聊','更新与维护':'维护'}.get(title,title))
             self.tabs.setTabToolTip(index,title)
         else:self.tabs.addTab(widget,title)
@@ -273,7 +335,7 @@ class SettingsDialog(QDialog):
         if self.embedded and event.key()==Qt.Key.Key_Escape:self.dismiss();event.accept();return
         super().keyPressEvent(event)
     def check(self,form,key,title):
-        widget=QCheckBox(title);self.fields[key]=widget;form.addRow(widget);self.field_tabs[key]=self._building_index;self.field_titles[key]=title
+        widget=SwitchRow(title);self.fields[key]=widget;form.addRow(widget);self.field_tabs[key]=self._building_index;self.field_titles[key]=title
         widget.toggled.connect(lambda:self.edited(key))
     def number(self,form,key,title,lo,hi,step,factor=1,suffix=''):
         widget=QDoubleSpinBox();widget.setRange(lo*factor,hi*factor);widget.setSingleStep(step*factor);widget.setDecimals(0 if step*factor>=1 else 2);widget.setSuffix(suffix)
@@ -283,7 +345,7 @@ class SettingsDialog(QDialog):
         self._writing_widgets=True
         for key,widget in self.fields.items():
             if isinstance(widget,QCheckBox):widget.setChecked(settings.get(key,DEFAULTS[key]))
-            elif isinstance(widget,QComboBox):widget.setCurrentIndex(widget.findData(settings.get(key,DEFAULTS[key])))
+            elif isinstance(widget,(QComboBox,SlidingSegments)):widget.setCurrentIndex(widget.findData(settings.get(key,DEFAULTS[key])))
             elif isinstance(widget,QLineEdit):widget.setText(settings.get(key,DEFAULTS[key]))
             else:widget.setValue(settings.get(key,DEFAULTS[key])*self.factors.get(key,1))
         if hasattr(self,'lines'):
@@ -313,7 +375,7 @@ class SettingsDialog(QDialog):
         elif key=='codex_startup':value=self.codex_startup.isChecked()
         elif key=='talk_lines':value=[line.strip() for line in self.lines.toPlainText().splitlines() if line.strip()]
         else:
-            widget=self.fields[key];value=widget.isChecked() if isinstance(widget,QCheckBox) else widget.currentData() if isinstance(widget,QComboBox) else widget.text() if isinstance(widget,QLineEdit) else widget.value()/self.factors.get(key,1)
+            widget=self.fields[key];value=widget.isChecked() if isinstance(widget,QCheckBox) else widget.currentData() if isinstance(widget,(QComboBox,SlidingSegments)) else widget.text() if isinstance(widget,QLineEdit) else widget.value()/self.factors.get(key,1)
         self.draft.set(key,value);self.status.clear();self.update_draft_state()
     def update_draft_state(self,*args):
         if self.draft is None:return
@@ -328,8 +390,9 @@ class SettingsDialog(QDialog):
         self.defaults_button.setEnabled(any(tab==self.tabs.currentIndex() and key in DEFAULTS for key,tab in self.field_tabs.items()))
         if 'no_move' in self.fields:
             locked=self.fields['no_move'].isChecked()
-            for key in ('wandering','drag_physics','move_speed','move_range'):self.fields[key].setEnabled(not locked)
-            self.movement_note.setText('位置已锁定：禁止拖动和自主走动；下方移动偏好会保留，解除锁定后恢复。' if locked else '自主走动关闭时仍可手动拖动；工作动作优先于自动随机动作。')
+            walking=self.fields['wandering'].isChecked() and not locked
+            for key in ('wandering','drag_physics'):self.fields[key].setEnabled(not locked)
+            for key in ('wander_horizontal_only','move_speed','move_range'):self.fields[key].setEnabled(walking)
         if 'status_actions' in self.fields:self.fields['status_action_interval'].setEnabled(self.fields['status_actions'].isChecked())
         if 'self_talk' in self.fields:
             talking=self.fields['self_talk'].isChecked()

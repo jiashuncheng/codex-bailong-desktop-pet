@@ -1,0 +1,17 @@
+{
+  "effectiveVersion": "1.0.0",
+  "effectiveDate": "2026-10-25",
+  "patchRange": [
+    0,
+    9
+  ],
+  "carry": "公开版本延续上一稳定版；版本第三段满10进一位到第二段，第二段满10进一位到第一段，归零段位。例如 0.9.9 → 1.0.0。",
+  "examples": [
+    "0.9.8 → 0.9.9",
+    "0.9.9 → 1.0.0",
+    "1.0.9 → 1.1.0",
+    "1.9.9 → 2.0.0"
+  ],
+  "legacyVersionsPreserved": true,
+  "helper": "release_version.py"
+}

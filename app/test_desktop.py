@@ -121,7 +121,7 @@ class DesktopUiTests(unittest.TestCase):
     def test_task_completion_survives_drag_and_protects_bubble(self):
         self.pet.dragging=True;self.pet.gate.state='drag'
         with patch.object(self.pet,'notify'),patch.object(self.pet,'refresh_quota'):
-            self.pet.on_activity(dict(kind='complete',title='完成样例'))
+            self.pet.on_activity(dict(kind='complete',session='11111111-1111-4111-8111-111111111111',turn='turn-1',title='完成样例'))
         self.assertIsNotNone(self.pet.pending_completion)
         self.assertEqual(self.pet.bubble.status_indicator.visual(),'attention')
         before=self.pet.bubble.status;self.pet.choose(self.pet.variants[0]);self.assertEqual(self.pet.bubble.status,before)

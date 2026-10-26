@@ -82,7 +82,7 @@ class LocalResetEvidence:
             self.state=json.loads(self.path.read_text(encoding='utf-8'))
             if not isinstance(self.state,dict):raise ValueError()
         except (OSError,ValueError):self.state={}
-    def observe(self,windows,observed,source):
+    def observe(self,windows,observed,source,announcement=None):
         if source!='live' or not isinstance(observed,(int,float)) or not math.isfinite(observed):return
         old=self.state.get('window');window=next((w for w in windows if w.get('name')=='一周'),None)
         if window is None:window=next((w for w in windows if w.get('name')=='5小时'),None)
@@ -96,9 +96,15 @@ class LocalResetEvidence:
             increase=value-old.get('remaining',value)
             advanced=stamp and old.get('reset') and stamp>old['reset']+60
             refilled=value>=99 and increase>=10
+            pending=pending_reset(announcement)
+            announced_refill=(window['name']=='一周' and isinstance(pending,dict) and
+                not locally_reset(announcement) and
+                isinstance(pending.get('announced'),(int,float)) and
+                observed>=pending['announced'] and increase>=10)
             rolled=advanced and old['reset']<=observed+120
-            if rolled or increase>1 and (advanced or refilled):
-                self.state['reset']=dict(observed=observed,window=window['name'],remaining=value)
+            if rolled or increase>1 and (advanced or refilled or announced_refill):
+                self.state['reset']=dict(observed=observed,window=window['name'],remaining=value,
+                    kind='natural' if rolled else 'extra')
         self.state['window']=current
         from desktop_core import atomic_json
         try:atomic_json(self.path,self.state)

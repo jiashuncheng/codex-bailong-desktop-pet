@@ -1,7 +1,7 @@
 """Categorised expanded details; live data, explanations and sources stay separate."""
-from PySide6.QtCore import Qt,QRectF,QPointF
+from PySide6.QtCore import Qt,QRectF,QPointF,QEvent
 from PySide6.QtGui import QPainter,QColor,QPen
-from PySide6.QtWidgets import QWidget,QLabel,QVBoxLayout,QHBoxLayout,QTabWidget,QScrollArea,QFrame
+from PySide6.QtWidgets import QWidget,QLabel,QVBoxLayout,QHBoxLayout,QTabWidget,QScrollArea,QFrame,QStackedWidget,QApplication
 from compact_bubble import font,FONT_CSS,source_button,Announcement
 from reset_watch import pending_reset,schedule_text,account_reset_text
 from ring_widgets import draw_metric_icon
@@ -105,6 +105,34 @@ class DetailsTabs(QTabWidget):
         for layout in (quota,tokens,reset,legend):layout.addStretch()
         self.setCurrentIndex(self.keys.index(bubble.detail_tab) if bubble.detail_tab in self.keys else 0)
         self.currentChanged.connect(lambda i:setattr(bubble,'detail_tab',self.keys[i]))
+        self._page_stack=self.findChild(QStackedWidget)
+        self._page_fade=None
+        if self._page_stack:
+            from data_page_motion import PageFade
+            self._page_fade=PageFade(self._page_stack)
+        self._last_index=self.currentIndex()
+        self.currentChanged.connect(self._page_changed)
+    def _page_changed(self,index):
+        previous=self._last_index;self._last_index=index
+        if not self._page_fade or previous==index:return
+        from settings_controls import motion_enabled
+        old=self.widget(previous);new=self.widget(index)
+        frame=self._page_fade.current_frame() if self._page_fade.isVisible() else None
+        if frame is None and old is not None and self.isVisible() and motion_enabled():
+            frame=self._page_fade.snapshot(old)
+        self._page_fade.clear()
+        if frame is None or new is None or not self.isVisible() or not motion_enabled():return
+        widgets=[new]+new.findChildren(QWidget)
+        for widget in reversed(widgets):
+            widget.ensurePolished()
+            if widget.layout():widget.layout().activate()
+        QApplication.sendPostedEvents(None,QEvent.Type.LayoutRequest)
+        target=self._page_fade.snapshot(new)
+        self._page_fade.present(frame,target,self._page_stack.rect())
+        new.repaint()
+    def hideEvent(self,event):
+        if self._page_fade:self._page_fade.clear()
+        super().hideEvent(event)
     def page(self,key,title):
         area=QScrollArea();area.setObjectName('detail_'+key);area.setWidgetResizable(True);area.setFrameShape(QFrame.Shape.NoFrame)
         area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)

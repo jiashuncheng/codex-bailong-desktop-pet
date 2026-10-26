@@ -33,10 +33,11 @@ class TokenUsageIndex:
         # Each selected source has an independent index; retain the old database
         # untouched rather than guessing which mixed historical rows belong here.
         import hashlib,os
-        source=os.path.normcase(str(self.home.resolve()))
+        source=__import__('codex_connection').source_identity(self.home)
         key=hashlib.sha256(source.encode('utf-8')).hexdigest()[:16]
         self.path=self.path.with_name(self.path.stem+'-source-'+key+self.path.suffix)
         self.format_known={}
+        self.legacy_import_pending=False
         from log_catalog import LogCatalog
         self.catalog=LogCatalog(self.home)
 
@@ -47,20 +48,25 @@ class TokenUsageIndex:
         db.execute('CREATE INDEX IF NOT EXISTS usage_stamp ON usage(stamp)')
         from token_analytics import migrate
         migrate(db)
+        from quota_history import migrate as migrate_quota_history
+        migrate_quota_history(db)
         db.execute('CREATE TABLE IF NOT EXISTS source_identity (home TEXT PRIMARY KEY)')
+        self.legacy_import_pending=False
         if not db.execute('SELECT 1 FROM source_identity').fetchone():
-            self.import_legacy(db)
-            db.execute('INSERT INTO source_identity VALUES(?)',(str(self.home),));db.commit()
+            if self.import_legacy(db):
+                db.execute('INSERT INTO source_identity VALUES(?)',(str(self.home),));db.commit()
+            else:self.legacy_import_pending=True
         return db
 
     def import_legacy(self,db):
         """Attribute retained history using file/session metadata; never move the old DB."""
-        if not self.legacy_path.is_file():return
+        if __import__('codex_connection').is_wsl_source(self.home):return True
+        if not self.legacy_path.is_file():return True
         savepoint=False
         try:
-            with closing(sqlite3.connect(self.legacy_path.resolve().as_uri()+'?mode=ro',uri=True,timeout=3)) as old:
+            with closing(sqlite3.connect(self.legacy_path.resolve().as_uri()+'?mode=ro',uri=True,timeout=0.5)) as old:
                 columns=[r[1] for r in old.execute('PRAGMA table_info(files)')]
-                if not {'path','session'}<=set(columns):return
+                if not {'path','session'}<=set(columns):return True
                 db.execute('SAVEPOINT legacy_copy');savepoint=True
                 owned=set()
                 for row in old.execute('SELECT * FROM files'):
@@ -77,16 +83,17 @@ class TokenUsageIndex:
                     for row in old.execute('SELECT '+','.join(names)+' FROM '+table):
                         if row[names.index('session')] in owned:db.execute(query,row)
                 db.execute('RELEASE legacy_copy');savepoint=False
+            return True
         except (sqlite3.DatabaseError,OSError,ValueError,TypeError):
             if savepoint:db.execute('ROLLBACK TO legacy_copy');db.execute('RELEASE legacy_copy')
-            # A damaged or older index is retained for recovery; logs rebuild it.
-            return
+            # A busy or unreadable legacy index must be retried on the next poll.
+            return False
 
     def scan_file(self,db,path,stop):
         from token_analytics import scan_file
         return scan_file(self,db,path,stop)
 
-    def poll(self,now=None,stop=lambda:False):
+    def poll(self,now=None,stop=lambda:False,cycle=None):
         from performance_metrics import METRICS
         files=self.catalog.discover(check=True);errors=self.catalog.errors;readable=0;schema_errors=0
         with closing(self.connect()) as db, db:
@@ -98,9 +105,22 @@ class TokenUsageIndex:
                     else:readable+=1
                 except OSError:errors+=1
             result=self.snapshot(db,now,errors);result.update(log_files=len(files),readable_files=readable,format_unknown=bool(schema_errors))
+            if self.legacy_import_pending:
+                result['partial']=True
+                result['legacy_migration_pending']=True
+                result['legacy_migration_reason']='旧 Token 记录暂不可读，下次刷新重试'
             if not readable:
                 result['partial']=True
                 if not result.get('history_days'):result['unavailable']=True;result['report']={}
+            if cycle:
+                from week_cycle import summarize,usage
+                used,records=usage(db,cycle)
+                result['week_cycle']=summarize(cycle,used,records,
+                    readable>0 and not result['partial'] and not result.get('unavailable'),now)
+            from quota_history import import_step,snapshot as quota_history_snapshot
+            progress=import_step(db,files,stop)
+            result['quota_history']=quota_history_snapshot(db,cycle,now,
+                readable>0 and not result['partial'] and not result.get('unavailable'),progress)
             return result
 
     def snapshot(self,db,now=None,errors=0):

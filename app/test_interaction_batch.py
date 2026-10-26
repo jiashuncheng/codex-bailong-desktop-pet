@@ -82,7 +82,7 @@ class InteractionTests(unittest.TestCase):
     def test_defaults_are_per_tab_and_movement_dependencies_are_explicit(self):
         s=self.settings();s.fields['scale'].setValue(1.2);s.mode.setCurrentIndex(s.mode.findData('mini'));s.startup.setChecked(True);s.tabs.setCurrentIndex(1)
         s.fields['no_move'].setChecked(True);self.assertFalse(s.fields['wandering'].isEnabled())
-        self.assertIn('位置已锁定',s.movement_note.text());self.assertEqual(s.fields['move_range'].value(),75)
+        self.assertFalse(s.fields['wander_horizontal_only'].isEnabled());self.assertEqual(s.fields['move_range'].value(),100)
         self.assertEqual(s.fields['status_action_interval'].decimals(),0)
         s.defaults_button.click();self.assertFalse(s.fields['no_move'].isChecked());self.assertEqual(s.fields['scale'].value(),1.0)
         self.assertEqual(s.mode.currentData(),'mini');self.assertTrue(s.startup.isChecked());self.startup.assert_not_called()

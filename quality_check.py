@@ -7,7 +7,7 @@ from build_local import source_hashes as current_sources
 def run(path):
     began=time.monotonic()
     with tempfile.TemporaryDirectory(prefix='bailong-regression-') as folder:
-        env=os.environ.copy();env.update(LOCALAPPDATA=folder,APPDATA=str(Path(folder)/'roaming'),CODEX_HOME=str(Path(folder)/'codex'),QT_QPA_PLATFORM='offscreen',PYTHONIOENCODING='utf-8')
+        env=os.environ.copy();env.update(LOCALAPPDATA=folder,APPDATA=str(Path(folder)/'roaming'),CODEX_HOME=str(Path(folder)/'codex'),QT_QPA_PLATFORM='offscreen',PYTHONIOENCODING='utf-8',BAILONG_ISOLATED='1')
         code="import faulthandler,unittest;faulthandler.dump_traceback_later(65);unittest.main(module="+repr(path.stem)+",verbosity=2)"
         p=subprocess.Popen([sys.executable,'-c',code],cwd=path.parent,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         try:
@@ -39,12 +39,17 @@ if len(sys.argv)>2:
     paths=[p for p in paths if p.stem in requested]
 if not paths:raise SystemExit('No tests selected')
 initial_hashes=current_sources()
+from storage_locations import install_root
+guard_path=install_root()/'installations.json'
+guard_before=guard_path.read_bytes() if guard_path.is_file() else None
+if guard_before is not None:(HERE/f'{phase}-installation-manifest-backup.json').write_bytes(guard_before)
 records=[]
 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
     for result in pool.map(run,paths):
         records.append(result);print(json.dumps({k:v for k,v in result.items() if k!='tail'}),flush=True)
 source_hashes=current_sources()
-proof=dict(scope='full' if sorted(p.stem for p in paths)==expected_modules else 'targeted',expectedModules=expected_modules,phase=phase,sourceHashes=source_hashes,sourceUnchangedDuringTests=source_hashes==initial_hashes,modules=len(records),tests=sum(r['tests'] for r in records),passed=bool(records) and source_hashes==initial_hashes and all(r['returncode']==0 and r['tests']>0 for r in records),records=records)
+guard_after=guard_path.read_bytes() if guard_path.is_file() else None
+proof=dict(scope='full' if sorted(p.stem for p in paths)==expected_modules else 'targeted',expectedModules=expected_modules,phase=phase,sourceHashes=source_hashes,sourceUnchangedDuringTests=source_hashes==initial_hashes,installationManifestUnchanged=guard_after==guard_before,modules=len(records),tests=sum(r['tests'] for r in records),passed=bool(records) and source_hashes==initial_hashes and guard_after==guard_before and all(r['returncode']==0 and r['tests']>0 for r in records),records=records)
 (HERE/f'{phase}-regressions.json').write_text(json.dumps(proof,ensure_ascii=False,indent=2),encoding='utf-8')
 print(json.dumps(dict(modules=proof['modules'],tests=proof['tests'],failed=[r['module'] for r in records if r['returncode']!=0])))
 raise SystemExit(0 if proof['passed'] else 1)

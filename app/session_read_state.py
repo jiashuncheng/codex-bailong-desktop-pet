@@ -7,6 +7,38 @@ def session_id(value):
     text=str(value);match=re.search(r'([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})$',text)
     return match.group(1).lower() if match else text
 
+def rollout_alias(path):
+    """Map an edited root-turn rollout back to its desktop conversation."""
+    path=Path(path)
+    uuid=r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}'
+    match=re.search(rf'({uuid})_({uuid})\.jsonl$',Path(path).name)
+    if not match or match.group(1).lower()==match.group(2).lower():return path.stem
+    parent,branch=(value.lower() for value in match.groups())
+    inherited_parent=False
+    try:
+        with path.open('rb') as stream:
+            size=0
+            for _ in range(64):
+                raw=stream.readline(65536);size+=len(raw)
+                if not raw or not raw.endswith(b'\n') or size>1048576:break
+                try:obj=json.loads(raw)
+                except (ValueError,UnicodeError):continue
+                payload=obj.get('payload') or {}
+                if not isinstance(payload,dict):continue
+                if obj.get('type')=='session_meta':
+                    owner=session_id(payload.get('id') or payload.get('session_id') or '')
+                    if owner==branch or is_subagent_metadata(payload):return path.stem
+                    if owner==parent:inherited_parent=True
+                if obj.get('type')=='event_msg' and payload.get('type')=='task_started':
+                    attribution=payload.get('turn_attribution') or {}
+                    if not isinstance(attribution,dict):return path.stem
+                    root_trigger=attribution.get('turn_trigger') in ('edit_user_message','composer','resume_interrupted_task')
+                    if inherited_parent and root_trigger and not attribution.get('initiating_agent_path') and not attribution.get('parent_turn_id'):
+                        return parent
+                    return path.stem
+    except OSError:pass
+    return path.stem
+
 
 def is_subagent_metadata(metadata):
     source=metadata.get('source')
@@ -19,6 +51,8 @@ def is_subagent_metadata(metadata):
 
 def subagent_sessions(home,ids):
     """Identify only proven child threads; missing metadata never hides a chat."""
+    from codex_connection import is_wsl_source
+    if is_wsl_source(home):return set()
     ids=list(dict.fromkeys(session_id(sid) for sid in ids if sid))
     if not ids:return set()
     try:
@@ -121,6 +155,8 @@ def read_unread_sessions(home):
 def read_tracking_probe(home):
     """Verify current marker shape and an actual read-only publication query."""
     from connection_health import sample
+    from codex_connection import is_wsl_source
+    if is_wsl_source(home):return sample('degraded','wsl_logs_only')
     home=Path(home)
     if read_unread_sessions(home) is None:
         return sample('unavailable','read_schema' if (home/'.codex-global-state.json').exists() else 'read_missing')

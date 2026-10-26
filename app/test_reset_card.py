@@ -54,6 +54,11 @@ class ResetCardTests(unittest.TestCase):
         card.resize(106,78);card.show();app.processEvents();expanded=[];card.expand.connect(lambda:expanded.append(True))
         size=card.size();button=card.source_button
         self.assertTrue(card.rect().contains(button.geometry()))
+        note,rect=card.note_layout()
+        self.assertEqual(button.geometry().bottom(),card.height()-3)
+        self.assertLess(rect.right(),button.x())
+        self.assertNotIn('最晚',note)
+        self.assertLessEqual(QFontMetricsF(__import__('typography').ui_font(10,True)).horizontalAdvance(note),rect.width())
         with patch('reset_card.QDesktopServices.openUrl',return_value=True) as opened:
             QTest.mouseClick(button,Qt.MouseButton.LeftButton)
             self.assertEqual(opened.call_count,1);self.assertEqual(opened.call_args.args[0].toString(),SOURCE_URL)

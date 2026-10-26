@@ -5,15 +5,24 @@ from app_updates import check_release,stage_installer,version_tuple,prune_comple
 
 class UpdateJob(QThread):
     result=Signal(object);failed=Signal(str,str);progress=Signal(int,int,str);selected=Signal(object)
-    def __init__(self,current,cache,release=None,parent=None):
-        super().__init__(parent);self.current=current;self.cache=cache;self.release=release;self.cancel=threading.Event()
+    def __init__(self,current,cache,release=None,parent=None,program_version=None):
+        super().__init__(parent);self.current=current;self.cache=cache;self.release=release;self.cancel=threading.Event();self.program_version=program_version or current
     def run(self):
         try:
             if self.release is None:
-                prune_completed(self.cache,self.current);value=check_release(self.current,cancel=self.cancel.is_set)
+                prune_completed(self.cache,self.current);value=check_release(self.current,cancel=self.cancel.is_set,state_dir=self.cache.parent,program_version=self.program_version)
             else:
-                progress=lambda n,total,phase:self.progress.emit(n,total,phase)
-                if self.release.kind=='program':
+                last=[0.,None]
+                def progress(n,total,phase):
+                    now=time.monotonic()
+                    if phase!=last[1] or now-last[0]>=.12 or n==total:
+                        last[:]=[now,phase];self.progress.emit(n,total,phase)
+                if self.release.animation_catalog:
+                    from animation_updates import stage
+                    from pet import ROOT
+                    animation=stage(self.release,ROOT,self.cache.parent,progress,self.cancel.is_set)
+                if self.release.kind=='animation':value=animation
+                elif self.release.kind=='program':
                     from program_updates import stage_program,MaterialMismatch
                     from pet import ROOT
                     try:value=stage_program(self.release,self.cache,ROOT,progress,self.cancel.is_set)
@@ -31,9 +40,11 @@ class UpdateJob(QThread):
         except Exception:self.failed.emit('error','更新暂不可用，请稍后重试')
 
 class UpdateController(QObject):
-    changed=Signal(object);installerReady=Signal(str);idle=Signal()
+    changed=Signal(object);installerReady=Signal(str);animationReady=Signal(object);idle=Signal()
     def __init__(self,current,cache,parent=None,allow_auto=True):
-        super().__init__(parent);self.current=current;self.cache=cache;self.allow_auto=allow_auto;self.release=None;self.job=None;self.closing=False;self.enabled=False;self.install_requested=False
+        from animation_updates import effective_version
+        super().__init__(parent);self.program_version=current;self.current=effective_version(current,cache.parent);self.cache=cache;self.allow_auto=allow_auto;self.release=None;self.job=None;self.closing=False;self.enabled=False;self.install_requested=False
+        current=self.current
         self.state=dict(phase='idle',message='点击检查 GitHub 公开稳定版',current=current,latest='',notes='',downloaded=0,total=0,checked=0)
         self.timer=QTimer(self);self.timer.setInterval(6*3600*1000);self.timer.timeout.connect(self._automatic)
         self.initial=QTimer(self);self.initial.setSingleShot(True);self.initial.setInterval(15000);self.initial.timeout.connect(self._automatic)
@@ -56,18 +67,18 @@ class UpdateController(QObject):
     def _bind(self,job):
         self.job=job;job.result.connect(self._result);job.failed.connect(self._failed);job.progress.connect(self._progress);job.selected.connect(self._selected);job.finished.connect(self._finished);self.changed.emit(self.snapshot());job.start()
     def _selected(self,release):
-        self.release=release;self.publish(package_kind=release.kind,package_reason=release.reason,total=release.size,downloaded=0,message=release.reason)
+        self.release=release;self.publish(package_kind=release.kind,package_animation=bool(release.animation_info_url),package_reason=release.reason,total=release.size,downloaded=0,message=release.reason)
     def check(self):
         import sys
         if sys.platform=='darwin':
             self.publish(phase='source',message='Mac 源码版：替换源码后重新启动即可更新。');return False
-        if self.closing or self.job is not None:return False
+        if self.closing or self.job is not None or self.state['phase']=='pending':return False
         self.publish(phase='checking',message='正在检查公开稳定版…')
-        self._bind(UpdateJob(self.current,self.cache,parent=self));return True
+        self._bind(UpdateJob(self.current,self.cache,parent=self,program_version=self.program_version));return True
     def download_install(self):
         import sys
         if sys.platform=='darwin':return False
-        if self.closing or self.job is not None or self.release is None or version_tuple(self.release.version)<=version_tuple(self.current):return False
+        if self.closing or self.job is not None or self.state['phase']=='pending' or self.release is None or version_tuple(self.release.version)<=version_tuple(self.current):return False
         self.install_requested=True;self.publish(phase='downloading',message='正在准备下载…',total=self.release.size)
         self._bind(UpdateJob(self.current,self.cache,self.release,parent=self));return True
     def cancel(self):
@@ -80,8 +91,12 @@ class UpdateController(QObject):
             if self.state.get('latest')!=value.version:self.state['downloaded']=0
             self.release=value;cmp=(version_tuple(value.version)>version_tuple(self.current))-(version_tuple(value.version)<version_tuple(self.current))
             message='发现新版本，可查看说明后下载并安装' if cmp>0 else '已是最新公开版本' if cmp==0 else '本机版本较新，公开稳定版为 '+value.version
-            self.publish(phase='available' if cmp>0 else 'current',message=message,latest=value.version,notes=value.notes,total=value.size,checked=time.time(),url=value.url,package_kind=value.kind,package_reason=value.reason)
+            self.publish(phase='available' if cmp>0 else 'current',message=message,latest=value.version,notes=value.notes,total=value.size,checked=time.time(),url=value.url,package_kind=value.kind,package_animation=bool(value.animation_info_url),package_reason=value.reason)
         else:
+            if self.release.kind=='animation':
+                self.publish(phase='pending',message='动画补丁已校验，等待当前动作结束后切换…')
+                if self.install_requested:self.animationReady.emit(value)
+                return
             self.publish(phase='ready',message='校验通过，正在启动安装器…')
             if self.install_requested:self.installerReady.emit(str(value))
     def _failed(self,phase,message):
@@ -97,6 +112,20 @@ class UpdateController(QObject):
         self.changed.emit(self.snapshot());self.idle.emit()
     def installing(self):self.publish(phase='installing',message='安装器已启动，将关闭桌宠并完成升级')
     def install_failed(self,message):self.install_requested=False;self.publish(phase='error',message=message)
+    def animation_applied(self,ready):
+        self.current=max((self.program_version,ready['release'].version),key=version_tuple);self.install_requested=False
+        self.publish(phase='current',current=self.current,latest=self.current,total=0,downloaded=0,message='动画资源已切换，上一套资源仍保留，可在素材设置回退')
+    def rollback_animation(self,previous):
+        if self.closing or self.job or self.state['phase']=='pending' or not previous:return False
+        from app_updates import Release
+        try:
+            value=previous['version'];catalog=previous['catalog'];version_tuple(value);version_tuple(previous['minimumProgramVersion'])
+            if not isinstance(catalog,dict):raise ValueError('catalog')
+        except (TypeError,KeyError,ValueError,UpdateError):
+            self.install_failed('上一套动画的回退记录不完整');return False
+        self.release=Release(value,'v'+value,'','',0,'',kind='animation',animation_catalog=catalog,minimum_program_version=previous['minimumProgramVersion'],reason='animation-rollback')
+        self.install_requested=True;self.publish(phase='materials',message='正在准备上一套动画资源…')
+        self._bind(UpdateJob(self.current,self.cache,self.release,parent=self,program_version=self.program_version));return True
     def shutdown(self):
         self.closing=True;self.initial.stop();self.timer.stop();self.cleanup_timer.stop();self.install_requested=False
         if self.job:self.job.cancel.set();return False

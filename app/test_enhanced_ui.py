@@ -52,7 +52,7 @@ class UiTests(unittest.TestCase):
         self.pet.start_walk()
         self.assertTrue(self.pet.walking)
         with patch.object(self.pet,'notify') as notify,patch.object(self.pet,'refresh_quota'):
-            self.pet.on_activity({'kind':'complete','title':'测试任务'})
+            self.pet.on_activity({'kind':'complete','session':'11111111-1111-4111-8111-111111111111','turn':'turn-1','title':'测试任务'})
             self.assertFalse(self.pet.walking)
             self.assertEqual(self.pet.current['id'],'18')
             self.assertIn('完成',self.pet.bubble.status)

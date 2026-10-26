@@ -34,17 +34,19 @@ class UpdatePanel(QWidget):
         controller.changed.connect(self.set_state);self.set_state(controller.snapshot())
     def set_state(self,state):
         self.state=state;phase=state['phase'];busy=self.controller.job is not None
-        self.version.setText('当前 '+state['current']+('  ·  公开版 '+state['latest'] if state.get('latest') else ''))
-        self.status.setText(state['message']);self.check.setEnabled(not busy and phase!='installing');self.check.setText('检查中…' if phase=='checking' else '检查更新')
+        self.version.setText('当前 '+state['current']+('    公开版 '+state['latest'] if state.get('latest') else ''))
+        self.status.setText(state['message']);self.check.setEnabled(not busy and phase not in ('installing','pending'));self.check.setText('检查中…' if phase=='checking' else '检查更新')
         from app_updates import version_tuple
         newer=bool(state.get('latest')) and version_tuple(state['latest'])>version_tuple(state['current'])
-        self.install.setVisible(newer and not busy and phase!='installing');self.install.setEnabled(not busy);self.install.setText('继续下载并安装' if phase=='cancelled' else '下载并安装')
+        self.install.setVisible(newer and not busy and phase not in ('installing','pending'));self.install.setEnabled(not busy);self.install.setText('继续下载并安装' if phase=='cancelled' else '下载并安装')
         downloading=phase in ('materials','downloading','verifying','extracting','ready');self.cancel.setVisible(busy and downloading);self.cancel.setEnabled(not self.controller.job.cancel.is_set() if busy else True)
         self.progress.setVisible(downloading or phase=='cancelled');self.amount.setVisible(downloading or phase=='cancelled' or newer)
         total=state.get('total',0);n=state.get('downloaded',0);self.progress.setValue(round(1000*n/max(1,total)))
         self.amount.setText((size_text(n)+' / ' if downloading or phase=='cancelled' else '安装包约 ')+size_text(total) if total else '')
         self.package.setVisible(newer)
-        self.package.setText('纯程序更新 · 复用本地动画，保留高清偏好' if state.get('package_kind')=='program' else ('完整安装包 · '+state['package_reason'] if state.get('package_reason') else '完整安装包 · 包含轻量素材'))
+        kind=state.get('package_kind')
+        self.package.setText((('动画补丁包 ' if kind=='animation' else '程序补丁包 ')+state.get('latest','')) if kind in ('program','animation') else ('完整安装包：'+state['package_reason'] if state.get('package_reason') else '完整安装包'))
+        if kind=='program' and state.get('package_animation'):self.package.setText(self.package.text()+'\n动画补丁包 '+state.get('latest',''))
         notes=re.sub(r'^\s*#{1,6}\s*','',state.get('notes',''),flags=re.M)
         if notes!=self.details.toPlainText():
             self.details.setPlainText(notes)

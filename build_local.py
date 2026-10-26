@@ -31,7 +31,7 @@ def sha(path):
 
 def source_hashes():
     paths=list((ROOT/'app').glob('*.py'))
-    paths += [ROOT/name for name in ('build_local.py','quality_check.py','build_release.py','check_bundle.py','deploy_release.py','release_version.py','release_retention.py','asset_pack.py','build_materials.py','build_program_update.py','package_trim.py','test_local_workflow.py','test_release_version.py','test_release_retention.py') if (ROOT/name).is_file()]
+    paths += [ROOT/name for name in ('build_local.py','quality_check.py','build_release.py','build_card_only.py','check_bundle.py','deploy_release.py','release_version.py','release_retention.py','asset_pack.py','build_materials.py','build_program_update.py','package_trim.py','test_local_workflow.py','test_release_version.py','test_release_retention.py') if (ROOT/name).is_file()]
     if (ROOT/'app/material_catalog.json').is_file():paths.append(ROOT/'app/material_catalog.json')
     paths += [p for p in [ROOT/'requirements-enhanced.txt',ROOT/'app/book_catalog.json'] if p.is_file()]
     paths += [p for p in (ROOT/'app/fonts').glob('*') if p.is_file()]
@@ -64,7 +64,7 @@ def native_matrix(exe,label):
     for factor in ('1','1.25','1.5','2'):
         output=ROOT/'本地实装'/f'{label}-原生交互-{factor}x.json'
         with tempfile.TemporaryDirectory(prefix='bailong-native-check-') as folder:
-            env=os.environ.copy();env.update(LOCALAPPDATA=folder,CODEX_HOME=str(Path(folder)/'codex'),QT_QPA_PLATFORM='windows',QT_SCALE_FACTOR=factor)
+            env=os.environ.copy();env.update(LOCALAPPDATA=folder,CODEX_HOME=str(Path(folder)/'codex'),QT_QPA_PLATFORM='windows',QT_SCALE_FACTOR=factor,BAILONG_ISOLATED='1')
             output.unlink(missing_ok=True)
             with (output.with_suffix('.log')).open('w',encoding='utf-8') as log:
                 try:subprocess.run([str(exe),'--interaction-probe',str(output)],cwd=exe.parent,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=100,check=True,creationflags=0x08000000)
@@ -81,7 +81,7 @@ def native_matrix(exe,label):
 def verify_tls_runtime(exe):
     output=ROOT/'本地实装/冻结TLS验收.json';output.unlink(missing_ok=True)
     with tempfile.TemporaryDirectory(prefix='bailong-tls-check-') as folder:
-        env=os.environ.copy();env.update(LOCALAPPDATA=folder,CODEX_HOME=str(Path(folder)/'codex'))
+        env=os.environ.copy();env.update(LOCALAPPDATA=folder,CODEX_HOME=str(Path(folder)/'codex'),BAILONG_ISOLATED='1')
         subprocess.run([str(exe),'--reset-diagnostics',str(output),'--tls-only'],cwd=exe.parent,env=env,check=True,timeout=20,creationflags=0x08000000)
     proof=read(output)
     if not all(proof.get(k) is True for k in ('contextReady','certificateVerification','hostnameVerification','offline')):raise ValueError('冻结程序TLS初始化或证书验证验收失败')

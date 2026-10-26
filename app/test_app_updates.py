@@ -20,7 +20,7 @@ class Response(io.BytesIO):
 
 class ReleaseTests(unittest.TestCase):
     def test_versions_include_legacy_and_minor_carry_and_never_downgrade(self):
-        self.assertGreater(version_tuple('0.7.2'),version_tuple('v0.6.50'));self.assertGreater(version_tuple('0.8.0'),version_tuple('0.7.9'));self.assertGreater(version_tuple('0.10.0'),version_tuple('0.9.9'))
+        self.assertGreater(version_tuple('0.7.2'),version_tuple('v0.6.50'));self.assertGreater(version_tuple('0.8.0'),version_tuple('0.7.9'));self.assertGreater(version_tuple('1.0.0'),version_tuple('0.9.9'));self.assertGreater(version_tuple('1.0.0'),version_tuple('0.10.0'))
         for v in ('0.7.2-beta','../escape','00.7.2','0.7','1;run'):
             with self.assertRaises(UpdateError):version_tuple(v)
     def test_exact_asset_and_repo_required_and_no_drafts_or_prereleases(self):

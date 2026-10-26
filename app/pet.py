@@ -72,7 +72,8 @@ class Pet(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setWindowTitle('白龙桌宠');self.setFixedSize(256,256)
-        self.manifest=json.loads((getattr(self,'asset_root',ASSETS)/'素材清单.json').read_text(encoding='utf-8'))
+        self.manifest=({'idle':{'id':'unavailable','file':'unavailable.webp','durationMs':1000},'variants':[]} if getattr(self,'_materials_missing',False)
+            else json.loads((getattr(self,'asset_root',ASSETS)/'素材清单.json').read_text(encoding='utf-8')))
         self.variants=[v for v in self.manifest['variants'] if self.asset_path(v).is_file()]
         self.idles=[self.manifest['idle']]+self.manifest.get('additionalIdleAnimations',[])[:1]
         self.cache=OrderedDict();self.pinned_frames={};self.frames=[];self.current=None;self.mode='idle';self.index=0

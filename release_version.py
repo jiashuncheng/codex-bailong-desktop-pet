@@ -1,15 +1,57 @@
-"""Project release numbering: carry the third component after nine."""
+"""Semantic version rules for local builds and public releases.
+
+Regular application builds use stable MAJOR.MINOR.PATCH versions. Prerelease
+and build metadata remain reserved until the updater workflow supports them.
+"""
+import argparse
 import re
 
-def next_version(current):
-    if not re.fullmatch(r'\d+\.\d+\.\d+',current):raise ValueError('Expected major.minor.patch')
-    major,minor,patch=map(int,current.split('.'))
-    return f'{major}.{minor+1}.0' if patch>=9 else f'{major}.{minor}.{patch+1}'
+
+_STABLE_VERSION = re.compile(
+    r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+)
+_CHANGE_TYPES = {"major", "minor", "patch"}
+
+
+def _parts(version):
+    if not isinstance(version, str) or not _STABLE_VERSION.fullmatch(version):
+        raise ValueError("Expected stable MAJOR.MINOR.PATCH without leading zeros")
+    return tuple(int(part) for part in version.split("."))
+
+
+def next_version(current, change_type):
+    """Return the next SemVer for a breaking, compatible, or fix-only change."""
+    if change_type not in _CHANGE_TYPES:
+        raise ValueError("change_type must be major, minor, or patch")
+    major, minor, patch = _parts(current)
+    if change_type == "major":
+        return f"{major + 1}.0.0"
+    if change_type == "minor":
+        return f"{major}.{minor + 1}.0"
+    return f"{major}.{minor}.{patch + 1}"
+
 
 def validate_new_version(version):
-    if not re.fullmatch(r'\d+\.\d+\.[0-9]',version):raise ValueError('New release patch must be 0–9')
+    _parts(version)
     return version
 
-if __name__=='__main__':
-    import sys
-    print(next_version(sys.argv[1]))
+
+def validate_public_successor(previous_public, candidate, change_type):
+    """Validate against the previous public stable release, never local builds."""
+    _parts(previous_public)
+    validate_new_version(candidate)
+    expected = next_version(previous_public, change_type)
+    if candidate != expected:
+        raise ValueError(
+            f"Previous public release {previous_public} with {change_type} change "
+            f"requires {expected}, got {candidate}"
+        )
+    return candidate
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Calculate the next Semantic Version")
+    parser.add_argument("current", help="Current stable version, without a v prefix")
+    parser.add_argument("--change", choices=sorted(_CHANGE_TYPES), required=True)
+    args = parser.parse_args()
+    print(next_version(args.current, args.change))

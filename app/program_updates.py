@@ -62,7 +62,10 @@ def remove_owned_tree(path,base):
 
 def stage_program(release,cache,app_root,progress=lambda *a:None,cancel=lambda:False,opener=None):
     if release.kind!='program' or not release.material_id:raise UpdateError('纯程序更新信息缺失')
-    progress(0,release.size,'materials');assets,tier=local_materials(app_root,release.material_id,cancel)
+    progress(0,release.size,'materials');assets=tier=None
+    try:assets,tier=local_materials(app_root,release.material_id,cancel)
+    except MaterialMismatch:
+        if not release.optional_materials:raise
     paths=program_paths(cache,release.version)
     from app_updates import open_url
     archive=download_archive(release,paths,progress,cancel,opener or open_url)
@@ -81,6 +84,12 @@ def stage_program(release,cache,app_root,progress=lambda *a:None,cancel=lambda:F
                 return json.loads(z.read(info))
             descriptor=small('program-update.json');manifest=small('payload-manifest.json');files=manifest_files(manifest)
             if descriptor.get('schema')!=1 or descriptor.get('kind')!='program' or descriptor.get('version')!=release.version or manifest.get('version')!=release.version or descriptor.get('materialId')!=release.material_id:raise UpdateError('程序包版本或素材标识不匹配')
+            optional=release.optional_materials and descriptor.get('optionalMaterials') is True
+            if assets is None:
+                if not optional:raise MaterialMismatch('程序包不支持无动画更新')
+                target_catalog=small('app/material_catalog.json')
+                tier=target_catalog['tiers']['light']
+                if target_catalog.get('schema')!=1 or tier.get('id')!=release.material_id or not 1<=len(tier['files'])<=128:raise UpdateError('目标素材目录无效')
             media={PREFIX+f['path']:dict(bytes=f['bytes'],sha256=f['sha256']) for f in tier['files']}
             if {n:f for n,f in files.items() if n.startswith(PREFIX)}!=media:raise MaterialMismatch('程序包素材清单变化，需使用完整安装包')
             core={n:f for n,f in files.items() if n not in media}
@@ -100,10 +109,12 @@ def stage_program(release,cache,app_root,progress=lambda *a:None,cancel=lambda:F
             cat=json.loads((pending/'app/material_catalog.json').read_text(encoding='utf-8'))
             if cat.get('schema')!=1 or cat['tiers']['light']!=tier:raise MaterialMismatch('目标素材规格不同，需使用完整安装包')
             for n,f in media.items():
+                if assets is None:continue
                 check_cancel(cancel);old=safe(assets,n[len(PREFIX):]);new=safe(pending,n);new.parent.mkdir(parents=True,exist_ok=True)
                 if old.stat().st_size!=f['bytes'] or digest_file(old,cancel)!=f['sha256']:raise MaterialMismatch('素材在更新期间变化，改用完整安装包')
                 try:os.link(old,new)
                 except OSError:shutil.copy2(old,new)
+            if assets is None:manifest=dict(manifest,files=core)
             atomic_json(pending/'payload-manifest.json',manifest)
         from directory_deploy import inspect_source
         inspect_source(pending,release.version);check_cancel(cancel)

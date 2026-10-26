@@ -7,11 +7,13 @@ widget geometry change or per-pixel Python work is involved.
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QTransform
+from PySide6.QtGui import QColor, QLinearGradient, QRadialGradient, QPainter, QPainterPath, QTransform
 
 
 _LIGHT = ((129, 104, 153), (63, 139, 121), (145, 81, 110))
 _DARK = ((210, 199, 224), (121, 195, 174), (227, 185, 199))
+_SATIN_LIGHT = ((126,108,154),(66,139,134),(181,116,142))
+_SATIN_DARK = ((194,177,221),(130,197,186),(223,175,193))
 
 
 def _clamp(value):
@@ -25,10 +27,15 @@ def _smooth(value):
 
 def _part_color(part, island):
     base, mint, warm = _DARK if island else _LIGHT
+    satin=_clamp(getattr(part,'satin',0.))
+    new_base,new_mint,rose=_SATIN_DARK if island else _SATIN_LIGHT
+    base=tuple(a+(b-a)*satin for a,b in zip(base,new_base))
+    mint=tuple(a+(b-a)*satin for a,b in zip(mint,new_mint))
     green = _clamp(getattr(part, 'mint', 0.))
+    rosy = _clamp(getattr(part, 'rose', 0.))
     pink = _clamp(getattr(part, 'warm', 0.))
-    rgb = tuple(round((a + (b - a) * green) * (1. - pink) + c * pink)
-                for a, b, c in zip(base, mint, warm))
+    rgb = tuple(round(((a+(b-a)*green)*(1-rosy)+r*rosy)*(1-pink)+c*pink)
+                for a,b,r,c in zip(base,mint,rose,warm))
     color = QColor(*rgb)
     color.setAlphaF(_clamp(part.opacity))
     return color
@@ -49,7 +56,21 @@ def _part_path(part):
     transform = QTransform()
     transform.translate(part.x, part.y)
     transform.rotate(part.angle)
+    stretch=QTransform(getattr(part,'sxx',1.),getattr(part,'sxy',0.),
+                       getattr(part,'sxy',0.),getattr(part,'syy',1.),0.,0.)
+    path=stretch.map(path)
     return transform.map(path)
+
+
+def _satin_brush(part,color):
+    amount=_clamp(getattr(part,'satin',0.))
+    if amount<=.00001:return color
+    gradient=QRadialGradient(QPointF(part.x-part.radius*.52,part.y-part.radius*.62),part.radius*2.2)
+    for position,delta in ((0.,.22),(.44,.015),(1.,-.13)):
+        delta*=amount
+        channels=[round(c+(255-c)*delta if delta>0 else c*(1+delta)) for c in (color.red(),color.green(),color.blue())]
+        shaded=QColor(*channels);shaded.setAlpha(color.alpha());gradient.setColorAt(position,shaded)
+    return gradient
 
 
 def _neck(first, second, bond):
@@ -131,6 +152,7 @@ def paint_liquid_glyph(painter, parts, island=False):
     joined = set()
     if candidates:
         _, i, j, neck = max(candidates, key=lambda item: item[0])
+        satin=max(getattr(parts[i],'satin',0.),getattr(parts[j],'satin',0.))
         # Winding-fill overlapping subpaths in a single draw. Qt's boolean
         # united() flattens curves at logical-pixel tolerance before DPR or
         # transforms, turning these tiny circles into visibly faceted polygons.
@@ -139,13 +161,22 @@ def paint_liquid_glyph(painter, parts, island=False):
         shape.addPath(paths[i])
         shape.addPath(paths[j])
         shape.addPath(neck)
-        painter.fillPath(shape, _neck_brush(parts[i], parts[j], colors[i], colors[j]))
-        joined.update((i, j))
+        if satin>.00001:
+            # Native curves form the neck; the same per-ball light is retained
+            # before/while/after contact so its appearance never switches on.
+            painter.fillPath(neck,_neck_brush(parts[i],parts[j],colors[i],colors[j]))
+        else:
+            painter.fillPath(shape, _neck_brush(parts[i], parts[j], colors[i], colors[j]))
+            joined.update((i, j))
     # Equal-color capsule parts (e.g. the checkmark) share one fill so their
     # overlap does not acquire a darker edge during an opacity transition.
     groups = {}
-    for i, path in enumerate(paths):
+    for i in sorted(range(len(parts)),key=lambda index:getattr(parts[index],'depth',0.)):
+        path=paths[i]
         if i in joined or parts[i].opacity <= .001:
+            continue
+        if getattr(parts[i],'satin',0.)>.00001:
+            painter.fillPath(path,_satin_brush(parts[i],colors[i]))
             continue
         key = colors[i].rgba()
         if key not in groups:

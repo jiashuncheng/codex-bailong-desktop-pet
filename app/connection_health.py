@@ -5,6 +5,8 @@ CAPABILITIES={'tasks':'任务状态','completion':'完成提醒','read':'自动�
 TTL={'tasks':25,'completion':25,'read':25,'quota':300,'tokens':100,'compaction':25}
 LABELS={'available':'正常','degraded':'受限','unavailable':'不可用','unknown':'待检测'}
 REASONS={
+    'wsl_stopped':'所选 WSL 发行版未运行或不可用；请启动后重试。',
+    'wsl_logs_only':'WSL 使用日志状态；Windows 桌面实时通道和自动已读不适用。',
     'starting':'等待本次检测。',
     'ok':'最近一次读取正常。',
     'logs_idle':'日志监测就绪，等待新任务。',

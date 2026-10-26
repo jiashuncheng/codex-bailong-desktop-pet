@@ -7,7 +7,7 @@ from datetime import datetime,timedelta
 from unittest.mock import patch
 from PySide6.QtCore import Qt,QEvent,QPoint,QPointF,QAbstractAnimation
 from PySide6.QtGui import QHelpEvent
-from PySide6.QtWidgets import QApplication,QToolButton,QToolTip
+from PySide6.QtWidgets import QApplication,QToolButton,QToolTip,QLabel
 from token_calendar import TokenUsageIndex
 from token_analytics import model_series,token_analogy,UNKNOWN
 from compact_bubble import CompactBubble
@@ -82,6 +82,15 @@ def sample():
              for day,value in [(12,1200),(13,30000),(14,12000),(15,56000),(16,78000),(17,30000)] for m in ('gpt-6.1-sol','gpt-6-sol')]))
 
 class ReportUiTests(unittest.TestCase):
+    def test_cycle_to_overview_measures_complete_body_before_resize(self):
+        self.r.open();self.complete()
+        for width in (268,420,560):
+            self.b.setFixedWidth(width);self.r.sync_geometry();initial=self.r.surface.size()
+            for page in ('cycle','overview','models','overview','cycle','overview'):
+                self.r.set_page(page)
+                self.assertEqual(self.r.surface.size(),initial,(width,page))
+                APP.processEvents()
+                self.assertEqual(self.r.surface.size(),initial,(width,page))
     def setUp(self):
         self.b=CompactBubble();self.b.move(100,650);self.b.show();APP.processEvents()
         self.r=DailyReport(self.b);self.b.report=self.r;self.r.set_snapshot(sample())
@@ -99,9 +108,36 @@ class ReportUiTests(unittest.TestCase):
         self.r.open();self.complete()
         self.assertFalse([b for b in self.r.findChildren(QToolButton) if b.objectName().startswith('report_range_') and not b.isHidden()])
         self.r.set_page('models');APP.processEvents()
+        nav=self.r.period_control.parentWidget()
+        for widget in [*self.r.page_buttons.values(),self.r.period_control]:
+            self.assertTrue(nav.rect().contains(widget.geometry()),widget.objectName())
         self.assertEqual(len([b for b in self.r.findChildren(QToolButton) if b.objectName().startswith('report_range_') and not b.isHidden()]),3)
         model=self.r.findChildren(ModelRow)[-1];model.click();self.assertEqual(self.r.selected_model,model.item['model'])
         self.r.set_period('7d');self.assertEqual(len(self.r.plot.series['bins']),7);self.r.set_period('30d');self.assertEqual(len(self.r.plot.series['bins']),30)
+    def test_cycle_page_shows_local_usage_and_gated_estimate(self):
+        self.r.open();self.complete()
+        self.r.set_page('cycle');APP.processEvents()
+        self.assertEqual(self.r.page_buttons['cycle'].text(),'额度对比')
+        self.assertEqual(self.r.layout.itemAt(0).widget().findChildren(QLabel)[0].text(),'数据面板')
+        self.assertEqual(self.r.day_label.text(),'')
+        self.assertTrue(self.r.period_control.isHidden())
+        self.assertEqual(self.r.cycle_view.estimate.text(),'—')
+        item=dict(id='test',start=1760000000,end=1760050000,through=1760050000,reset_at=1760600000,
+            kind='natural',closed=False,remaining=75,used=150000,estimated_total=600000,
+            per_percent=6000,complete=True,fresh=True,records=3,drop=25,comparison_reason='尚无可比历史',change=None)
+        data=sample();data['quota_history']=dict(cycles=[item])
+        self.r.set_snapshot(data)
+        self.assertEqual(self.r.cycle_view.used.text(),'150.0K')
+        self.assertEqual(self.r.cycle_view.estimate.text(),'600.0K')
+        self.assertIn('75%',self.r.cycle_view.detail.text())
+        APP.processEvents()
+        self.assertEqual(self.r.scroll.verticalScrollBar().maximum(),0)
+        self.assertTrue(self.r.cycle_view.note.isHidden() or self.r.cycle_view.rules.isHidden())
+        self.assertTrue(self.r.cycle_view.rules_button.isVisible())
+        data=dict(data,quota_history=dict(cycles=[dict(item,estimated_total=None,complete=False)]))
+        self.r.set_snapshot(data)
+        self.assertEqual(self.r.cycle_view.estimate.text(),'—')
+        self.assertIn('受限',self.r.cycle_view.quality.text())
     def test_overview_fully_fits_and_model_scroll_is_only_for_overflow(self):
         self.r.open();self.complete();APP.processEvents()
         area=self.r.scroll
@@ -120,6 +156,20 @@ class ReportUiTests(unittest.TestCase):
         self.r.set_page('overview');APP.processEvents()
         self.assertEqual(self.r.scroll.verticalScrollBar().maximum(),0)
         self.assertFalse(self.r.scroll.verticalScrollBar().isVisible())
+    def test_page_changes_keep_chrome_and_only_fade_body(self):
+        self.r.open();self.complete();APP.processEvents()
+        title=self.r.header_title;nav=self.r.page_buttons['models'].parentWidget()
+        header_geometry=title.parentWidget().geometry();nav_geometry=nav.geometry()
+        with patch('settings_controls.motion_enabled',return_value=True):
+            for page in ('models','cycle','overview'):
+                self.r.set_page(page);APP.processEvents()
+                self.assertIs(self.r.header_title,title)
+                self.assertIs(self.r.page_buttons['models'].parentWidget(),nav)
+                self.assertEqual(title.parentWidget().geometry(),header_geometry)
+                self.assertEqual(nav.geometry(),nav_geometry)
+                self.assertTrue(self.r.page_fade.geometry().top()>=nav.geometry().bottom())
+            self.r.page_fade.animation.setCurrentTime(self.r.page_fade.animation.duration())
+            self.assertFalse(self.r.page_fade.isVisible())
     def test_native_tooltips_suppressed_but_inline_hover_still_works(self):
         self.b.redraw();APP.processEvents();button=self.b.findChild(QToolButton,'bubble_report')
         with patch.object(QToolTip,'showText') as show:

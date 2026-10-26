@@ -19,7 +19,7 @@ def present_barrier():
 
 class TransitionCover(QWidget):
     def __init__(self,parent):
-        super().__init__(parent);self.image=None
+        super().__init__(parent);self.image=None;self.next_image=None;self.blend=0.
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus);self.hide()
     def paintEvent(self,event):
         p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -29,7 +29,11 @@ class TransitionCover(QWidget):
         if t.canvas_morph:
             t.paint_morph(p);return
         # The captured frame already contains the exact corner/background.
-        if self.image is not None:p.drawPixmap(0,0,self.image)
+        if self.image is not None:
+            if self.next_image is None:p.drawPixmap(self.rect(),self.image,self.image.rect())
+            else:
+                p.setOpacity(1.-self.blend);p.drawPixmap(self.rect(),self.image,self.image.rect())
+                p.setOpacity(self.blend);p.drawPixmap(self.rect(),self.next_image,self.next_image.rect())
 
 class NativeLanding(QWidget):
     """Brief independent surface across a layered window's native shrink.
@@ -72,11 +76,11 @@ class PanelTransition(QObject):
     def __init__(self,bubble):
         super().__init__(bubble);self.bubble=bubble;self.cover=TransitionCover(bubble)
         self.start_rect=None;self.target_rect=None;self.before=None;self.deferred=False;self.active=False;self.preparing=False;self.frozen=[]
-        self.canvas_morph=False;self.start_island=False;self.canvas_rect=None;self.progress=0.;self.raw_progress=0.;self.shrinking=False;self.closing=False
+        self.canvas_morph=False;self.same_size_fade=False;self.start_island=False;self.canvas_rect=None;self.progress=0.;self.raw_progress=0.;self.shrinking=False;self.closing=False
         self.old_surface=None;self.morph=None
         self.landing=NativeLanding(bubble);self.landing_timer=QTimer(self);self.landing_timer.setSingleShot(True)
         self.landing_timer.setInterval(0);self.landing_timer.timeout.connect(self.release_landing)
-        self._preparation_updates=None;self.status_deferred=False;self.post_handoff=None
+        self._preparation_updates=None;self.status_deferred=False;self.post_handoff=None;self.start_page_state=None
         self.animation=QVariantAnimation(self);self.animation.setDuration(280)
         self.animation.setStartValue(0.);self.animation.setEndValue(1.)
         self.animation.setEasingCurve(QEasingCurve.Type.Linear)
@@ -89,11 +93,16 @@ class PanelTransition(QObject):
             if icon:
                 if hold:icon.freeze_motion()
                 else:icon.resume_motion()
+    def _page_state(self):
+        b=self.bubble
+        return (b.panel_page,b.expanded,b.bubble_mode,b.auto_compact,b._minimal_normal_open,b.detail_tab)
     def begin(self):
         b=self.bubble
         self.release_landing()
         self._hold_icon(True)
-        self.start_island=b.is_island();self.canvas_morph=False;self.closing=False
+        self.start_island=b.is_island();self.canvas_morph=False;self.same_size_fade=False;self.closing=False
+        self.start_page_state=self._page_state()
+        self.cover.next_image=None;self.cover.blend=0.
         self.old_surface=SurfaceState.capture(b) if b.isVisible() else None;self.morph=None
         if b.isVisible():
             self.before=b.grab();self.start_rect=QRect(b.geometry());self.old_surface.frame=self.before
@@ -114,12 +123,36 @@ class PanelTransition(QObject):
         if self.closing:return
         b=self.bubble;target=b.content_geometry()
         if self.start_rect is None or target==self.start_rect:
+            if target==self.start_rect and self.before is not None and b.isVisible() and self._page_state()!=self.start_page_state:
+                # Equal-sized editor pages used to swap live widgets directly.
+                # On a long-idle backing store the first new paint could arrive
+                # one compositor frame later, exposing a blank or stale page.
+                widgets=[b.content]+b.content.findChildren(QWidget)
+                for widget in reversed(widgets):
+                    widget.ensurePolished()
+                    if widget.layout():widget.layout().activate()
+                QApplication.sendPostedEvents(None,QEvent.Type.LayoutRequest)
+                b.setUpdatesEnabled(bool(self._preparation_updates))
+                image=SurfaceState.capture(b,target.topLeft()).frame
+                if image is not None and not image.isNull():
+                    b.setFixedSize(target.size());b.move(target.topLeft())
+                    self.cover.image=self.before;self.cover.next_image=image;self.cover.blend=0.
+                    self.cover.setGeometry(b.rect());self.cover.show();self.cover.raise_()
+                    if b.report:b.report.follow.finish(target)
+                    self.before=None;self.start_rect=None;self.old_surface=None;self.deferred=False;self.preparing=False
+                    self.active=True;self.same_size_fade=True;self.target_rect=target
+                    self.animation.stop();self.animation.setDuration(160)
+                    self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+                    self.animation.setStartValue(0.);self.animation.setEndValue(1.)
+                    self.animation.start();self._end_preparation();return
             b.setFixedSize(target.size());b.move(target.topLeft());b.content.setVisible(b.isVisible());self.cover.hide()
+            self.cover.image=None;self.cover.next_image=None;self.cover.blend=0.
             if b.report:b.report.follow.finish(target)
-            self.before=None;self.start_rect=None;self.old_surface=None;self.deferred=False;self.preparing=False;self._end_preparation();self._hold_icon(False);return
+            self.before=None;self.start_rect=None;self.old_surface=None;self.start_page_state=None;self.deferred=False;self.preparing=False;self._end_preparation();self._hold_icon(False);return
         self.target_rect=target;b.layout.activate()
         self.shrinking=target.width()*target.height()<self.start_rect.width()*self.start_rect.height()
         self.animation.setDuration(SHRINK_MS if self.shrinking else EXPAND_MS)
+        self.animation.setEasingCurve(QEasingCurve.Type.Linear)
         widgets=[b.content]+b.content.findChildren(QWidget)
         for widget in reversed(widgets):
             widget.ensurePolished()
@@ -132,9 +165,10 @@ class PanelTransition(QObject):
         for widget in widgets:
             if not self.shrinking and widget.isVisibleTo(b.content) and hasattr(widget,'begin_reveal'):widget.begin_reveal()
         ratio=b.devicePixelRatioF();size=b.content.size()
-        image=QPixmap(pixel_size(size.width(),ratio),pixel_size(size.height(),ratio));image.setDevicePixelRatio(ratio);image.fill(Qt.GlobalColor.transparent if b.is_island() else QColor('#fcfafc'))
+        image=QPixmap(pixel_size(size.width(),ratio),pixel_size(size.height(),ratio));image.setDevicePixelRatio(ratio);image.fill(Qt.GlobalColor.transparent if b.is_compact() else QColor('#fcfafc'))
         b.content.render(image,QPoint(),QRegion(),QWidget.RenderFlag.DrawChildren)
         self.cover.image=image
+        self.cover.next_image=None;self.cover.blend=0.
         self.morph=SurfaceMorph(self.old_surface,SurfaceState.capture(b,target.topLeft()))
         b.layout.setEnabled(False)
         self.frozen=[(b.layout.itemAt(i).widget(),b.layout.itemAt(i).widget().updatesEnabled()) for i in range(b.layout.count()) if b.layout.itemAt(i).widget()]
@@ -178,11 +212,12 @@ class PanelTransition(QObject):
         if b.windowHandle():b.windowHandle().setFlag(Qt.WindowType.WindowTransparentForInput,True)
         if b.report:b.report.dismiss()
         self._end_preparation()
-        self.animation.setDuration(DISMISS_MS);self.cover.repaint();self.animation.start()
+        self.animation.setDuration(DISMISS_MS);self.animation.setEasingCurve(QEasingCurve.Type.Linear);self.cover.repaint();self.animation.start()
     def advance(self,value):
         if self.target_rect is None:return
         self.raw_progress=float(value)
-        self.progress=max(0.,dismiss_progress(value)) if self.closing else container_progress(value)
+        self.progress=max(0.,dismiss_progress(value)) if self.closing else max(0.,min(1.,float(value))) if self.same_size_fade else container_progress(value)
+        if self.same_size_fade:self.cover.blend=self.progress
         self.cover.repaint()
         if self.bubble.report:self.bubble.report.follow.advance(self.raw_progress)
     def visible_geometry(self):
@@ -215,7 +250,7 @@ class PanelTransition(QObject):
             p.drawPixmap(round(x),round(y),image)
         p.setClipping(False);p.setOpacity(normal);p.setPen(QPen(QColor('#e0d9e6'),1));p.setBrush(Qt.BrushStyle.NoBrush);p.drawRoundedRect(rect.adjusted(.5,.5,-.5,-.5),radius,radius)
     def finish(self):
-        b=self.bubble;closing=self.closing;self.closing=False
+        b=self.bubble;closing=self.closing;same_size_fade=self.same_size_fade;self.closing=False
         guarded=bool(not closing and (self.shrinking or QApplication.platformName()=='windows') and b.isVisible() and self.morph and self.morph.end.frame is not None)
         if guarded:
             # Publish on another native backing store BEFORE touching the
@@ -235,11 +270,18 @@ class PanelTransition(QObject):
                 b.setMinimumSize(0,0);b.setMaximumSize(16777215,16777215)
                 b.setGeometry(self.target_rect);b.setFixedSize(self.target_rect.size())
             self.thaw();self.canvas_morph=False
-            b.content.setVisible(not closing and b.isVisible());b.layout.activate();self.cover.hide();self.cover.image=None
+            b.content.setVisible(not closing and b.isVisible());b.layout.activate()
+            if not same_size_fade:self.cover.hide();self.cover.image=None
         finally:b.setUpdatesEnabled(enabled)
+        if same_size_fade:
+            # Keep the finished raster above the newly shown page until its
+            # live widgets have synchronously painted at the final geometry.
+            b.content.repaint()
+            if QApplication.platformName()=='windows':present_barrier()
+            self.cover.hide();self.cover.image=None
         b.repaint()
         if b.report:b.report.follow.finish(self.target_rect)
-        self.active=False;self.before=None;self.old_surface=None;self.morph=None;self.start_rect=self.target_rect=None
+        self.active=False;self.before=None;self.old_surface=None;self.morph=None;self.same_size_fade=False;self.start_page_state=None;self.cover.image=None;self.cover.next_image=None;self.cover.blend=0.;self.start_rect=self.target_rect=None
         if guarded:self.landing_timer.start()
         else:self._hold_icon(False);self.start_reveals()
         deferred=self.deferred;self.deferred=False

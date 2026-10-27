@@ -9,6 +9,16 @@ PLAYERS={'potplayermini.exe','potplayermini64.exe','potplayer.exe','vlc.exe','mp
     'mediaplayer.exe','wmplayerlegacy.exe','kmplayer.exe','kmplayer64.exe','qqplayer.exe','splayer.exe'}
 BROWSERS={'chrome.exe','msedge.exe','firefox.exe','brave.exe','vivaldi.exe','opera.exe','arc.exe',
     '360se.exe','360chrome.exe','qqbrowser.exe','sogouexplorer.exe'}
+# Windows exposes no universal "this is a game" flag.  The combined policy
+# therefore excludes known shell, browser, office and developer windows, then
+# treats an unknown process that truly fills a monitor as a game candidate.
+NON_GAME_PROCESSES={'explorer.exe','applicationframehost.exe','searchhost.exe','shellexperiencehost.exe',
+    'startmenuexperiencehost.exe','textinputhost.exe','dwm.exe','taskmgr.exe','mspaint.exe','notepad.exe',
+    'winword.exe','excel.exe','powerpnt.exe','outlook.exe','onenote.exe','write.exe','calc.exe',
+    'code.exe','devenv.exe','pycharm64.exe','idea64.exe','notepad++.exe','steamwebhelper.exe',
+    'gamebar.exe','obs64.exe','obs32.exe','teams.exe','slack.exe','discord.exe','wechat.exe','qq.exe'}
+NON_GAME_CLASSES={'progman','workerw','shell_traywnd','cabinetwclass','applicationframewindow',
+    'windows.ui.core.corewindow','chrome_widgetwin_1','mozillawindowclass','opera_windowclass'}
 VIDEO_ROLES=('video','视频','影片','video player','视频播放器','影片播放器')
 FULLSCREEN_LABELS=('全屏','full screen','fullscreen')
 PLAY_LABELS=('播放','暂停','play','pause')
@@ -28,6 +38,13 @@ def video_coverage(rect,monitor):
     centered=abs((l+r-x-z)/2)<=mw*.035 and abs((t+b-y-w)/2)<=mh*.035
     fills_axis=(r-l>=mw*.975 or b-t>=mh*.975)
     return centered and fills_axis and intersection(rect,monitor)>=mw*mh*.22
+
+def game_fullscreen(frame):
+    """Return whether an unknown monitor-filling process is a game candidate."""
+    if not frame or not frame.get('fullscreen'):return False
+    process=str(frame.get('process') or '').casefold();window_class=str(frame.get('cls') or '').casefold()
+    if not process or process in PLAYERS or process in BROWSERS or process in NON_GAME_PROCESSES:return False
+    return window_class not in NON_GAME_CLASSES
 
 class MONITORINFO(ctypes.Structure):
     _fields_=[('cbSize',wintypes.DWORD),('rcMonitor',wintypes.RECT),('rcWork',wintypes.RECT),('dwFlags',wintypes.DWORD)]
@@ -177,16 +194,18 @@ class VideoProbe:
             frame.update(video=self.browser.video(frame['hwnd'],frame['monitor']),reason='browser')
         return frame
 
-class VideoGate:
-    """Debounce fullscreen entry; never guess on an unrecognized page."""
-    def __init__(self):
+class FullscreenGate:
+    """Debounce a real monitor-filling window, optionally requiring video."""
+    def __init__(self,require_video=True):
+        self.require_video=bool(require_video)
         self.active=None;self.pending=None;self.since=0.;self.missing=None
     def update(self,frame,now):
         key=(frame.get('hwnd',0),tuple(frame.get('monitor',())))
         active_key=(self.active['hwnd'],tuple(self.active['monitor'])) if self.active else None
         if not frame.get('fullscreen') or (self.active and key!=active_key):
             self.active=None;self.missing=None
-        if frame.get('fullscreen') and frame.get('video') is True:
+        accepted=frame.get('fullscreen') and (not self.require_video or frame.get('video') is True)
+        if accepted:
             self.missing=None
             if self.pending!=key:self.pending=key;self.since=now
             if now-self.since>=.45:self.active=frame
@@ -196,3 +215,7 @@ class VideoGate:
                 if self.missing is None:self.missing=now
                 if now-self.missing>=(3. if frame.get('video') is None else .65):self.active=None
         return dict(self.active) if self.active else None
+
+class VideoGate(FullscreenGate):
+    """Compatibility alias for the video-only fullscreen policy."""
+    def __init__(self):super().__init__(require_video=True)

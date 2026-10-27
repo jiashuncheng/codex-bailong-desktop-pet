@@ -19,12 +19,13 @@ if __name__=='__main__' and '--watch-codex' in sys.argv:
     raise SystemExit(watch_codex())
 
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QPoint, QRectF, QUrl
-from PySide6.QtGui import QIcon, QPainter, QPixmap, QCursor, QFontDatabase, QFont, QDesktopServices
+from PySide6.QtGui import QIcon, QPainter, QPixmap, QCursor, QFontDatabase, QDesktopServices, QColor, QPen
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QProgressBar, QLabel
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 from pet import Pet, Bubble, ROOT, QuotaWorker
 from enhanced_core import RolloutTail, motion_step, clean_text, windows_from_limits
+from version import VERSION
 from reset_watch import LocalResetEvidence, locally_reset, ResetTracker, fetch_feed, schedule_text, account_reset_text, SOURCE_URL, local_time
 from token_calendar import TokenUsageIndex
 from refresh_flow import RefreshCoordinator, RefreshRuns
@@ -305,6 +306,12 @@ class EnhancedPet(Pet):
         self.last_reset_display=''
         self.notify_history=[]
         self.enhanced_ready=True
+        # The tray icon is also the quota entry point.  Keep the last rendered
+        # key so a 120-second refresh cannot cause unnecessary icon repaints.
+        self._tray_base_icon=QIcon(str(ROOT/'app/branding/bailong.ico'))
+        self._tray_icon_key=None
+        self._tray_update_hint=''
+        self._tray_quota_hint='额度：等待更新'
         self.motion_timer=QTimer(self)
         self.motion_timer.setInterval(33)
         self.motion_timer.timeout.connect(self.motion_tick)
@@ -321,8 +328,8 @@ class EnhancedPet(Pet):
         self.diagnostic_timer.setInterval(10000)
         self.diagnostic_timer.timeout.connect(self.record_state)
         self.diagnostic_timer.start()
-        self.tray=QSystemTrayIcon(QIcon(str(ROOT/'app/branding/bailong.ico')),self)
-        self.tray.setToolTip('白龙桌宠增强版 · 双击角色查额度')
+        self.tray=QSystemTrayIcon(self._tray_base_icon,self)
+        self.tray.setToolTip('白龙桌宠\n额度：等待更新\n点击显示面板，右键设置')
         tray_menu=QMenu()
         tray_menu.addAction('显示 / 隐藏气泡',self.toggle_bubble)
         tray_menu.addAction('立即查询额度',self.quota)
@@ -331,7 +338,10 @@ class EnhancedPet(Pet):
         tray_menu.addAction('退出',self.close)
         self.tray.setContextMenu(tray_menu)
         self.tray.activated.connect(lambda reason:self.toggle_bubble() if reason==QSystemTrayIcon.ActivationReason.Trigger else None)
-        self.tray.show()
+        self._tray_shell_enabled=monitor and os.environ.get('BAILONG_ISOLATED')!='1'
+        if self._tray_shell_enabled:self.tray.show()
+        self._refresh_tray_icon()
+        if self._tray_shell_enabled and sys.platform=='win32':QTimer.singleShot(3500,self._maintain_tray_history)
         pos=self.settings.get('position')
         if isinstance(pos,list) and len(pos)==2:
             self.move(self.constrained_position(QPoint(int(pos[0]),int(pos[1]))))
@@ -360,7 +370,7 @@ class EnhancedPet(Pet):
             return super().say(text,ms)
         self.bubble_timer.stop()
         self.status_hold=time.monotonic()+max(2,ms/1000 if ms else 3)
-        self.bubble.message(text)
+        self.bubble.message(text,speech=0<getattr(self,'message_priority',0)<10)
         self.position_bubble()
 
     def dismiss_bubble(self):
@@ -376,7 +386,8 @@ class EnhancedPet(Pet):
         y=self.y()-self.bubble.height()-8
         if self.y()-self.bubble.placement_height()-8<area.top():y=self.y()+self.height()+8
         x=max(area.left(),min(x,area.right()-self.bubble.width()+1))
-        reserve=self.bubble.report.reserved_height()+6 if self.bubble.report and self.bubble.report.requested else 0
+        reserve=self.bubble.report.reserved_height(self.bubble.size())+6 if self.bubble.report and self.bubble.report.requested else 0
+        reserve=min(reserve,max(0,area.height()-self.bubble.height()))
         y=max(area.top()+reserve,min(y,area.bottom()-self.bubble.height()+1))
         self.bubble.move(x,y)
         if sys.platform!='darwin' and self.bubble.enabled and self.isVisible() and self.windowFlags()&Qt.WindowType.WindowStaysOnTopHint and self.can_raise_bubble():
@@ -513,6 +524,7 @@ class EnhancedPet(Pet):
             self.bubble.quota_caption='额度暂不可用 · 双击可重试'
             self.bubble.redraw()
             self.position_bubble()
+            self._refresh_tray_icon()
         self.quota_runs.complete(run)
         self.refresh_flow.result('quota',run,False)
 
@@ -548,6 +560,72 @@ class EnhancedPet(Pet):
         self.bubble.windows=self.quota_windows
         self.bubble.redraw()
         self.position_bubble()
+        self._refresh_tray_icon()
+
+    def _tray_window(self):
+        """Return the same priority window used by the capsule quota ring."""
+        from island_widgets import selected_quota, valid_percent
+        window=selected_quota(self.quota_windows or [])
+        value=window.get('remaining')
+        valid=valid_percent(value)
+        rounded=round(float(value),1) if valid else None
+        return window,rounded,valid
+
+    def _tray_quota_text(self,window,value,valid):
+        name=str(window.get('name') or '额度')
+        if valid:
+            amount=f'{value:g}%'
+        elif window.get('pending'):
+            amount='待刷新'
+        else:
+            amount='未知'
+        reset=account_reset_text(window.get('resetsAt')).replace(' · ','，')
+        return f'{name} {amount}\n{reset}'
+
+    def _tray_quota_icon(self,window,value,valid):
+        """Draw the circular, number-free quota ring used by the tray preview."""
+        from ui_theme import TRAY_FIVE, TRAY_LOW, TRAY_WEEK, TRAY_TRACK, ISLAND
+        pixmap=QPixmap(64,64);pixmap.fill(Qt.GlobalColor.transparent)
+        painter=QPainter(pixmap);painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        ring_width=10
+        background=QColor(ISLAND);background.setAlpha(235)
+        painter.setPen(Qt.PenStyle.NoPen);painter.setBrush(background)
+        painter.drawEllipse(QRectF(1,1,62,62))
+        painter.setPen(QPen(QColor(TRAY_TRACK),ring_width,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
+        arc=QRectF(7,7,50,50);painter.drawEllipse(arc)
+        if valid:
+            name=str(window.get('name') or '')
+            if value<=15:color=QColor(TRAY_LOW)
+            elif name=='一周':color=QColor(TRAY_WEEK)
+            else:color=QColor(TRAY_FIVE)
+            painter.setPen(QPen(color,ring_width,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
+            remaining=max(0,min(100,value))
+            if remaining>0:painter.drawArc(arc,90*16,-round(360*16*remaining/100))
+        painter.end();return QIcon(pixmap)
+
+    def _refresh_tray_icon(self):
+        if not hasattr(self,'tray'):return
+        window,value,valid=self._tray_window()
+        key=(str(window.get('name') or '额度'),value,bool(window.get('pending')))
+        if key!=self._tray_icon_key:
+            self.tray.setIcon(self._tray_quota_icon(window,value,valid))
+            self._tray_icon_key=key
+        self._tray_quota_hint=self._tray_quota_text(window,value,valid)
+        update=self._tray_update_hint or '点击显示面板，右键设置'
+        text='白龙桌宠 '+VERSION+'\n'+self._tray_quota_hint+'\n'+update
+        if self.tray.toolTip()!=text:self.tray.setToolTip(text)
+
+    def _maintain_tray_history(self):
+        def maintain():
+            try:
+                from tray_history import reconcile
+                reconcile(STATE_DIR)
+            except (OSError,ValueError,KeyError,TypeError) as error:
+                # Shell history maintenance must not break the running tray or
+                # introduce a periodic registry scan/retry loop.
+                try:save_json(STATE_DIR/'tray-history-error.json',dict(error=str(error)[:300],at=time.time()))
+                except OSError:pass
+        threading.Thread(target=maintain,name='BailongTrayHistory',daemon=True).start()
 
     def on_activity(self,event):
         kind=event.get('kind')
@@ -596,8 +674,7 @@ class EnhancedPet(Pet):
         text=event.get('display') or event.get('text','等待 Codex 新消息')
         if not self.commentary and event.get('state') in ('working','responding'):
             text='正在处理任务：'+event.get('title','Codex 对话')
-        self.bubble.status=clean_text(text,180)
-        self.bubble.refresh_status()
+        self.bubble.set_activity_text(text)
         self.position_bubble()
 
     def flush_status(self):
@@ -700,11 +777,12 @@ class EnhancedPet(Pet):
 
     def notify(self,title,text):
         self.notify_history.append({'title':title,'at':time.time()})
+        if not getattr(self,'_tray_shell_enabled',False):return
         if sys.platform=='win32':
             # Qt's showMessage has no silent option. Never fall back to an audible alert.
             try:
                 from silent_notify import SilentNotifier
-                if not self.silent_notifier:self.silent_notifier=SilentNotifier(int(self.winId()))
+                if not self.silent_notifier:self.silent_notifier=SilentNotifier()
                 self.silent_notifier.show(title,clean_text(text,120))
             except (OSError,ValueError):
                 pass  # the head bubble remains the guaranteed visible reminder

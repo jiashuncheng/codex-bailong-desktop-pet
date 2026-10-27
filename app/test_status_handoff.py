@@ -37,10 +37,10 @@ class StatusHandoffTests(unittest.TestCase):
         for mode in ('mini','auto'):
             self.working();icon=self.icon;before=icon._motion_now();captured=[]
             original=SurfaceState.capture.__func__
-            def capture(cls,bubble,origin=None):
+            def capture(cls,bubble,origin=None,frame=None):
                 captured.append(icon._motion_now())
                 self.now+=.075  # Expensive layout/render must not advance the glyph.
-                result=original(cls,bubble,origin)
+                result=original(cls,bubble,origin,frame=frame)
                 captured.append(icon._motion_now())
                 return result
             with patch.object(SurfaceState,'capture',classmethod(capture)):

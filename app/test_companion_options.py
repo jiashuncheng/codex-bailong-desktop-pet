@@ -10,6 +10,33 @@ from codex_startup import ExitGate
 from app_updates import check_release,API,REPOSITORY,release_without_api,UpdateError
 APP=QApplication.instance() or QApplication([])
 class Changes(unittest.TestCase):
+ def speaking_task(self):
+  p=self.pet;p.apply_settings(dict(bubble_mode='auto',self_talk=True,talk_quiet=False,wandering=False,random_actions=False,status_actions=False),save=False)
+  p.on_activity(dict(kind='status',session='speech-test',state='working',active=1,title='测试会话',display='正在编辑文件'))
+  p.status_hold=0;p.flush_status();return p
+ def test_click_speech_is_visible_then_restores_latest_codex_status(self):
+  p=self.speaking_task();b=p.bubble
+  with patch.object(p,'play',return_value=True),patch.object(p,'play_click_sound'):
+   p.choose(dict(id='synthetic',line='测试点击台词'),interactive=True)
+  self.assertEqual(b.status_view.text(),'测试点击台词')
+  p.on_activity(dict(kind='status',session='speech-test',state='working',active=1,title='测试会话',display='正在运行命令'))
+  self.assertEqual(b.status_view.text(),'测试点击台词')
+  p.status_hold=time.monotonic()-1;p.flush_status();self.assertIn('正在运行命令',b.status_view.text())
+ def test_auto_speech_obeys_busy_quiet_setting_and_stays_silent(self):
+  p=self.speaking_task();p.settings['talk_lines']=['测试自动台词'];p.next_talk=0
+  with patch.object(p,'play_click_sound') as sound:p._move_frame();sound.assert_not_called()
+  self.assertEqual(p.bubble.status_view.text(),'测试自动台词')
+  p.status_hold=0;p.bubble.set_activity_text('正在编辑文件');p.settings['talk_quiet']=True;p.next_talk=0
+  with patch.object(p,'say') as say:p._move_frame();say.assert_not_called()
+ def test_five_second_talk_interval_is_saved_and_loaded_on_restart(self):
+  p=self.pet
+  with patch('desktop_settings.autostart_enabled',return_value=False),patch('codex_startup.enabled',return_value=False):p.open_settings()
+  s=p.settings_dialog;s.tabs.setCurrentIndex(4);s.fields['self_talk'].setChecked(True)
+  s.fields['talk_min'].setValue(5);s.fields['talk_max'].setValue(5);s.apply()
+  saved=json.loads((Path(self.tmp.name)/'settings.json').read_text(encoding='utf-8'))
+  self.assertEqual((saved['talk_min'],saved['talk_max']),(5,5))
+  p.close();APP.processEvents();self.pet=DesktopPet(monitor=False)
+  self.assertEqual((self.pet.settings['talk_min'],self.pet.settings['talk_max']),(5,5))
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();r=Path(self.tmp.name);self.patches=[patch(m+'.'+k,r/('settings.json' if k=='CONFIG' else '')) for m in ('desktop','enhanced') for k in ('CONFIG','STATE_DIR')]
   for p in self.patches:p.start()
@@ -22,6 +49,17 @@ class Changes(unittest.TestCase):
   p=self.pet;p.apply_settings({'bubble':False},save=False)
   p.bubble.message('test');p.position_bubble();p.bubble.size_transition.complete();APP.processEvents();self.assertFalse(p.bubble.isVisible())
   p.apply_settings({'bubble':True},save=False);p.bubble.size_transition.complete();APP.processEvents();self.assertTrue(p.bubble.isVisible())
+ def test_view_status_does_not_replace_saved_minimal_preference(self):
+  p=self.pet;b=p.bubble;p.apply_settings({'bubble_mode':'minimal'})
+  b.size_transition.complete();p.open_status();b.size_transition.complete();APP.processEvents()
+  self.assertEqual(b.bubble_mode,'minimal');self.assertEqual(p.settings['bubble_mode'],'minimal')
+  saved=json.loads((Path(self.tmp.name)/'settings.json').read_text(encoding='utf-8'))
+  self.assertEqual(saved['bubble_mode'],'minimal');self.assertFalse(b.is_compact())
+  b.evaluate_mode(b.last_task_update+100);b.size_transition.complete();self.assertTrue(b.is_minimal())
+ def test_minimal_setting_clears_previous_automatic_capsule_state(self):
+  p=self.pet;b=p.bubble;b.auto_compact=True
+  p.apply_settings({'bubble_mode':'minimal'},save=False);b.size_transition.complete();APP.processEvents()
+  self.assertFalse(b.auto_compact);self.assertFalse(b.is_island());self.assertTrue(b.is_minimal())
  def test_detached_panel_keeps_anchor_when_pet_moves(self):
   p=self.pet;p.apply_settings({'panel_detached':True},save=False);p.bubble.size_transition.complete();APP.processEvents();before=p.bubble.pos()
   p.move(p.x()-50,p.y()-30);p.position_bubble();self.assertEqual(p.bubble.pos(),before)

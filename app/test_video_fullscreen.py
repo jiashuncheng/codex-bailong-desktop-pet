@@ -3,7 +3,7 @@ import os,unittest
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication,QWidget
-from video_fullscreen import VideoGate,VideoProbe,BrowserVideoProbe,fills_monitor,video_coverage
+from video_fullscreen import VideoGate,FullscreenGate,VideoProbe,BrowserVideoProbe,fills_monitor,video_coverage,game_fullscreen
 from video_yield import VideoYield
 APP=QApplication.instance() or QApplication([])
 M=(0,0,1920,1080)
@@ -32,6 +32,13 @@ class ClassifierTests(unittest.TestCase):
     def test_negative_monitor_coordinates(self):self.assertTrue(video_coverage((-1920,0,0,1080),(-1920,0,0,1080)))
     def test_entry_requires_stable_observation(self):
         g=VideoGate();self.assertIsNone(g.update(frame(),0));self.assertIsNone(g.update(frame(),.2));self.assertTrue(g.update(frame(),.8))
+    def test_all_window_gate_does_not_require_video_tag(self):
+        g=FullscreenGate(require_video=False);generic=frame(video=False,reason='window_fullscreen')
+        self.assertIsNone(g.update(generic,0));self.assertIsNone(g.update(generic,.2));self.assertTrue(g.update(generic,.8))
+    def test_game_candidate_excludes_browser_and_office_but_accepts_unknown(self):
+        self.assertTrue(game_fullscreen(frame(process='game.exe',cls='GameWindow',video=False)))
+        self.assertFalse(game_fullscreen(frame(process='firefox.exe',cls='MozillaWindowClass',video=False)))
+        self.assertFalse(game_fullscreen(frame(process='winword.exe',cls='OpusApp',video=False)))
     def test_alt_tab_clears_immediately(self):
         g=VideoGate();g.update(frame(),0);g.update(frame(),1);self.assertIsNone(g.update(frame(hwnd=701),1.1))
     def test_fullscreen_exit_clears_immediately(self):
@@ -111,6 +118,19 @@ class ControllerTests(unittest.TestCase):
         self.assertTrue(self.guard.attention_override);self.assertFalse(self.pet._video_yielded)
         indicator.acknowledge();self.assertFalse(self.guard.attention_override);self.assertTrue(self.pet._video_yielded)
         self.assertFalse(any(c[1] for c in self.api.calls))
+    def test_all_window_mode_hides_without_completion_override(self):
+        self.pet.settings['fullscreen_yield_mode']='game_video';self.guard.reconcile()
+        generic=frame(video=True,reason='game_fullscreen');self.guard.accept(generic,0);self.guard.accept(generic,.8)
+        self.assertTrue(self.pet._fullscreen_yielded);self.assertFalse(self.pet._video_yielded);self.assertFalse(self.guard.attention_override)
+        self.bubble.status_indicator.notify_complete(dict(session='test',turn='all'))
+        self.assertTrue(self.pet._fullscreen_yielded);self.assertFalse(self.guard.attention_override)
+        self.guard.accept(generic,3);self.assertTrue(self.pet._fullscreen_yielded)
+        self.guard.accept(frame(fullscreen=False,video=False),4);self.assertFalse(self.pet._fullscreen_yielded)
+    def test_all_window_mode_uses_pet_monitor_not_foreground_monitor_only(self):
+        self.pet.settings['fullscreen_yield_mode']='game_video';self.guard.reconcile()
+        self.api.rects={int(self.pet.winId()):(2100,0,2300,300),int(self.bubble.winId()):(2100,0,2300,300)}
+        generic=frame(video=True,reason='game_fullscreen');self.guard.accept(generic,0);self.guard.accept(generic,.8)
+        self.assertFalse(self.pet._fullscreen_yielded)
     def test_manual_unpin_still_wins_over_unread_completion(self):
         self.bubble.status_indicator.notify_complete(dict(session='test',turn='one'))
         self.pet.settings['on_top']=False;self.enter()

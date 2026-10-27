@@ -653,7 +653,7 @@ class CompactBubble(Bubble):
             self.status_view.set_conversations(rows,extra,self.expanded,metadata)
         else:
             self.status_view.clear_conversations()
-            self.status_view.set_status('等待 Codex 新消息' if self.roster.items else self.status,self.expanded)
+            self.status_view.set_status('等待 Codex 新消息' if self.roster.items or self.status_indicator.completion_auto_dismissed else self.status,self.expanded)
     def refresh_status(self):
         """Keep static cards and chart clocks alive for text-only changes."""
         if self.size_transition.running or self.size_transition.preparing:
@@ -664,7 +664,7 @@ class CompactBubble(Bubble):
             if self.island is None:self.redraw();return
             from conversation_roster import LABELS
             selected,extra=self.roster.selection(self.status_indicator.unread)
-            self.status_indicator.session_summary='/'.join('压缩' if v.get('compacting') and v['state']!='waiting' else LABELS.get(v['state'],'待命').removesuffix('中') for v in selected)+(' +'+str(extra) if extra else '')
+            self.status_indicator.session_summary='/'.join('压缩' if v.get('compacting') and v['state']!='waiting' else LABELS.get(v['state'],'待命').removesuffix('中') for v in selected)+(' +'+str(extra) if extra else '');self.status_indicator.session_states=[v['state'] for v in selected]
             self.island.refresh();return
         title=getattr(self,'_status_title',None)
         if title is None or not self.status_view.isVisible():
@@ -817,14 +817,16 @@ class CompactBubble(Bubble):
         if self.size_transition.running or self.size_transition.preparing:
             self.size_transition.status_deferred=True;return
         if self.island:self.island.refresh()
-        if (self.roster.items or self.status_indicator.unread) and not self._roster_pending:
+        if (self.roster.items or self.status_indicator.unread or self.status_indicator.completion_auto_dismissed) and not self._roster_pending:
             self._roster_pending=True;QTimer.singleShot(0,self,self._apply_roster)
     def _apply_roster(self):self._roster_pending=False;self.refresh_status()
     def _auto_cycle_conversations(self):
-        if not self.conversation_auto_scroll or not self.status_view.isVisible() or not self.status_view.extra:return
-        if self.panel_page!='status' or self.size_transition.running:return
+        if not self.conversation_auto_scroll or self.panel_page!='status' or self.is_minimal():return
+        if self.size_transition.running or self.size_transition.preparing:return
+        surface=self.island if self.is_island() else self.status_view
+        if surface is None or not surface.isVisible():return
         from PySide6.QtGui import QCursor
-        if self.status_view.rect().contains(self.status_view.mapFromGlobal(QCursor.pos())):return
+        if surface.rect().contains(surface.mapFromGlobal(QCursor.pos())):return
         if self.roster.rotate_one(self.status_indicator.unread):self.refresh_status()
     def cycle_conversations(self,direction=1):
         self.roster.cycle(direction);self.refresh_status()
@@ -853,7 +855,7 @@ class CompactBubble(Bubble):
         self.status_indicator.set_island(True);self.island=StatusIsland(self.status_indicator)
         from conversation_roster import LABELS
         selected,extra=self.roster.selection(self.status_indicator.unread)
-        self.status_indicator.session_summary='/'.join('压缩' if v.get('compacting') and v['state']!='waiting' else LABELS.get(v['state'],'待命').removesuffix('中') for v in selected)+(' +'+str(extra) if extra else '')
+        self.status_indicator.session_summary='/'.join('压缩' if v.get('compacting') and v['state']!='waiting' else LABELS.get(v['state'],'待命').removesuffix('中') for v in selected)+(' +'+str(extra) if extra else '');self.status_indicator.session_states=[v['state'] for v in selected]
         self.island.refresh()
         self.island.expand.connect(lambda:self.set_mode('auto'));row.addWidget(self.island)
         if self.show_quota:

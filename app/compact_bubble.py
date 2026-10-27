@@ -6,7 +6,7 @@ from PySide6.QtGui import QColor,QFont,QFontMetrics,QPainter,QPen,QTextLayout,QT
 from PySide6.QtCore import QPointF,QObject,QEvent
 from PySide6.QtWidgets import QWidget,QLabel,QHBoxLayout,QVBoxLayout,QToolButton,QApplication,QStackedWidget,QLayout,QToolTip
 from panel_transition import PanelTransition
-from panel_scale import StatusContent,StatusScaleHost,scaled_size
+from panel_scale import StatusContent,StatusScaleHost,scaled_size,panel_scale_for_role
 from surface_morph import PANEL_RADIUS
 from status_indicator import StatusIndicator
 from refresh_indicator import RefreshButton
@@ -934,7 +934,7 @@ class CompactBubble(Bubble):
         if redraw:self.redraw()
     def visual_size(self,size=None):return scaled_size(self.content.size() if size is None else size,self.ui_scale)
     def _sync_scale_host(self):
-        scale=self.role_scale if self.panel_page=='status' and not self.expanded else 1.
+        scale=panel_scale_for_role(self.role_scale) if self.panel_page=='status' and not self.expanded else 1.
         screen=self.screen() or QApplication.primaryScreen();area=screen.availableGeometry()
         if scale!=1:scale=min(scale,(area.width()-24)/self.content.width(),(area.height()-24)/self.content.height())
         self.ui_scale=scale

@@ -7,6 +7,10 @@ from PySide6.QtWidgets import QWidget,QGraphicsView,QGraphicsScene,QFrame
 def scaled_size(size,scale):
     return QSize(max(1,math.ceil(size.width()*scale)),max(1,math.ceil(size.height()*scale)))
 
+def panel_scale_for_role(role_scale):
+    """Follow half the character's size change, with readable size limits."""
+    return max(.8,min(1.5,1.+(float(role_scale)-1.)*.5))
+
 class StatusContent(QWidget):
     def __init__(self,bubble):super().__init__(bubble);self.bubble=bubble
     # The embedded logical root is a QWidget window, not a native OS window.

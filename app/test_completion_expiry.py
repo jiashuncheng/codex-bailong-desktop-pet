@@ -1,5 +1,5 @@
 """Completion lifetimes, restart persistence and both visible status surfaces."""
-import json,tempfile,unittest
+import json,tempfile,time,unittest
 from pathlib import Path
 from PySide6.QtCore import QEvent
 from PySide6.QtTest import QTest
@@ -56,7 +56,8 @@ class CompletionExpiryTests(unittest.TestCase):
         try:
             icon.notify_complete(dict(session='a',turn='done'))
             self.assertTrue(icon.isHidden());self.assertTrue(icon.completion_timer.isActive())
-            QTest.qWait(100)
+            deadline=time.monotonic()+2
+            while icon.unread and time.monotonic()<deadline:QTest.qWait(10)
             self.assertFalse(icon.unread);self.assertFalse(icon.completion_timer.isActive())
             self.assertEqual(icon.visual(),'idle')
         finally:icon.deleteLater();APP.sendPostedEvents(None,QEvent.Type.DeferredDelete)

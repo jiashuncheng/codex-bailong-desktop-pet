@@ -133,8 +133,8 @@ class SettingsDialog(QDialog):
         pet=self.pet
         behavior=self.tab('人物与动作')
         self.section(behavior,'位置与移动',None)
-        self.number(behavior,'scale','角色与状态面板大小（倍）',.4,2.5,.1)
-        note=QLabel('正常状态卡片、胶囊和极简圆圈随角色缩放；设置、聊天和展开详情保持原尺寸。')
+        self.number(behavior,'scale','角色大小（倍）',.4,2.5,.1)
+        note=QLabel('状态卡片、胶囊和极简圆圈仅跟随角色一半的大小变化，保持在 0.8～1.5 倍，便于阅读；设置、聊天和展开详情保持原尺寸。')
         note.setWordWrap(True);note.setStyleSheet(f'font-size:11px;color:{MUTED};');behavior.addRow(note)
         self.check(behavior,'no_move','锁定人物位置（禁止拖动和自主走动）')
         self.check(behavior,'wandering','允许自主走动（不影响手动拖动）')

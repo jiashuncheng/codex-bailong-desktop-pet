@@ -26,23 +26,23 @@ class PanelScaleTests(unittest.TestCase):
         b=self.b
         for mode,base_width in [('auto',268),('mini',222),('minimal',54)]:
             b.set_mode(mode);self.finish()
-            for scale in (.4,1.,1.5,2.,1.):
-                b.set_role_scale(scale);self.finish()
-                self.assertAlmostEqual(b.width(),base_width*scale,delta=1)
+            for role,panel in ((.4,.8),(.7,.85),(1.,1.),(1.5,1.25),(2.,1.5),(2.5,1.5),(1.,1.)):
+                b.set_role_scale(role);self.finish()
+                self.assertAlmostEqual(b.width(),base_width*panel,delta=1)
                 self.assertEqual(b.size(),b.visual_size())
                 self.assertTrue(b.content.isVisible())
                 image=complete_frame(b);self.assertAlmostEqual(image.deviceIndependentSize().width(),b.width(),delta=1)
                 b.grab() # Exercise the actual scene renderer too.
     def test_scaled_capsule_click_opens_unscaled_details_and_scales_on_return(self):
         b=self.b;b.set_role_scale(2);b.set_mode('mini');self.finish()
-        self.assertEqual(b.width(),444)
+        self.assertEqual(b.width(),333)
         self.click(b.island);self.finish()
-        self.assertFalse(b.is_island());self.assertEqual(b.width(),536)
+        self.assertFalse(b.is_island());self.assertEqual(b.width(),402)
         details=b.content.findChild(QToolButton,'bubble_details')
         self.assertIsNotNone(details);self.click(details);self.finish()
         self.assertTrue(b.expanded);self.assertEqual(b.ui_scale,1.)
         self.assertEqual(b.width(),360)
-        b.toggle_details();self.finish();self.assertEqual(b.width(),536)
+        b.toggle_details();self.finish();self.assertEqual(b.width(),402)
     def test_scaled_button_uses_transformed_hitbox(self):
         b=self.b;b.set_role_scale(1.5);b.set_mode('mini');self.finish()
         clicks=[];b.shortcutRequested.connect(lambda:clicks.append(True))
@@ -50,11 +50,11 @@ class PanelScaleTests(unittest.TestCase):
     def test_capture_keeps_scaled_glyph_and_separate_satellites(self):
         b=self.b;b.set_role_scale(2);b.set_mode('mini');self.finish()
         capture=SurfaceState.capture(b)
-        self.assertEqual(capture.rect.width(),264);self.assertEqual(capture.icon_rect.width(),32)
+        self.assertEqual(capture.rect.width(),198);self.assertEqual(capture.icon_rect.width(),24)
         self.assertEqual(len(capture.satellites),2)
-        self.assertEqual(capture.satellites[0][0].width(),80)
+        self.assertEqual(capture.satellites[0][0].width(),60)
         b.set_mode('auto');self.finish()
-        self.assertEqual(SurfaceState.capture(b).rect.width(),536)
+        self.assertEqual(SurfaceState.capture(b).rect.width(),402)
     def test_hover_mapping_still_pauses_rotation(self):
         b=self.b
         for sid in ('a','b','c'):b.roster.observe(dict(session=sid,state='working'))

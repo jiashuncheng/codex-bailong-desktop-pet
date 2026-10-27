@@ -24,7 +24,7 @@ class PanelScaleTests(unittest.TestCase):
         QTest.mouseClick(host.viewport(),Qt.MouseButton.LeftButton,pos=point);APP.processEvents()
     def test_normal_and_capsule_scale_geometry_and_return_to_original_without_drift(self):
         b=self.b
-        for mode,base_width in [('auto',268),('mini',222),('minimal',54)]:
+        for mode,base_width in [('auto',268),('mini',246),('minimal',54)]:
             b.set_mode(mode);self.finish()
             for role,panel in ((.4,.8),(.7,.85),(1.,1.),(1.5,1.25),(2.,1.5),(2.5,1.5),(1.,1.)):
                 b.set_role_scale(role);self.finish()
@@ -35,7 +35,7 @@ class PanelScaleTests(unittest.TestCase):
                 b.grab() # Exercise the actual scene renderer too.
     def test_scaled_capsule_click_opens_unscaled_details_and_scales_on_return(self):
         b=self.b;b.set_role_scale(2);b.set_mode('mini');self.finish()
-        self.assertEqual(b.width(),333)
+        self.assertEqual(b.width(),369)
         self.click(b.island);self.finish()
         self.assertFalse(b.is_island());self.assertEqual(b.width(),402)
         details=b.content.findChild(QToolButton,'bubble_details')
@@ -50,7 +50,7 @@ class PanelScaleTests(unittest.TestCase):
     def test_capture_keeps_scaled_glyph_and_separate_satellites(self):
         b=self.b;b.set_role_scale(2);b.set_mode('mini');self.finish()
         capture=SurfaceState.capture(b)
-        self.assertEqual(capture.rect.width(),198);self.assertEqual(capture.icon_rect.width(),24)
+        self.assertEqual(capture.rect.width(),234);self.assertEqual(capture.icon_rect.width(),24)
         self.assertEqual(len(capture.satellites),2)
         self.assertEqual(capture.satellites[0][0].width(),60)
         b.set_mode('auto');self.finish()

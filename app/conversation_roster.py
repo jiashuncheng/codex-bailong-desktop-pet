@@ -11,7 +11,7 @@ def title_keywords(title):
     return re.split(r'[，。！？\n]',text,maxsplit=1)[0].strip(' ：:') or str(title)
 
 class ConversationRoster:
-    def __init__(self):self.items={};self.serial=0;self.page=0;self.pinned=[];self.names={};self.pending=set();self.rotating=None;self.next_slot=0;self.cursor=None;self.candidates=[]
+    def __init__(self):self.items={};self.serial=0;self.page=0;self.pinned=[];self.names={};self.sources={};self.pending=set();self.rotating=None;self.next_slot=0;self.cursor=None;self.candidates=[]
     def update_names(self,names):
         changed=False
         for sid,title in names.items():
@@ -24,6 +24,18 @@ class ConversationRoster:
         disposable=[sid for sid in self.names if sid not in self.items and sid not in self.pending]
         for sid in disposable[:-256]:self.names.pop(sid,None)
         return changed
+    def update_sources(self,sources):
+        changed=False
+        for sid,info in sources.items():
+            sid=session_id(sid)
+            if not sid or not isinstance(info,dict) or info.get('source_kind') not in ('local','terminal','wsl','ssh'):continue
+            value=dict(source_kind=info['source_kind'],source_label=str(info.get('source_label') or '未知')[:64])
+            if self.sources.get(sid)!=value:changed=True
+            self.sources[sid]=value
+            if sid in self.items:self.items[sid].update(value)
+        disposable=[sid for sid in self.sources if sid not in self.items and sid not in self.pending]
+        for sid in disposable[:-256]:self.sources.pop(sid,None)
+        return changed
     def observe(self,event):
         sid=session_id(event.get('session',''))
         if not sid:return
@@ -31,7 +43,7 @@ class ConversationRoster:
         state='complete' if event.get('kind')=='complete' else event.get('state','idle')
         start=old.get('start',self.serial) if old.get('state') in ACTIVE else self.serial
         detail=event.get('display') or {'thinking':'正在思考','working':'正在处理任务','responding':'正在整理回复','waiting':'等待你的操作','complete':'任务已完成','interrupted':'任务已中断'}.get(state,'等待新任务')
-        self.items[sid]=dict(session=sid,state=state,compacting=bool(event.get('compacting')),waiting_reason=event.get('waiting_reason','') if state=='waiting' else '',title=self.names.get(sid) or event.get('conversation_name') or event.get('title') or old.get('title') or '会话 '+sid[-4:],text=detail,turn=event.get('turn',''),start=start,updated=self.serial)
+        self.items[sid]=dict(session=sid,state=state,source_kind=event.get('source_kind') or self.sources.get(sid,{}).get('source_kind') or old.get('source_kind','unknown'),source_label=event.get('source_label') or self.sources.get(sid,{}).get('source_label') or old.get('source_label','未知'),compacting=bool(event.get('compacting')),waiting_reason=event.get('waiting_reason','') if state=='waiting' else '',title=self.names.get(sid) or event.get('conversation_name') or event.get('title') or old.get('title') or '会话 '+sid[-4:],text=detail,turn=event.get('turn',''),start=start,updated=self.serial)
         if state in ('complete','waiting') and (old.get('state')!=state or old.get('turn')!=event.get('turn','')):
             self.page=0;self.rotating=None;self.next_slot=0;self.cursor=None
         # Bound old in-memory details; pending IDs remain available separately.
@@ -44,7 +56,7 @@ class ConversationRoster:
         if set(pending)-self.pending:
             self.page=0;self.rotating=None;self.next_slot=0;self.cursor=None
         self.pending=set(pending)
-        done=[dict(self.items.get(sid,dict(session=sid,title=self.names.get(sid) or '会话 '+sid[-4:],text='')),state='complete') for sid in pending]
+        done=[dict(self.items.get(sid,dict(session=sid,title=self.names.get(sid) or '会话 '+sid[-4:],text='',**self.sources.get(sid,{}))),state='complete') for sid in pending]
         active=sorted([v for v in self.items.values() if v['state'] in ACTIVE and v['session'] not in pending],key=lambda v:(v['state']!='waiting',v['start'],v['session']))
         waiting=[v for v in active if v['state']=='waiting']
         pool=done+active

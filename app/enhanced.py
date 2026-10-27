@@ -87,6 +87,7 @@ class ActivityThread(QThread):
             try:
                 from session_read_state import session_id,active_conversations,conversation_names
                 from enhanced_core import Session
+                from conversation_sources import session_source
                 try:pending=json.loads((self.session_dir/'task-notifications.json').read_text(encoding='utf-8')).get('unread',[])
                 except (OSError,ValueError,AttributeError):pending=[]
                 pending=[k for k in pending if isinstance(k,list) and len(k)==2 and all(isinstance(v,str) for v in k)]
@@ -118,12 +119,16 @@ class ActivityThread(QThread):
                 if time.monotonic()-self.last_name_scan>=3:
                     self.last_name_scan=time.monotonic()
                     ids=self.targets.choose('names',128);names={} if self.wsl else conversation_names(self.tail.home,ids)
-                    if names:
+                    wanted={session_id(s) for s in ids}
+                    sources={session_id(sid):session_source(s,self.wsl) for sid,s in self.tail.reducer.sessions.items() if s.provenance_known and session_id(sid) in wanted}
+                    if names or sources:
                         self.conversation_names.update(names)
                         self.conversation_names={sid:name for sid,name in self.conversation_names.items() if sid in self.targets.entries}
-                        self.event.emit(dict(kind='conversation_names',names=names))
+                        self.event.emit(dict(kind='conversation_names',names=names,sources=sources))
                 from session_read_state import session_id
                 for event in batch:
+                    if event.get('kind') in ('status','complete') and event.get('session'):
+                        event.update(session_source(self.tail.reducer.sessions.get(event['session']),self.wsl))
                     name=self.conversation_names.get(session_id(event.get('session','')))
                     if name:event['title']=name;event['conversation_name']=name
                     self.event.emit(event)

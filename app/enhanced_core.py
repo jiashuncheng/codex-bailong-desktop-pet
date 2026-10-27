@@ -98,6 +98,8 @@ class Session:
     done: bool = True
     source_subagent: bool = False
     provenance_known: bool = False
+    source_kind: str = ''
+    source_label: str = ''
     display: str = ''
     calls: dict = field(default_factory=dict)
     compacting: bool = False
@@ -163,6 +165,8 @@ class ActivityReducer:
             owner=p.get('id') or p.get('session_id')
             if not s.provenance_known and (not owner or session_id(owner)==session_id(sid)):
                 s.source_subagent=is_subagent_metadata(p);s.provenance_known=True
+                from conversation_sources import metadata_source
+                s.source_kind,s.source_label=metadata_source(p)
         if s.source_subagent:
             return []
         limits = p.get('rate_limits')

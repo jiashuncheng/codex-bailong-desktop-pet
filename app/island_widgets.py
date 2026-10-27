@@ -8,7 +8,8 @@ from reset_watch import epoch
 from ui_theme import SURFACE,INK,MUTED,ACCENT,TRACK,ISLAND,ON_ISLAND,ISLAND_RUNNING,QUOTA_WEEK,QUOTA_LOW
 from chart_reveal import ChartReveal
 
-WIDTH=222
+WIDTH=246
+STATUS_WIDTH=156
 HEIGHT=44
 
 def valid_percent(value):
@@ -41,8 +42,13 @@ def short_status(icon):
 
 class IslandStatusText(QLabel):
     """Keep plain accessible text while painting each session in its own color."""
-    def set_status(self,text,states):
-        self.setText(text)
+    def set_status(self,text,states,entries=None,extra=0):
+        self.setText(text);self.source_rows=[];self.extra=extra
+        metrics=QFontMetrics(ui_font(11,True))
+        labels={'thinking':'思考','working':'执行','responding':'回复','waiting':'待操作','complete':'完成','interrupted':'中断'}
+        for item in (entries or [])[:2]:
+            source=str(item.get('source_label') or '未知')
+            self.source_rows.append(dict(source=metrics.elidedText(source,Qt.TextElideMode.ElideMiddle,46),full_source=source,title=item.get('title',''),status=labels.get(item['state'],'待命'),running=item['state'] in ('thinking','working','responding','waiting')))
         self.status_layout=QTextLayout(text,self.font())
         formats=[];offset=0
         # Elision/shortening preserves slash-separated session order. Overflow
@@ -58,6 +64,20 @@ class IslandStatusText(QLabel):
         if line.isValid():line.setLineWidth(self.width())
         self.status_layout.endLayout();self.update()
     def paintEvent(self,event):
+        if getattr(self,'source_rows',None):
+            p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setFont(ui_font(11,True))
+            line_height=17;top=(self.height()-len(self.source_rows)*line_height)/2
+            for index,row in enumerate(self.source_rows):
+                y=top+index*line_height
+                p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor('#443b50'))
+                p.drawRoundedRect(QRectF(0,y+1,54,15),4,4)
+                p.setPen(QColor('#d6cadd'));p.drawText(QRectF(4,y,46,line_height),Qt.AlignmentFlag.AlignVCenter,row['source'])
+                p.setPen(QColor(ISLAND_RUNNING if row['running'] else ON_ISLAND))
+                p.drawText(QRectF(59,y,34,line_height),Qt.AlignmentFlag.AlignVCenter,row['status'])
+            if self.extra:
+                p.setPen(QColor('#c1b5cd'))
+                p.drawText(QRectF(94,top+(len(self.source_rows)-1)*line_height,max(1,self.width()-94),line_height),Qt.AlignmentFlag.AlignVCenter|Qt.AlignmentFlag.AlignRight,'+'+str(self.extra))
+            return
         layout=getattr(self,'status_layout',None)
         if layout is None:return super().paintEvent(event)
         p=QPainter(self);p.setPen(QColor(ON_ISLAND))
@@ -67,7 +87,7 @@ class StatusIsland(QWidget):
     expand=Signal()
     def __init__(self,icon,parent=None):
         super().__init__(parent);self.setObjectName('status_island');self.icon=icon
-        self.setFixedSize(132,40);self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedSize(STATUS_WIDTH,40);self.setCursor(Qt.CursorShape.PointingHandCursor)
         row=QHBoxLayout(self);row.setContentsMargins(12,0,10,0);row.setSpacing(5)
         row.addWidget(icon);icon.show()
         self.text=IslandStatusText();self.text.setFont(ui_font(12,True));self.text.setStyleSheet('color:'+ON_ISLAND+';background:transparent;')
@@ -84,7 +104,13 @@ class StatusIsland(QWidget):
             suffix=tail.group();text=metrics.elidedText(text[:tail.start()],Qt.TextElideMode.ElideRight,max(1,budget-metrics.horizontalAdvance(suffix)))+suffix
         else:text=metrics.elidedText(text,Qt.TextElideMode.ElideRight,budget)
         states=getattr(self.icon,'session_states',[]) if getattr(self.icon,'session_summary','') else [self.icon.state if self.icon.visual() in ('busy','waiting') else 'complete']
-        self.text.set_status(text,states);self.setAccessibleName('Codex · '+full+'；点击打开正常面板')
+        entries=getattr(self.icon,'session_entries',[])
+        tail=re.search(r'\+(\d+)$',full);extra=int(tail.group(1)) if tail else 0
+        self.text.set_status(text,states,entries,extra)
+        if entries:
+            description='；'.join((str(v.get('source_label') or '未知')+' · '+str(v.get('title') or '')+' · '+{'thinking':'思考中','working':'执行中','responding':'回复中','waiting':'待操作','complete':'已完成'}.get(v['state'],'待命')).replace(' ·  · ',' · ') for v in entries)
+            full=description+(f'；另有 {extra} 个会话' if extra else '')
+        self.text.setAccessibleName(full);self.setAccessibleName('Codex · '+full+'；点击打开正常面板')
     def mousePressEvent(self,event):
         if event.button()==Qt.MouseButton.LeftButton:
             window=self.window()

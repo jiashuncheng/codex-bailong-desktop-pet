@@ -29,7 +29,7 @@ class StatusIndicator(QWidget):
         self.busy_since=self.clock();self.completed_at=None;self.seen=deque(maxlen=64)
         self.unread=[];self.store=None;self.ledger=None;self.acknowledged_at=None
         self.island=False;self._last_signature=None
-        self.completion_times={};self.session_summary='';self.session_states=[]
+        self.completion_times={};self.session_summary='';self.session_states=[];self.session_entries=[]
         self._hidden_at=self.clock();self._motion_offset=0.;self._motion_holds={'hidden'}
         self.motion=GlyphMotion(self._motion_now())
         self._tick_at=None;self._paint_at=None

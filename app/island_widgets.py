@@ -7,6 +7,7 @@ from typography import ui_font,FONT_CSS
 from reset_watch import epoch
 from ui_theme import SURFACE,INK,MUTED,ACCENT,TRACK,ISLAND,ON_ISLAND,ISLAND_RUNNING,QUOTA_WEEK,QUOTA_LOW
 from chart_reveal import ChartReveal
+from capsule_names import short_session_name,capsule_columns
 
 WIDTH=246
 STATUS_WIDTH=156
@@ -44,11 +45,20 @@ class IslandStatusText(QLabel):
     """Keep plain accessible text while painting each session in its own color."""
     def set_status(self,text,states,entries=None,extra=0):
         self.setText(text);self.source_rows=[];self.extra=extra
-        metrics=QFontMetrics(ui_font(11,True))
+        self.row_font=ui_font(11,True);metrics=QFontMetrics(self.row_font)
         labels={'thinking':'思考','working':'执行','responding':'回复','waiting':'待操作','complete':'完成','interrupted':'中断'}
-        for item in (entries or [])[:2]:
+        entries=(entries or [])[:2]
+        names=[short_session_name(v.get('title'),v.get('source_label')) for v in entries]
+        statuses=[labels.get(v['state'],'待命') for v in entries]
+        self.count_font=QFont(self.row_font);self.count_font.setPixelSize(10)
+        self.row_columns=capsule_columns(self.width(),metrics,names,statuses,extra,QFontMetrics(self.count_font))
+        for item,name,status in zip(entries,names,statuses):
             source=str(item.get('source_label') or '未知')
-            self.source_rows.append(dict(source=metrics.elidedText(source,Qt.TextElideMode.ElideMiddle,46),full_source=source,title=item.get('title',''),status=labels.get(item['state'],'待命'),running=item['state'] in ('thinking','working','responding','waiting')))
+            self.source_rows.append(dict(source=metrics.elidedText(source,Qt.TextElideMode.ElideMiddle,max(1,self.row_columns['source_width']-2)),full_source=source,title=item.get('title',''),name=metrics.elidedText(name,Qt.TextElideMode.ElideMiddle,self.row_columns['name_width']),full_name=name,status=status,running=item['state'] in ('thinking','working','responding','waiting')))
+        # If long, distinct titles have the same middle-elided abbreviation,
+        # expose their different endings instead of identical short labels.
+        if len(self.source_rows)==2 and self.source_rows[0]['name']==self.source_rows[1]['name'] and names[0]!=names[1]:
+            for row,name in zip(self.source_rows,names):row['name']=metrics.elidedText(name,Qt.TextElideMode.ElideLeft,self.row_columns['name_width'])
         self.status_layout=QTextLayout(text,self.font())
         formats=[];offset=0
         # Elision/shortening preserves slash-separated session order. Overflow
@@ -65,18 +75,21 @@ class IslandStatusText(QLabel):
         self.status_layout.endLayout();self.update()
     def paintEvent(self,event):
         if getattr(self,'source_rows',None):
-            p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setFont(ui_font(11,True))
-            line_height=17;top=(self.height()-len(self.source_rows)*line_height)/2
+            p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setFont(self.row_font)
+            line_height=17;top=(self.height()-len(self.source_rows)*line_height)/2;c=self.row_columns
+            def draw(text,x,y,width,color,align=Qt.AlignmentFlag.AlignLeft):
+                rect=QRectF(x,y,width,line_height);p.save();p.setClipRect(rect)
+                p.setPen(QColor(color));p.drawText(rect,Qt.AlignmentFlag.AlignVCenter|align,text);p.restore()
             for index,row in enumerate(self.source_rows):
                 y=top+index*line_height
                 p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor('#443b50'))
-                p.drawRoundedRect(QRectF(0,y+1,54,15),4,4)
-                p.setPen(QColor('#d6cadd'));p.drawText(QRectF(4,y,46,line_height),Qt.AlignmentFlag.AlignVCenter,row['source'])
-                p.setPen(QColor(ISLAND_RUNNING if row['running'] else ON_ISLAND))
-                p.drawText(QRectF(59,y,34,line_height),Qt.AlignmentFlag.AlignVCenter,row['status'])
+                p.drawRoundedRect(QRectF(0,y+1,c['source_width'],15),4,4)
+                draw(row['source'],1,y,c['source_width']-2,'#d6cadd')
+                draw(row['name'],c['name_x'],y,c['name_width'],ON_ISLAND)
+                draw(row['status'],c['status_x'],y,c['status_width'],ISLAND_RUNNING if row['running'] else ON_ISLAND)
             if self.extra:
-                p.setPen(QColor('#c1b5cd'))
-                p.drawText(QRectF(94,top+(len(self.source_rows)-1)*line_height,max(1,self.width()-94),line_height),Qt.AlignmentFlag.AlignVCenter|Qt.AlignmentFlag.AlignRight,'+'+str(self.extra))
+                p.setFont(self.count_font)
+                draw('+'+str(self.extra),c['count_x'],top+(len(self.source_rows)-1)*line_height,c['count_width'],'#c1b5cd',Qt.AlignmentFlag.AlignRight)
             return
         layout=getattr(self,'status_layout',None)
         if layout is None:return super().paintEvent(event)

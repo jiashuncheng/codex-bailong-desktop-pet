@@ -133,7 +133,9 @@ class SettingsDialog(QDialog):
         pet=self.pet
         behavior=self.tab('人物与动作')
         self.section(behavior,'位置与移动',None)
-        self.number(behavior,'scale','角色大小（倍）',.4,2.5,.1)
+        self.number(behavior,'scale','角色与状态面板大小（倍）',.4,2.5,.1)
+        note=QLabel('正常状态卡片、胶囊和极简圆圈随角色缩放；设置、聊天和展开详情保持原尺寸。')
+        note.setWordWrap(True);note.setStyleSheet(f'font-size:11px;color:{MUTED};');behavior.addRow(note)
         self.check(behavior,'no_move','锁定人物位置（禁止拖动和自主走动）')
         self.check(behavior,'wandering','允许自主走动（不影响手动拖动）')
         self.check(behavior,'wander_horizontal_only','自主走动仅水平')
@@ -329,7 +331,8 @@ class SettingsDialog(QDialog):
             # Reserve the gutter so opening a disclosure cannot rewrap its body.
             area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn);area.setWidget(widget)
             bar=area.verticalScrollBar();bar.setSingleStep(32)
-            bar.rangeChanged.connect(lambda low,high,b=bar:b.setEnabled(high>low))
+            from shiboken6 import isValid
+            bar.rangeChanged.connect(lambda low,high,b=bar:b.setEnabled(high>low) if isValid(b) else None)
             index=self.tabs.addTab(area,{'面板与显示':'面板','人物与动作':'人物','Codex 联动':'Codex','角色与素材':'素材','闲聊与台词':'闲聊','更新与维护':'维护'}.get(title,title))
             self.tabs.setTabToolTip(index,title)
         else:self.tabs.addTab(widget,title)

@@ -85,6 +85,16 @@ class StatusIsland(QWidget):
         else:text=metrics.elidedText(text,Qt.TextElideMode.ElideRight,budget)
         states=getattr(self.icon,'session_states',[]) if getattr(self.icon,'session_summary','') else [self.icon.state if self.icon.visual() in ('busy','waiting') else 'complete']
         self.text.set_status(text,states);self.setAccessibleName('Codex · '+full+'；点击打开正常面板')
+    def mousePressEvent(self,event):
+        if event.button()==Qt.MouseButton.LeftButton:
+            window=self.window()
+            if hasattr(window,'card_pointer_press'):window.card_pointer_press(event)
+            event.accept();return
+        super().mousePressEvent(event)
+    def mouseMoveEvent(self,event):
+        window=self.window()
+        if hasattr(window,'card_pointer_move') and window.card_pointer_move(event):event.accept();return
+        super().mouseMoveEvent(event)
     def mouseReleaseEvent(self,event):
         window=self.window()
         if hasattr(window,'card_pointer_release') and window.card_pointer_release():event.accept();return

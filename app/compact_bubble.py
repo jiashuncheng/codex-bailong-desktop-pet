@@ -6,6 +6,7 @@ from PySide6.QtGui import QColor,QFont,QFontMetrics,QPainter,QPen,QTextLayout,QT
 from PySide6.QtCore import QPointF,QObject,QEvent
 from PySide6.QtWidgets import QWidget,QLabel,QHBoxLayout,QVBoxLayout,QToolButton,QApplication,QStackedWidget,QLayout,QToolTip
 from panel_transition import PanelTransition
+from panel_scale import StatusContent,StatusScaleHost,scaled_size
 from surface_morph import PANEL_RADIUS
 from status_indicator import StatusIndicator
 from refresh_indicator import RefreshButton
@@ -315,9 +316,15 @@ class StatusScroller(QLabel):
     def mousePressEvent(self,event):
         if event.button()==Qt.MouseButton.LeftButton and self._on_name(event.position()):
             self.name_pressed=True;self.name_hovered=True;self.update();event.accept();return
+        if event.button()==Qt.MouseButton.LeftButton and not self.full:
+            window=self.window()
+            if hasattr(window,'card_pointer_press'):window.card_pointer_press(event)
+            event.accept();return
         super().mousePressEvent(event)
     def mouseReleaseEvent(self,event):
         was_pressed=self.name_pressed;self.name_pressed=False;self.update()
+        window=self.window()
+        if hasattr(window,'card_pointer_release') and window.card_pointer_release():event.accept();return
         if event.button()==Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
             if self._on_name(event.position()) and was_pressed:
                 self.conversationRequested.emit(self.conversation_id)
@@ -375,7 +382,7 @@ class InlineExplanationOnly(QObject):
     def eventFilter(self,obj,event):
         if event.type()==QEvent.Type.ToolTip and isinstance(obj,QWidget):
             bubble=self.parent()
-            if obj is bubble or bubble.isAncestorOf(obj):
+            if obj is bubble or bubble.isAncestorOf(obj) or bubble.content.isAncestorOf(obj):
                 QToolTip.hideText();event.accept();return True
         return False
 
@@ -398,7 +405,8 @@ class CompactBubble(Bubble):
     def __init__(self,owner=None):
         super().__init__();self._owner=owner;self.setParent(owner,self.windowFlags())
         self.report=None;self.inline_explanations=InlineExplanationOnly(self);QApplication.instance().installEventFilter(self.inline_explanations)
-        self.content=QWidget(self);self.content.setLayout(self.layout);self.content.setFixedWidth(268);self.content.show()
+        self.role_scale=1.;self.ui_scale=1.;self.scale_host=None
+        self.content=StatusContent(self);self.content.setLayout(self.layout);self.content.setFixedWidth(268);self.content.show()
         self.setFixedWidth(268);self.layout.setContentsMargins(10,6,10,6);self.layout.setSpacing(3)
         self.layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         self.setFont(font(12));self.setStyleSheet('QLabel{'+FONT_CSS+'font-weight:500;color:#393343;font-size:12px;background:transparent;}')
@@ -913,12 +921,26 @@ class CompactBubble(Bubble):
             r=self.report;scroller=self.status_view
             if r and r.requested and not r._animating and not self.size_transition.running and not self.size_transition.preparing:
                 if not r.follow.active and scroller.animation.state()==QAbstractAnimation.State.Running and scroller._to_height!=scroller._from_height:
-                    target=self.content_geometry(QSize(self.content.width(),self.height()+scroller._to_height-scroller._from_height))
+                    target=self.content_geometry(self.visual_size(QSize(self.content.width(),self.content.height()+scroller._to_height-scroller._from_height)))
                     r.follow.begin_status(target)
             self._fit_height()
             if r:r.follow.track_status(self.geometry(),scroller.progress)
     def _status_height_finished(self):
         if self.report:self.report.follow.finish_status()
+    def set_role_scale(self,value,redraw=True):
+        value=max(.4,min(2.5,float(value)))
+        if value==self.role_scale:return
+        self.size_transition.complete();self.role_scale=value
+        if redraw:self.redraw()
+    def visual_size(self,size=None):return scaled_size(self.content.size() if size is None else size,self.ui_scale)
+    def _sync_scale_host(self):
+        scale=self.role_scale if self.panel_page=='status' and not self.expanded else 1.
+        screen=self.screen() or QApplication.primaryScreen();area=screen.availableGeometry()
+        if scale!=1:scale=min(scale,(area.width()-24)/self.content.width(),(area.height()-24)/self.content.height())
+        self.ui_scale=scale
+        if scale!=1 and self.scale_host is None:self.scale_host=StatusScaleHost(self)
+        if self.scale_host:self.scale_host.sync(scale)
+        if not self.size_transition.preparing:self.content.setVisible(self.isVisible())
     def _fit_height(self):
         if self.size_transition.running:return
         if self._fitting_height:return
@@ -935,14 +957,15 @@ class CompactBubble(Bubble):
             self.details_tabs.setFixedHeight(height);wanted+=height-old
         if self.content.height()!=max(40,wanted):self.content.setFixedHeight(max(40,wanted))
         self.setAccessibleName(self.heading+'；'+self.status)
-        if not self.size_transition.preparing and self.size()!=self.content.size():self.setFixedSize(self.content.size())
+        self._sync_scale_host()
+        if not self.size_transition.preparing and self.size()!=self.visual_size():self.setFixedSize(self.visual_size())
         self.layout.activate();self._fitting_height=False;self._position_now()
     def _position_now(self):
         if self.size_transition.running or self.size_transition.preparing or self.size_transition.landing.image is not None:return
         owner=self.owner_pet()
         if owner and getattr(owner,'enhanced_ready',False):owner.position_bubble()
     def content_geometry(self,size=None):
-        owner=self.owner_pet();size=self.content.size() if size is None else size
+        owner=self.owner_pet();size=self.visual_size() if size is None else size
         if owner is None:return QRectF(self.x(),self.y(),size.width(),size.height()).toRect()
         if hasattr(owner,'card_geometry') and (owner.settings.get('panel_detached') or not owner.settings.get('character_visible',True)):return owner.card_geometry(size)
         screen=QApplication.screenAt(owner.frameGeometry().center()) or QApplication.primaryScreen();area=screen.availableGeometry()
@@ -959,19 +982,20 @@ class CompactBubble(Bubble):
         # One-/two-line changes must not flip the bubble to the opposite side
         # of the character near the top edge. Probe with the larger compact size.
         reserve=max(0,2*self.status_view.line_height-self.status_view.height()) if not self.expanded and not self.is_island() else 0
-        return self.height()+reserve
+        return self.height()+round(reserve*self.ui_scale)
     def paintEvent(self,event):
         p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source);p.fillRect(self.rect(),Qt.GlobalColor.transparent)
         p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
         if not self.isVisible() or self.is_compact() or self.size_transition.canvas_morph or self.size_transition.preparing:return
         p.setBrush(QColor('#fcfafc'));p.setPen(QPen(QColor('#e0d9e6'),1))
-        p.drawRoundedRect(QRectF(self.rect()).adjusted(.5,.5,-.5,-.5),PANEL_RADIUS,PANEL_RADIUS)
+        p.drawRoundedRect(QRectF(self.rect()).adjusted(.5,.5,-.5,-.5),PANEL_RADIUS*self.ui_scale,PANEL_RADIUS*self.ui_scale)
     def resizeEvent(self,event):
         super().resizeEvent(event)
         if not self._redrawing and not self._fitting_height:self._position_now()
     def hideEvent(self,event):
         if hasattr(self,'size_transition'):self.size_transition.cancel()
+        self.content.hide()
         super().hideEvent(event)
     def showEvent(self,event):
         super().showEvent(event)

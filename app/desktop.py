@@ -1153,7 +1153,7 @@ class DesktopPet(EnhancedPet):
             rss_mb=round(mem.rss/1048576,1),uptime=round(time.monotonic()-self.created_at,1),throwing=self.throwing)
         if self.connection_health.records['quota']['state']=='available' and any(w.get('resetsAt') and w['resetsAt']<=time.time() for w in self.quota_windows):
             self.connection_health.record('quota',dict(state='degraded',code='quota_expired'))
-        value['ui_revision']=95
+        value['ui_revision']=96
         value['single_native_tray_identity']=True
         value['isolated_shell_registration_disabled']=not getattr(self,'_tray_shell_enabled',False)
         value['report_minimum_width']=report.MIN_WIDTH if report else 268

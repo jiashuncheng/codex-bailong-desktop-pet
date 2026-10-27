@@ -29,25 +29,27 @@ def raster_offset(point,canvas,ratio,origin=QPointF()):
 
 
 def complete_frame(bubble):
-    size=bubble.content.size();ratio=bubble.devicePixelRatioF()
+    size=bubble.visual_size();ratio=bubble.devicePixelRatioF()
     image=QPixmap(pixel_size(size.width(),ratio),pixel_size(size.height(),ratio));image.setDevicePixelRatio(ratio);image.fill(Qt.GlobalColor.transparent)
     p=QPainter(image);p.setRenderHint(QPainter.RenderHint.Antialiasing)
     if not bubble.is_compact():
         p.setBrush(QColor(SURFACE));p.setPen(QPen(QColor('#e0d9e6'),1))
-        p.drawRoundedRect(QRectF(0,0,size.width(),size.height()).adjusted(.5,.5,-.5,-.5),PANEL_RADIUS,PANEL_RADIUS)
+        p.drawRoundedRect(QRectF(0,0,size.width(),size.height()).adjusted(.5,.5,-.5,-.5),PANEL_RADIUS*bubble.ui_scale,PANEL_RADIUS*bubble.ui_scale)
+    p.scale(bubble.ui_scale,bubble.ui_scale)
     bubble.content.render(p,QPoint(),QRegion(),QWidget.RenderFlag.DrawChildren);p.end()
     return image
 
 
-def snapshot(widget,children_only=False,skip=None):
-    ratio=widget.devicePixelRatioF();image=QPixmap(pixel_size(widget.width(),ratio),pixel_size(widget.height(),ratio))
+def snapshot(widget,children_only=False,skip=None,scale=1.):
+    ratio=widget.devicePixelRatioF();image=QPixmap(pixel_size(widget.width()*scale,ratio),pixel_size(widget.height()*scale,ratio))
     image.setDevicePixelRatio(ratio);image.fill(Qt.GlobalColor.transparent)
     if children_only:
-        painter=QPainter(image)
+        painter=QPainter(image);painter.scale(scale,scale)
         for child in widget.findChildren(QWidget,options=Qt.FindChildOption.FindDirectChildrenOnly):
             if child.isVisibleTo(widget) and child is not skip:child.render(painter,child.pos(),QRegion(),QWidget.RenderFlag.DrawChildren)
         painter.end()
-    else:widget.render(image,QPoint(),QRegion(),QWidget.RenderFlag.DrawChildren)
+    else:
+        painter=QPainter(image);painter.scale(scale,scale);widget.render(painter,QPoint(),QRegion(),QWidget.RenderFlag.DrawChildren);painter.end()
     return image
 
 
@@ -63,6 +65,7 @@ class SurfaceState:
     frame_origin:QPointF=None
     screen_origin:QPointF=None
     radius:float=PANEL_RADIUS
+    minimal:bool=False
 
     @classmethod
     def capture(cls,bubble,origin=None,frame=None):
@@ -70,23 +73,24 @@ class SurfaceState:
         minimal=bubble.is_minimal()
         root=bubble.island if island else bubble.minimal_quota if minimal else bubble.content
         offset=root.mapTo(bubble.content,QPoint())
-        rect=QRectF(QPointF(origin+offset),QSizeF(root.size()))
+        scale=bubble.ui_scale;scaled_offset=QPointF(offset)*scale
+        rect=QRectF(QPointF(origin)+scaled_offset,QSizeF(root.size())*scale)
         icon=bubble.status_indicator;icon_pos=icon.mapTo(root,QPoint()) if not minimal else QPoint()
-        image=snapshot(root,children_only=island,skip=icon)
+        image=snapshot(root,children_only=island,skip=icon,scale=scale)
         # Extract the shared glyph so it follows one path instead of appearing
         # twice in two fading, differently positioned screenshots.
         clear=QPainter(image);clear.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
-        clear.fillRect(QRectF(QPointF(icon_pos),QSizeF(icon.size())),Qt.GlobalColor.transparent);clear.end()
-        glyph=snapshot(icon) if not minimal else QPixmap();glyph_rect=QRectF(QPointF(origin+offset+icon_pos),QSizeF(icon.size())) if not minimal else QRectF(rect.center(),QSizeF(0,0))
-        if minimal:image=snapshot(root)
+        clear.fillRect(QRectF(QPointF(icon_pos)*scale,QSizeF(icon.size())*scale),Qt.GlobalColor.transparent);clear.end()
+        glyph=snapshot(icon,scale=scale) if not minimal else QPixmap();glyph_rect=QRectF(QPointF(origin)+scaled_offset+QPointF(icon_pos)*scale,QSizeF(icon.size())*scale) if not minimal else QRectF(rect.center(),QSizeF(0,0))
+        if minimal:image=snapshot(root,scale=scale)
         satellites=[]
         if island:
             for name in ('island_shortcut','island_quota'):
-                widget=next((w for w in bubble.findChildren(QToolButton,name) if w.isVisibleTo(bubble.content)),None)
+                widget=next((w for w in bubble.content.findChildren(QToolButton,name) if w.isVisibleTo(bubble.content)),None)
                 if widget:
-                    pos=widget.mapTo(bubble.content,QPoint());satellites.append((QRectF(QPointF(origin+pos),QSizeF(widget.size())),snapshot(widget)))
+                    pos=widget.mapTo(bubble.content,QPoint());satellites.append((QRectF(QPointF(origin)+QPointF(pos)*scale,QSizeF(widget.size())*scale),snapshot(widget,scale=scale)))
         screen=bubble.screen()
-        return cls(rect,image,glyph_rect,glyph,island,satellites,frame if frame is not None else complete_frame(bubble),QPointF(origin),QPointF(screen.geometry().topLeft()) if screen else QPointF(),root.height()/2 if island or minimal else PANEL_RADIUS)
+        return cls(rect,image,glyph_rect,glyph,island,satellites,frame if frame is not None else complete_frame(bubble),QPointF(origin),QPointF(screen.geometry().topLeft()) if screen else QPointF(),root.height()*scale/2 if island or minimal else PANEL_RADIUS*scale,minimal)
 
 
 def mix_rect(a,z,f):
@@ -98,7 +102,7 @@ class SurfaceMorph:
         self.start=start;self.end=end;self._landing=None
         self.shrinking=end.rect.width()*end.rect.height()<start.rect.width()*start.rect.height()
     def content_opacities(self,time):
-        if not self.start.island and not self.end.island and self.start.radius==PANEL_RADIUS and self.end.radius==PANEL_RADIUS:
+        if not self.start.island and not self.end.island and not self.start.minimal and not self.end.minimal:
             # Normal/detail cards share a surface. Do not fade both contents
             # to zero midway: that exposes a blank white card as a flash.
             incoming=stage(time,.10,.72)

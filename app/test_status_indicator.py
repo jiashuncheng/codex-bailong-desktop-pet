@@ -151,10 +151,13 @@ class IndicatorTests(unittest.TestCase):
                 again=StatusIndicator(clock=lambda:self.now);again.set_store(path)
                 self.assertFalse(again.unread);again.deleteLater()
             finally:restored.close();restored.deleteLater()
-    def test_long_idle_and_errors_do_not_expire_unread(self):
-        self.icon.notify_complete(dict(session='a',turn='1'));self.now+=86400
+    def test_expiry_removes_notice_but_preserves_connection_warning(self):
+        self.icon.wall_clock=lambda:self.now
+        self.icon.notify_complete(dict(session='a',turn='1'));self.now+=29
         self.icon.observe(dict(state='offline',active=0));self.icon._tick()
         self.assertEqual(self.icon.visual(),'attention');self.assertFalse(self.icon.timer.isActive())
+        self.assertFalse(self.icon.expire_completed());self.now+=1
+        self.assertTrue(self.icon.expire_completed());self.assertEqual(self.icon.visual(),'warning')
 
     def test_warning_is_static_and_no_false_completion_from_text(self):
         self.icon.observe(dict(state='working',active=1,text='部分测试已完成，继续工作'))

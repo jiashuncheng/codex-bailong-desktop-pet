@@ -157,6 +157,7 @@ class DailyReport(QWidget):
     refreshRequested=Signal()
     GAP=6
     PAD=8
+    MIN_WIDTH=268
     def __init__(self,bubble):
         flags=Qt.WindowType.Tool|Qt.WindowType.FramelessWindowHint
         if __import__('sys').platform=='darwin':flags|=Qt.WindowType.WindowDoesNotAcceptFocus
@@ -165,13 +166,14 @@ class DailyReport(QWidget):
         self.snapshot={};self.natural_height=412;self._overview_height=412;self.fraction=0.;self._building=False
         self.book_index=0;self._book_opened=False
         self._animating=False;self._frame=None;self._pending_rebuild=False;self._syncing=False;self._series_cache={}
-        self.refresh_busy=False
+        self.refresh_busy=False;self._body_cache={};self._data_revision=0
         self.setWindowTitle('白龙数据面板');self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating);self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setStyleSheet('QLabel{'+FONT_CSS+'color:#393343;background:transparent;}QScrollArea{border:0;background:transparent;}QScrollBar:vertical{background:#f5f0f8;width:7px;margin:0;border-radius:3px;}QScrollBar::handle:vertical{background:#c7b7d7;min-height:18px;border-radius:3px;}QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:transparent;}')
         self.surface=QWidget(self);self.layout=QVBoxLayout(self.surface);self.layout.setContentsMargins(10,8,10,8);self.layout.setSpacing(5)
         from data_page_motion import PageFade
         self.page_fade=PageFade(self.surface)
+        self.page_fade.animation.finished.connect(self._page_motion_finished)
         self.refresh_button=action_button('refresh','刷新数据面板',parent=self.surface,hit_size=28)
         self.refresh_button.setObjectName('report_refresh');self.refresh_button.clicked.connect(self.request_refresh)
         self.refresh_button.hide()
@@ -196,6 +198,7 @@ class DailyReport(QWidget):
         snapshot=snapshot or {};previous=self.snapshot;self.snapshot=snapshot
         r=snapshot.get('report') or {};old=previous.get('report') or {}
         if r==old and all(snapshot.get(k)==previous.get(k) for k in ('partial','unavailable','week_cycle','quota_history')):return
+        self._data_revision+=1
         if r.get('day')!=old.get('day') or r.get('daily_models')!=old.get('daily_models'):self._series_cache.clear()
         if self._animating or self.follow.active:
             self._pending_rebuild=True;return
@@ -212,6 +215,7 @@ class DailyReport(QWidget):
                 self.note_label.setText(self._note(r));self.update()
                 self._update_data_state()
                 if self.page=='overview':self.sync_geometry()
+                self._refresh_page_frame()
             else:
                 self.rebuild();self.sync_geometry();self.chart_entry()
     def request_refresh(self):
@@ -230,40 +234,64 @@ class DailyReport(QWidget):
         return series
     def chart_entry(self):
         if not self._animating and not self.follow.active and self.plot:
-            self.plot.begin_reveal();QTimer.singleShot(0,self.plot,self.plot.start_reveal)
+            self.plot.begin_reveal()
+            if self.page_fade.animation.state()==QAbstractAnimation.State.Running:self._refresh_page_frame()
+            else:QTimer.singleShot(0,self.plot,self.plot.start_reveal)
+    def _refresh_page_frame(self):
+        if self.page_fade.slide and self.page_fade.animation.state()==QAbstractAnimation.State.Running:
+            self.page_fade.next_frame=self.page_fade.snapshot(self.scroll)
     def set_page(self,page):
         if self.page==page:
             self.page_buttons[page].setChecked(True);return
         from settings_controls import motion_enabled
-        frame=None
+        frame=None;previous=self.page
         if self.isVisible() and not self._animating and not self.follow.active and motion_enabled():
             if self.plot:self.plot.freeze_reveal()
-            frame=self.page_fade.snapshot_region(self.surface,self.scroll.geometry()) if self.page_fade.isVisible() else self.page_fade.snapshot(self.scroll)
-        self.page_fade.clear()
-        self.page=page;self.rebuild();self.sync_geometry();self.layout.activate()
-        if frame is not None:
-            # Settle and paint the live page first. The old frame then fades
-            # over a ready target while its chart reveal runs beneath it.
-            widgets=[self.scroll]+self.scroll.findChildren(QWidget)
-            for widget in reversed(widgets):
-                widget.ensurePolished()
-                if widget.layout():widget.layout().activate()
-            QApplication.sendPostedEvents(None,QEvent.Type.LayoutRequest)
-            self.page_fade.present(frame,None,self.scroll.geometry(),fade_out=True)
-            self.chart_entry()
-            # Start from a painted zero-progress chart underneath the overlay.
-            self.scroll.repaint()
-        else:self.chart_entry()
+            frame=self.page_fade.current_frame() if self.page_fade.isVisible() else self.page_fade.snapshot(self.scroll)
+        from panel_transition import present_barrier
+        guarded=self.isVisible() and not self._animating and not self.follow.active and QApplication.platformName()=='windows'
+        opacity=self.windowOpacity()
+        if guarded:
+            self.follow.shield.present(self.grab(),self.geometry());present_barrier();self.setWindowOpacity(0.)
+        enabled=self.updatesEnabled();self.setUpdatesEnabled(False)
+        try:
+            self.page_fade.clear()
+            self.page=page;self.rebuild();self.sync_geometry();self.layout.activate()
+            if frame is not None:self.page_fade.hold(frame,self.scroll.geometry())
+            self.setUpdatesEnabled(enabled)
+            if frame is not None:
+                # Resolve only this report's descendants. A global flush can
+                # run unrelated card layout work during native handoff.
+                widgets=[self.scroll]+self.scroll.findChildren(QWidget)
+                for widget in reversed(widgets):
+                    widget.ensurePolished()
+                    if widget.layout():widget.layout().activate()
+                for widget in widgets:QApplication.sendPostedEvents(widget,QEvent.Type.LayoutRequest)
+                if self.plot:self.plot.begin_reveal()
+                target=self.page_fade.snapshot(self.scroll)
+                order=('overview','models','cycle')
+                self.page_fade.present(frame,target,self.scroll.geometry(),direction=1 if order.index(page)>order.index(previous) else -1)
+                self.scroll.repaint()
+            else:self.chart_entry()
+        finally:
+            self.setUpdatesEnabled(enabled)
+            if guarded:
+                self.repaint();self.setWindowOpacity(opacity);self.repaint();present_barrier()
+                self.follow.park(self.follow.shield)
+    def _page_motion_finished(self):
+        if self.requested and self.isVisible() and self.plot:self.plot.start_reveal()
     def set_period(self,period):
         if self.period==period:
             if period in self.range_buttons:self.range_buttons[period].setChecked(True)
             return
         self.period=period;self.selected_model=None
         if self._animating or self.follow.active:self._pending_rebuild=True;return
+        self.page_fade.clear()
         if self.page=='models' and self.report:self._update_models();self.chart_entry()
     def select_model(self,model):
         self.selected_model=None if self.selected_model==model else model
         if self._animating or self.follow.active:self._pending_rebuild=True;return
+        self.page_fade.clear()
         if self.page=='models' and self.report:self._update_models();self.chart_entry()
     def _update_models(self):
         series=self._series()
@@ -294,6 +322,7 @@ class DailyReport(QWidget):
                 row.setChecked(row.selected)
                 row.setAccessibleName(item['model']+f"  {item['total']:,} Tokens");row.update()
         self._update_filter_label()
+        if 'models' in self._body_cache:self._body_cache['models']['model_state']=(self._data_revision,self.period,self.selected_model)
     def _update_filter_label(self):
         if not hasattr(self,'filter_label'):return
         self.filter_label.setText('筛选：'+self.selected_model if self.selected_model else '范围内全部模型')
@@ -313,6 +342,7 @@ class DailyReport(QWidget):
         return card,value
     def _update_cycle(self):
         self.cycle_view.set_snapshot(self.snapshot)
+        if 'cycle' in self._body_cache:self._body_cache['cycle']['cycle_revision']=self._data_revision
     def clear_model_filter(self):
         if self.selected_model:self.select_model(self.selected_model)
     def _add_model_rows(self,series):
@@ -376,11 +406,23 @@ class DailyReport(QWidget):
         if self._animating or self.follow.active:
             self._pending_rebuild=True;return
         self._building=True
+        for cached_page,item in self._body_cache.items():
+            if item['refs']['scroll'] is getattr(self,'scroll',None):
+                item['refs'].update({name:getattr(self,name) for name in item['refs']})
         while self.layout.count()>2:
             w=self.layout.takeAt(2).widget()
-            if w:w.hide();w.deleteLater()
-        width=self.bubble.width();self.surface.setFixedWidth(width);r=self.snapshot.get('report') or {};self.report=r
+            if w:
+                w.hide()
+                if not any(item['refs']['scroll'] is w for item in self._body_cache.values()):w.deleteLater()
+        width=self.panel_width();self.surface.setFixedWidth(width);r=self.snapshot.get('report') or {};self.report=r
         self.ensure_chrome(r)
+        cached=self._body_cache.get(self.page)
+        if cached and cached['ready']==bool(r):
+            for name,value in cached['refs'].items():setattr(self,name,value)
+            self.layout.addWidget(self.scroll,1);self.scroll.show()
+            self._update_cached_body(r,cached);self._building=False;self._measure_overview();return
+        if cached:
+            cached['refs']['scroll'].deleteLater();del self._body_cache[self.page]
         self.readout=None
         self.scroll=QScrollArea();self.scroll.setMinimumSize(0,0);self.scroll.setWidgetResizable(True);self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff if self.page=='overview' else Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -448,6 +490,23 @@ class DailyReport(QWidget):
         # Models reuse this canvas and scroll only when their rows overflow it.
         self._building=False
         self._measure_overview()
+        common=('scroll','plot','readout','data_state','note_label','body_height')
+        extra={'overview':('stats','hour_total','analogy','book_estimate'),'models':('model_total','filter_label','clear_filter','model_rows','model_layout'),'cycle':('cycle_view',)}
+        names=common+extra[self.page] if r or self.page=='cycle' else common
+        self._body_cache[self.page]=dict(ready=bool(r),refs={name:getattr(self,name) for name in names})
+        if self.page=='models':self._body_cache[self.page]['model_state']=(self._data_revision,self.period,self.selected_model)
+        if self.page=='cycle':self._body_cache[self.page]['cycle_revision']=self._data_revision
+    def _update_cached_body(self,r,cached):
+        if r:
+            if self.page=='overview':
+                self.stats.report=r;self.stats.update();self.hour_total.setText(compact_tokens(r.get('yesterday_total',0)))
+                if self.plot.report!=r:self.plot.set_data(r)
+                self._update_analogy(r)
+            elif self.page=='models' and cached.get('model_state')!=(self._data_revision,self.period,self.selected_model):
+                self._update_models();cached['model_state']=(self._data_revision,self.period,self.selected_model)
+        if self.page=='cycle' and cached.get('cycle_revision')!=self._data_revision:
+            self._update_cycle();cached['cycle_revision']=self._data_revision
+        self._update_data_state();self.note_label.setText(self._note(r))
     def _measure_overview(self):
         if self.page=='overview':
             for widget in [self.surface]+self.surface.findChildren(QWidget):widget.ensurePolished()
@@ -459,25 +518,53 @@ class DailyReport(QWidget):
             header=sum(max(self.layout.itemAt(i).widget().minimumHeight(),self.layout.itemAt(i).widget().sizeHint().height()) for i in (0,1))
             self._overview_height=height+header+margins.top()+margins.bottom()+2*self.layout.spacing()+2
         self.natural_height=self._overview_height
-    def reserved_height(self):
+    def reserved_height(self,host_size=None):
         area=(self.bubble.screen() or QApplication.primaryScreen()).availableGeometry()
-        return min(self.natural_height+self.PAD,max(0,area.height()-self.bubble.height()-self.GAP)) if self.requested else 0
+        height=self.bubble.height() if host_size is None else host_size.height()
+        return min(self.natural_height+self.PAD,max(0,area.height()-height-self.GAP)) if self.requested else 0
+    def panel_width(self,host=None):
+        host=self.bubble.geometry() if host is None else host
+        area=(self.bubble.screen() or QApplication.primaryScreen()).availableGeometry()
+        return min(max(self.MIN_WIDTH,round(host.width())),max(1,area.width()-2*self.PAD))
+    def geometry_for_host(self,host):
+        """Small hosts anchor a readable panel; they do not dictate its width."""
+        area=(self.bubble.screen() or QApplication.primaryScreen()).availableGeometry()
+        width=self.panel_width(host)
+        x=round(host.x()+(host.width()-width)/2)
+        x=max(area.left()+self.PAD,min(x,area.right()-self.PAD-width+1))
+        height=max(1,min(self.natural_height,round(host.y())-area.top()-self.GAP-self.PAD))
+        return QRect(x,round(host.y())-self.GAP-height,width,height)
     def toggle(self):self.dismiss() if self.requested else self.open()
     def open(self):
+        from panel_transition import present_barrier
         reversing=self._animating
         self.animation.stop()
         self.requested=True
-        if not reversing:
-            count=len(book_catalog()['books'])
-            self.book_index=(self.book_index+1+random.randrange(count-1))%count if self._book_opened else random.randrange(count)
-            self._book_opened=True
-            top=bool(self.bubble.windowFlags()&Qt.WindowType.WindowStaysOnTopHint)
-            if bool(self.windowFlags()&Qt.WindowType.WindowStaysOnTopHint)!=top:self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint,top)
-            self.rebuild();owner=self.bubble.owner_pet()
-            if owner and getattr(owner,'enhanced_ready',False):owner.stop_walk();owner.position_bubble()
-            self.sync_geometry();self._prepare_frame()
-        self.show();self.raise_();self._input_passthrough(True)
-        self.follow.prewarm()
+        native_open=not self.isVisible() and QApplication.platformName()=='windows'
+        opacity=self.windowOpacity()
+        try:
+            # A hidden layered HWND can retain its last fully open bitmap.
+            # Publish the zero-size reveal before making a cold show visible.
+            if native_open:self.setWindowOpacity(0.)
+            if not reversing:
+                count=len(book_catalog()['books'])
+                self.book_index=(self.book_index+1+random.randrange(count-1))%count if self._book_opened else random.randrange(count)
+                self._book_opened=True
+                top=bool(self.bubble.windowFlags()&Qt.WindowType.WindowStaysOnTopHint)
+                if bool(self.windowFlags()&Qt.WindowType.WindowStaysOnTopHint)!=top:self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint,top)
+                # All tabs share the overview's measured height. A direct
+                # quota-alert entry must measure it while hidden too, rather
+                # than open a short cycle page and jump on the next tab.
+                if self.page!='overview':
+                    selected=self.page;self.page='overview';self.rebuild();self.page=selected
+                self.rebuild();owner=self.bubble.owner_pet()
+                if owner and getattr(owner,'enhanced_ready',False):owner.stop_walk();owner.position_bubble()
+                self.sync_geometry();self._prepare_frame()
+            self.show();self.raise_();self._input_passthrough(True)
+            self.follow.prewarm()
+            if native_open:self.repaint();present_barrier()
+        finally:
+            if native_open:self.setWindowOpacity(opacity)
         self._start_animation(1.)
     def dismiss(self):
         if not self.requested and not self.isVisible():return
@@ -493,7 +580,6 @@ class DailyReport(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents,value)
         if self.windowHandle():self.windowHandle().setFlag(Qt.WindowType.WindowTransparentForInput,value)
     def _prepare_frame(self):
-        self.page_fade.clear()
         self.refresh_button.freeze_motion('surface')
         if self.plot:
             if self.requested:self.plot.begin_reveal()
@@ -513,7 +599,7 @@ class DailyReport(QWidget):
         frame=QPixmap(round(size.width()*ratio),round(size.height()*ratio));frame.setDevicePixelRatio(ratio)
         frame.fill(QColor('#fcfafc'))
         self.surface.render(frame,QPoint(),QRegion(),QWidget.RenderFlag.DrawChildren)
-        self._frame=frame;self._animating=True
+        self._frame=frame;self._animating=True;self.page_fade.clear()
         button=self.bubble.findChild(QToolButton,'bubble_report')
         x=button.mapToGlobal(button.rect().center()).x() if button and button.isVisible() else self.bubble.geometry().center().x()
         self._merge_anchor=QPointF(x-self.x(),self.bubble.y()+1-self.y())
@@ -552,8 +638,10 @@ class DailyReport(QWidget):
     def _finished(self):
         from panel_transition import present_barrier
         guarded=self.requested and self._animating and QApplication.platformName()=='windows'
+        opacity=self.windowOpacity()
         if guarded:
             self.follow.shield.present(self.grab(),self.geometry());present_barrier()
+            self.setWindowOpacity(0.)
         self._animating=False
         if not self.requested:
             self.fraction=0.;self._frame=None;self.surface.hide()
@@ -575,29 +663,33 @@ class DailyReport(QWidget):
         self._frame=None;self._input_passthrough(False)
         self.repaint()
         if guarded:
-            present_barrier();self.follow.park(self.follow.shield)
+            present_barrier();self.setWindowOpacity(opacity);self.repaint();present_barrier();self.follow.park(self.follow.shield)
         if self.plot:self.plot.start_reveal()
     def sync_geometry(self):
         if self._building or self._syncing or self.follow.active:return
         b=self.bubble
+        # A host's union canvas is a presentation surface, not its visible
+        # card. A closing report must never chase that temporary native rect.
+        if b.size_transition.running or b.size_transition.preparing:return
         if not b.isVisible():self.hide();return
         if self._animating or self.follow.active:
             # Follow an anchor move without invalidating the backing store.
             # Width/height changes wait until the frozen frame is released.
             if self.requested:
-                self.move(b.x()-self.PAD,b.y()-self.GAP-self.surface.height()-self.PAD)
+                rect=self.geometry_for_host(b.geometry())
+                self.move(rect.x()-self.PAD,b.y()-self.GAP-self.surface.height()-self.PAD)
             return
         self._syncing=True
         try:
-            area=(b.screen() or QApplication.primaryScreen()).availableGeometry();width=b.width()
+            width=self.panel_width()
             if self.surface.width()!=width:
                 self.surface.setFixedWidth(width)
                 if self.page=='overview' and getattr(self,'stats',None):self.stats.set_columns(width-22)
             self._measure_overview()
-            target=max(1,min(self.natural_height,b.y()-area.top()-self.GAP-self.PAD))
+            rect=self.geometry_for_host(b.geometry());target=rect.height()
             if self.surface.size()!=QSize(width,target):self.surface.setFixedSize(width,target)
             self.surface.move(self.PAD,self.PAD);self.layout.activate()
-            self.setGeometry(b.x()-self.PAD,b.y()-self.GAP-target-self.PAD,width+2*self.PAD,target+2*self.PAD)
+            self.setGeometry(rect.adjusted(-self.PAD,-self.PAD,self.PAD,self.PAD))
             if self.isVisible():self.repaint()
         finally:self._syncing=False
     def eventFilter(self,obj,event):

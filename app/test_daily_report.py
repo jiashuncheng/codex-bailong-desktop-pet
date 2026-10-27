@@ -82,6 +82,71 @@ def sample():
              for day,value in [(12,1200),(13,30000),(14,12000),(15,56000),(16,78000),(17,30000)] for m in ('gpt-6.1-sol','gpt-6-sol')]))
 
 class ReportUiTests(unittest.TestCase):
+    def test_capsule_and_minimal_hosts_keep_a_readable_report_width(self):
+        for mode in ('mini','minimal'):
+            self.b.set_mode(mode);self.b.size_transition.complete();APP.processEvents()
+            self.r.open();self.complete();self.r.set_page('models')
+            self.r.page_fade.animation.setCurrentTime(self.r.page_fade.animation.duration());APP.processEvents()
+            self.assertGreaterEqual(self.r.surface.width(),268)
+            self.assertGreater(self.r.surface.width(),self.b.width())
+            self.assertEqual(self.r.content_geometry().bottom()+1,self.b.y()-self.r.GAP)
+            control=self.r.period_control
+            self.assertLessEqual(control.mapTo(self.r.surface,control.rect().topRight()).x(),self.r.surface.width()-8)
+            self.r.dismiss();self.complete()
+    def test_period_change_drops_any_outdated_page_snapshot(self):
+        self.r.open();self.complete()
+        # This test exercises cancellation of an active page transition.
+        # Hosted Windows may disable animations globally; control that input
+        # instead of assuming the runner's accessibility preference is ours.
+        with patch('settings_controls.motion_enabled',return_value=True):self.r.set_page('models')
+        self.assertIsNotNone(self.r.page_fade.frame)
+        self.r.set_period('7d')
+        self.assertIsNone(self.r.page_fade.frame)
+        self.assertEqual(len(self.r.plot.series['bins']),7)
+
+    def test_period_change_with_reduced_motion_has_no_outdated_snapshot(self):
+        self.r.open();self.complete()
+        with patch('settings_controls.motion_enabled',return_value=False):self.r.set_page('models')
+        self.assertIsNone(self.r.page_fade.frame)
+        self.r.set_period('7d')
+        self.assertIsNone(self.r.page_fade.frame)
+        self.assertEqual(len(self.r.plot.series['bins']),7)
+
+    def test_page_cache_reuses_views_and_refreshes_data_changed_offscreen(self):
+        import copy
+        self.r.open();self.complete();overview=self.r.plot
+        self.r.set_page('models');models=self.r.plot
+        self.r.set_page('overview');self.assertIs(self.r.plot,overview)
+        changed=copy.deepcopy(self.r.snapshot);changed['report']['hours'][2]+=999
+        changed['report']['daily_models'].append(dict(day='2026-10-17',model='new-model',total=900,input=800,output=100,known=True))
+        self.r.set_snapshot(changed);self.r.set_page('models')
+        self.assertIs(self.r.plot,models);self.assertTrue(any(row.item['model']=='new-model' for row in self.r.model_rows))
+        self.r.set_page('cycle');self.r.set_page('models')
+        self.assertTrue(any(row.item['model']=='new-model' for row in self.r.model_rows))
+        self.r.set_page('overview');self.assertEqual(self.r.plot.report['hours'][2],999)
+        self.assertEqual(len(self.r._body_cache),3)
+    def test_cached_model_page_updates_after_data_arrives_while_report_is_closed(self):
+        import copy
+        self.r.open();self.complete();self.r.set_page('models');plot=self.r.plot
+        self.r.page_fade.animation.setCurrentTime(self.r.page_fade.animation.duration())
+        self.r.dismiss();self.complete()
+        changed=copy.deepcopy(self.r.snapshot);changed['report']['daily_models'][0]['total']+=12345
+        self.r.set_snapshot(changed);self.r.open();self.complete()
+        self.assertIs(self.r.plot,plot)
+        self.assertEqual(self.r.plot.series['total'],sum(row['total'] for row in changed['report']['daily_models']))
+    def test_page_motion_keeps_an_opaque_background_without_text_crossfade(self):
+        from PySide6.QtGui import QPixmap,QPainter,QColor
+        from PySide6.QtCore import QRect
+        from data_page_motion import paint_pages
+        first=QPixmap(60,40);first.fill(QColor('red'))
+        second=QPixmap(60,40);second.fill(QColor('blue'))
+        for direction in (-1,1):
+            for progress in (.25,.5,.75):
+                mixed=QPixmap(60,40);mixed.fill(Qt.GlobalColor.transparent)
+                painter=QPainter(mixed);paint_pages(painter,QRect(0,0,60,40),first,second,progress,direction);painter.end()
+                image=mixed.toImage()
+                self.assertEqual({image.pixelColor(x,20).name() for x in range(60)},{'#ff0000','#0000ff'})
+                self.assertTrue(all(image.pixelColor(x,20).alpha()==255 for x in range(60)))
     def test_cycle_to_overview_measures_complete_body_before_resize(self):
         self.r.open();self.complete()
         for width in (268,420,560):
@@ -104,6 +169,20 @@ class ReportUiTests(unittest.TestCase):
         self.assertEqual(self.r.content_geometry().bottom()+1,self.b.y()-6)
         self.assertGreater(middle,1);self.complete();self.assertGreater(self.r.visible_height(),middle)
         self.r.dismiss();self.r.animation.setCurrentTime(130);self.assertTrue(self.r.isVisible());self.complete();self.assertFalse(self.r.isVisible())
+    def test_native_reopen_paints_zero_frame_before_opacity_is_restored(self):
+        from unittest.mock import patch
+        r=self.r;r.open();self.complete();r.dismiss();self.complete();r.setWindowOpacity(.8)
+        opacity=r.windowOpacity();observed=[];show=r.show
+        def native_show():
+            observed.append((r.windowOpacity(),r.fraction,r.surface.isHidden(),r._frame is not None));show()
+        with patch('daily_report.QApplication.platformName',return_value='windows'),patch('panel_transition.present_barrier'),patch.object(r,'show',side_effect=native_show):r.open()
+        self.assertEqual(observed,[(0.,0.,True,True)]);self.assertAlmostEqual(r.windowOpacity(),opacity)
+    def test_native_reopen_failure_does_not_leave_report_invisible(self):
+        from unittest.mock import patch
+        r=self.r;r.setWindowOpacity(.7);opacity=r.windowOpacity()
+        with patch('daily_report.QApplication.platformName',return_value='windows'),patch.object(r,'_prepare_frame',side_effect=RuntimeError('capture failed')):
+            with self.assertRaises(RuntimeError):r.open()
+        self.assertAlmostEqual(r.windowOpacity(),opacity)
     def test_overview_has_no_range_filter_model_page_filters_totals(self):
         self.r.open();self.complete()
         self.assertFalse([b for b in self.r.findChildren(QToolButton) if b.objectName().startswith('report_range_') and not b.isHidden()])

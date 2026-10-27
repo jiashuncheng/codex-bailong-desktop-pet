@@ -65,7 +65,7 @@ class SurfaceState:
     radius:float=PANEL_RADIUS
 
     @classmethod
-    def capture(cls,bubble,origin=None):
+    def capture(cls,bubble,origin=None,frame=None):
         origin=bubble.pos() if origin is None else origin;island=bubble.is_island()
         minimal=bubble.is_minimal()
         root=bubble.island if island else bubble.minimal_quota if minimal else bubble.content
@@ -86,7 +86,7 @@ class SurfaceState:
                 if widget:
                     pos=widget.mapTo(bubble.content,QPoint());satellites.append((QRectF(QPointF(origin+pos),QSizeF(widget.size())),snapshot(widget)))
         screen=bubble.screen()
-        return cls(rect,image,glyph_rect,glyph,island,satellites,complete_frame(bubble),QPointF(origin),QPointF(screen.geometry().topLeft()) if screen else QPointF(),root.height()/2 if island or minimal else PANEL_RADIUS)
+        return cls(rect,image,glyph_rect,glyph,island,satellites,frame if frame is not None else complete_frame(bubble),QPointF(origin),QPointF(screen.geometry().topLeft()) if screen else QPointF(),root.height()/2 if island or minimal else PANEL_RADIUS)
 
 
 def mix_rect(a,z,f):

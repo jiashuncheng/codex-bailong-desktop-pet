@@ -1,5 +1,6 @@
 """Desktop configuration, action arbitration and bounded physics (no Qt)."""
 import copy
+import sys
 import json
 import math
 import os
@@ -9,8 +10,8 @@ from pathlib import Path
 from version import VERSION
 DEFAULTS=dict(schema=2,scale=1.0,playback_speed=1.0,action_gap=2.0,
     random_interval=25.0,move_speed=55.0,move_range=1.0,wander_range_revision=1,wander_horizontal_only=True,wander_home=None,drag_physics=True,
-    on_top=True,video_fullscreen_yield=True,no_move=False,mouse_through=False,wandering=True,random_actions=True,
-    commentary=True,sound=True,bubble=True,quota_visible=True,self_talk=False,character_visible=True,card_anchor=None,panel_detached=False,codex_exit=False,
+    on_top=True,video_fullscreen_yield=True,fullscreen_yield_mode='video',no_move=False,mouse_through=False,wandering=True,random_actions=True,
+    commentary=True,sound=True,bubble=True,quota_visible=True,quota_decline_threshold=10.,quota_increase_threshold=15.,self_talk=False,character_visible=True,card_anchor=None,panel_detached=False,codex_exit=False,
     conversation_auto_scroll=True,conversation_scroll_seconds=3.,conversation_scroll_revision=2,status_actions=True,status_action_interval=12.,status_response_revision=2,update_checks=True,token_chart_range='all',bubble_mode='auto',
     capsule_action='chatgpt',capsule_website='',talk_min=30.0,talk_max=90.0,talk_quiet=True,
     talk_lines=['忙完记得休息一下。','我在这里陪着你。','今天也一起把小事做好吧。'],
@@ -45,7 +46,8 @@ def normalized(raw):
     out['conversation_scroll_revision']=2
     for k,lo,hi in [('scale',.4,2.5),('playback_speed',.25,3),('action_gap',0,60),
         ('random_interval',3,600),('move_speed',10,300),('move_range',.1,1),
-        ('talk_min',5,3600),('talk_max',5,7200),('status_action_interval',8,120),('conversation_scroll_seconds',2,120)]:
+        ('talk_min',5,3600),('talk_max',5,7200),('status_action_interval',8,120),('conversation_scroll_seconds',2,120),
+        ('quota_decline_threshold',1,100),('quota_increase_threshold',1,100)]:
         try:v=float(out[k]);out[k]=min(hi,max(lo,v)) if math.isfinite(v) else DEFAULTS[k]
         except (TypeError,ValueError):out[k]=DEFAULTS[k]
     for k,v in DEFAULTS.items():
@@ -61,6 +63,14 @@ def normalized(raw):
     out['talk_lines']=[str(s)[:500] for s in out['talk_lines'][:200]] if isinstance(out['talk_lines'],list) else DEFAULTS['talk_lines'][:]
     out['facing']=-1 if out['facing']==-1 else 1
     if out['token_chart_range'] not in ('all','30d','7d','day'):out['token_chart_range']='all'
+    if isinstance(raw,dict) and 'fullscreen_yield_mode' not in raw:
+        out['fullscreen_yield_mode']='video' if raw.get('video_fullscreen_yield',True) else 'off'
+    if out.get('fullscreen_yield_mode')=='all':out['fullscreen_yield_mode']='game_video'
+    if out.get('fullscreen_yield_mode') not in ('off','video','game_video'):
+        out['fullscreen_yield_mode']='video' if out.get('video_fullscreen_yield',True) else 'off'
+    if sys.platform=='darwin' and out['fullscreen_yield_mode']=='game_video':out['fullscreen_yield_mode']='video'
+    # Keep the pre-mode key as a compatibility mirror for older diagnostics.
+    out['video_fullscreen_yield']=out['fullscreen_yield_mode']=='video'
     if out['bubble_mode'] not in ('auto','mini','minimal'):out['bubble_mode']='auto'
     from quick_actions import action_info
     out['capsule_action']=action_info(out['capsule_action'])[0]

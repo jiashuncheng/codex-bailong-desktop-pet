@@ -21,8 +21,12 @@ class ReportChartResponseTests(unittest.TestCase):
         self.r.close();self.b.close();self.b.deleteLater();APP.processEvents()
     def finish_open(self):
         self.r.animation.setCurrentTime(self.r.animation.duration());APP.processEvents()
-    def assert_revealing(self):
+    def finish_page(self):
+        if self.r.page_fade.animation.state()==RUNNING:
+            self.r.page_fade.animation.setCurrentTime(self.r.page_fade.animation.duration())
         APP.processEvents()
+    def assert_revealing(self):
+        self.finish_page()
         self.assertTrue(self.r.plot.isVisible());self.assertFalse(self.r.plot.reveal.pending)
         self.assertEqual(self.r.plot.reveal.animation.state(),RUNNING)
         self.assertLess(self.r.plot.reveal.progress,.2)
@@ -34,7 +38,7 @@ class ReportChartResponseTests(unittest.TestCase):
             self.assertNotEqual(first,second)
     def test_identical_and_unrelated_refresh_leave_both_plot_clocks_untouched(self):
         for page in ('overview','models'):
-            self.r.set_page(page);APP.processEvents()
+            self.r.set_page(page);self.finish_page()
             p=self.r.plot;p.reveal.animation.setCurrentTime(180)
             progress=p.reveal.progress;ms=p.reveal.animation.currentTime();scroll=self.r.scroll
             refreshed=copy.deepcopy(self.r.snapshot)
@@ -46,7 +50,7 @@ class ReportChartResponseTests(unittest.TestCase):
             self.assertEqual(p.reveal.animation.state(),RUNNING)
     def test_changed_chart_data_updates_existing_plot_without_skipping_animation(self):
         for page in ('overview','models'):
-            self.r.set_page(page);APP.processEvents()
+            self.r.set_page(page);self.finish_page()
             p=self.r.plot;p.reveal.animation.setCurrentTime(150);progress=p.reveal.progress
             refreshed=copy.deepcopy(self.r.snapshot)
             refreshed['report']['hours'][3]+=100

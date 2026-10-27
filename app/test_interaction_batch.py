@@ -33,6 +33,23 @@ class DraftTests(unittest.TestCase):
 
 
 class InteractionTests(unittest.TestCase):
+    def test_quota_alert_opens_prepared_cycle_page_without_toggling_main_card(self):
+        from card_surface_probe import sample
+        self.pet.bubble.token_snapshot=sample();b=self.pet.bubble;before=b.geometry()
+        self.pet.open_quota_comparison();r=b.report
+        self.assertTrue(r.requested);self.assertEqual(r.page,'cycle');self.assertIsNotNone(r._frame)
+        # Existing docking may move the compact card to keep the whole report
+        # on screen. It must not expand it or start a second card transition.
+        self.assertEqual(b.size(),before.size());self.assertFalse(b.size_transition.running)
+        placed=b.geometry()
+        r.animation.setCurrentTime(110);progress=r.animation.currentTime()
+        self.pet.open_quota_comparison()
+        self.assertIs(b.report,r);self.assertEqual(r.animation.currentTime(),progress)
+        r.animation.setCurrentTime(r.animation.duration());APP.processEvents();size=r.size()
+        r.set_page('models');self.pet.open_quota_comparison()
+        self.assertEqual(r.page,'cycle');self.assertTrue(r.requested);self.assertEqual(r.size(),size)
+        self.assertEqual(b.geometry(),placed)
+
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
         self.patches=[patch('enhanced.CONFIG',self.root/'settings.json'),patch('enhanced.STATE_DIR',self.root),
@@ -107,6 +124,13 @@ class InteractionTests(unittest.TestCase):
         self.pet.build_menu(menu);walk=next(a for a in menu.actions() if a.objectName()=='command_walk')
         self.assertFalse(walk.isEnabled());self.assertIn('已锁定',walk.text())
         self.pet.execute_command('recover');self.assertTrue(self.pet.isVisible());self.assertFalse(self.pet.settings['mouse_through'])
+
+    def test_recover_from_tray_restores_panel_when_both_surfaces_are_hidden(self):
+        self.pet.settings['character_visible']=False;self.pet.settings['bubble']=False
+        self.pet.bubble.enabled=False;self.pet._desktop_hidden=True;self.pet.apply_surface_visibility()
+        self.assertFalse(self.pet.isVisible());self.assertFalse(self.pet.bubble.isVisible())
+        self.pet.recover();settle(self.pet)
+        self.assertTrue(self.pet.bubble.isVisible())
     def test_quota_query_is_a_silent_refresh_without_changing_preferences(self):
         self.pet.apply_settings(dict(bubble=False,quota_visible=False));current=self.pet.current
         with patch.object(self.pet,'refresh_quota') as refresh,patch('enhanced.EnhancedPet.quota') as interaction:

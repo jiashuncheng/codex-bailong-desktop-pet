@@ -1,5 +1,5 @@
 """Persistent 16px task indicator. Animate only this widget while visible."""
-import time
+import time,math
 import json
 from collections import deque
 from pathlib import Path
@@ -16,15 +16,20 @@ ACTIVE={'thinking','working','responding'}
 class StatusIndicator(QWidget):
     changed=Signal()
     ATTENTION_SECONDS=1.8
-    def __init__(self,parent=None,clock=None):
+    COMPLETION_SECONDS=30.
+    def __init__(self,parent=None,clock=None,wall_clock=None):
         super().__init__(parent)
         self.setObjectName('codex_status_indicator');self.setFixedSize(16,16)
         self.clock=clock or time.monotonic
+        self.wall_clock=wall_clock or time.time
+        self.completion_expiries={};self.completion_auto_dismissed=False
+        self.completion_timer=QTimer(self);self.completion_timer.setSingleShot(True)
+        self.completion_timer.timeout.connect(self.expire_completed)
         self.state='idle';self.active=0;self.waiting=0;self.completed=False
         self.busy_since=self.clock();self.completed_at=None;self.seen=deque(maxlen=64)
         self.unread=[];self.store=None;self.ledger=None;self.acknowledged_at=None
         self.island=False;self._last_signature=None
-        self.completion_times={};self.session_summary=''
+        self.completion_times={};self.session_summary='';self.session_states=[]
         self._hidden_at=self.clock();self._motion_offset=0.;self._motion_holds={'hidden'}
         self.motion=GlyphMotion(self._motion_now())
         self._tick_at=None;self._paint_at=None
@@ -48,6 +53,13 @@ class StatusIndicator(QWidget):
             if isinstance(data,dict):
                 stored_unread=keys(data.get('unread',[]))
                 self.unread=[key for key in stored_unread if key[0] and key[1]]
+                now=self.wall_clock();expiry={}
+                rows=data.get('completion_expiries',[])
+                for row in rows if isinstance(rows,list) else []:
+                    if isinstance(row,list) and len(row)==3 and all(isinstance(v,str) for v in row[:2]) and type(row[2]) in (int,float) and math.isfinite(row[2]):
+                        expiry[(session_id(row[0]),row[1])]=min(row[2],now+self.COMPLETION_SECONDS)
+                self.completion_expiries={key:expiry.get(key,now+self.COMPLETION_SECONDS) for key in self.unread}
+                self.completion_auto_dismissed=not bool(self.unread)
                 self.seen=deque(keys(data.get('seen',[])),maxlen=64)
                 for key in stored_unread:
                     if key not in self.unread and key not in self.seen:self.seen.append(key)
@@ -57,24 +69,43 @@ class StatusIndicator(QWidget):
                 from codex_connection import data_home
                 excluded=subagent_sessions(data_home(home),[sid for sid,turn in self.unread])
                 kept=[key for key in self.unread if key[0] not in excluded]
-                if kept!=stored_unread:self.unread=kept;self._save()
+                self.unread=kept;self._save()
         except (OSError,ValueError):pass
         self.ledger.remember(list(self.seen)+self.unread)
+        self.expire_completed();self._schedule_completion_expiry()
         self._sync();self.update()
 
     def _save(self):
+        self.completion_expiries={key:deadline for key,deadline in self.completion_expiries.items() if key in self.unread}
+        self._schedule_completion_expiry()
         if self.store:
             try:
-                atomic_json(self.store,dict(unread=self.unread,seen=list(self.seen)))
+                atomic_json(self.store,dict(unread=self.unread,seen=list(self.seen),completion_expiries=[[*key,deadline] for key,deadline in self.completion_expiries.items()]))
                 if self.ledger:self.ledger.remember(list(self.seen)+self.unread)
             except OSError:pass
+
+    def _schedule_completion_expiry(self):
+        if not self.completion_expiries:self.completion_timer.stop();return
+        remaining=min(self.completion_expiries.values())-self.wall_clock()
+        self.completion_timer.start(max(1,min(2147483647,math.ceil(remaining*1000))))
+
+    def expire_completed(self):
+        """Dismiss only expired notices; never mark a Codex conversation read."""
+        now=self.wall_clock()
+        expired={key for key,deadline in self.completion_expiries.items() if deadline<=now}
+        if not expired:self._schedule_completion_expiry();return False
+        self.unread=[key for key in self.unread if key not in expired]
+        self.completion_auto_dismissed=True;self.completed=False;self.acknowledged_at=None
+        if not self.unread:self.completed_at=None
+        if self.state=='complete' and not self.is_busy():self.state='idle'
+        self._save();self._sync();self.update();return True
 
     def acknowledge(self,session=None):
         before=len(self.unread)
         self.unread=[] if session is None else [key for key in self.unread if key[0]!=session_id(session)]
         if len(self.unread)==before:return False
         self.completed=True;self.acknowledged_at=self.clock()
-        if not self.unread:self.completed_at=None
+        if not self.unread:self.completed_at=None;self.completion_auto_dismissed=True
         self._save();self._sync();self.update();return True
 
     def shaking(self,now=None):
@@ -85,7 +116,7 @@ class StatusIndicator(QWidget):
         self.unread=[key for key in self.unread if key not in seen or self.clock()-self.completion_times.get(key,-float('inf'))<2]
         if len(self.unread)==before:return False
         self.acknowledged_at=None;self.completed=False
-        if not self.unread:self.completed_at=None
+        if not self.unread:self.completed_at=None;self.completion_auto_dismissed=True
         if not self.is_busy() and self.state=='complete':self.state='idle'
         self._save();self._sync();self.update();return True
 
@@ -115,6 +146,8 @@ class StatusIndicator(QWidget):
         self.seen.append(key)
         if key not in self.unread:self.unread.append(key)
         self.completion_times[key]=self.clock()
+        self.completion_expiries[key]=self.wall_clock()+self.COMPLETION_SECONDS
+        self.completion_auto_dismissed=False
         if len(self.completion_times)>128:self.completion_times={k:v for k,v in self.completion_times.items() if k in self.unread}
         self.acknowledged_at=None
         # The monitor emits the aggregate status immediately after completion.
@@ -136,7 +169,7 @@ class StatusIndicator(QWidget):
         if self.is_busy():return 'busy'
         if self.state=='interrupted':return 'paused'
         if self.state=='offline':return 'warning'
-        if self.completed or self.state=='complete':return 'complete'
+        if not self.completion_auto_dismissed and (self.completed or self.state=='complete'):return 'complete'
         return 'idle'
 
     def _sync(self):

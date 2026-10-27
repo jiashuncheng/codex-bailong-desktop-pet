@@ -104,11 +104,15 @@ class SettingsDialog(QDialog):
         appearance=self.tab('面板与显示')
         self.section(appearance,'显示内容',None)
         self.check(appearance,'panel_detached','面板与人物分别移动')
-        for key,title in [('character_visible','显示人物'),('on_top','始终置顶'),('video_fullscreen_yield','全屏视频时让位'),('mouse_through','鼠标穿透（可从托盘恢复）'),('bubble','显示面板'),('quota_visible','显示额度和重置时间')]:
+        for key,title in [('character_visible','显示人物'),('on_top','始终置顶'),('mouse_through','鼠标穿透（可从托盘恢复）'),('bubble','显示面板'),('quota_visible','显示额度和重置时间')]:
             self.check(appearance,key,title)
-            if key=='video_fullscreen_yield':
-                note=QLabel('完成提醒确认后继续让位。Mac 浏览器识别需在系统设置中授予运行此程序的 Python 辅助功能权限。' if sys.platform=='darwin' else '完成提醒确认后，视频仍全屏则继续让位；退出全屏恢复当前置顶设置。')
-                note.setWordWrap(True);note.setStyleSheet(f'font-size:11px;color:{MUTED};');appearance.addRow(note)
+        modes=[('关闭','off'),('仅视频','video')]
+        if sys.platform=='win32':modes.append(('游戏和视频','game_video'))
+        self.fullscreen_mode=SlidingSegments(modes)
+        appearance.addRow('全屏时让位',self.fullscreen_mode);self.fields['fullscreen_yield_mode']=self.fullscreen_mode;self.field_tabs['fullscreen_yield_mode']=0;self.field_titles['fullscreen_yield_mode']='全屏时让位'
+        self.fullscreen_mode.currentIndexChanged.connect(lambda:self.edited('fullscreen_yield_mode'))
+        note=QLabel('视频让位保留完成提醒优先级。Mac 浏览器识别需在系统设置中授予运行此程序的 Python 辅助功能权限。' if sys.platform=='darwin' else '仅视频模式保留完成提醒优先级。游戏和视频模式在桌宠所在屏幕全屏时隐藏人物和面板，退出后恢复；完成提醒不会打断全屏。')
+        note.setWordWrap(True);note.setStyleSheet(f'font-size:11px;color:{MUTED};');appearance.addRow(note)
         self.check(appearance,'conversation_auto_scroll','自动轮换状态会话（保留两条，悬停时暂停）')
         self.number(appearance,'conversation_scroll_seconds','会话轮换间隔（秒）',2,120,1)
         self.section(appearance,'卡片与快捷入口','自动模式闲置后收为胶囊；手动选择胶囊或极简后不会因新状态自动展开。')
@@ -148,6 +152,9 @@ class SettingsDialog(QDialog):
     def build_page_2(self):
         pet=self.pet
         connection=self.tab('Codex 联动')
+        self.section(connection,'额度变化提醒',None)
+        self.number(connection,'quota_decline_threshold','下降达到',1,100,1,suffix='%')
+        self.number(connection,'quota_increase_threshold','上涨达到',1,100,1,suffix='%')
         self.section(connection,'启动与退出','登录启动与 Codex 联动相互独立；Mac 当前支持登录启动。')
         self.startup=SwitchRow('登录 macOS 时启动' if sys.platform=='darwin' else '登录 Windows 时启动');connection.addRow(self.startup)
         self.field_tabs['startup']=self._building_index;self.field_titles['startup']='开机启动'

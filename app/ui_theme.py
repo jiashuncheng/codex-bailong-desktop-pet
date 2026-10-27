@@ -19,7 +19,13 @@ DISABLED='#8b8195'
 HEALTH_COLORS={'available':'#506e66','degraded':'#885c70','unavailable':'#89566c','unknown':'#706879'}
 ISLAND='#302a3c'
 ON_ISLAND='#f7f3fb'
+ISLAND_RUNNING='#ffd36a'
 ISLAND_ICON='#d6c5ed'
+# Tray-only high-contrast accents (Radix dark mauve / iris / blue / ruby).
+TRAY_TRACK='#3c393f'
+TRAY_FIVE='#b1a9ff'
+TRAY_WEEK='#70b8ff'
+TRAY_LOW='#ff949d'
 MODEL_COLORS=['#8b78a6','#8297a5','#aa8194','#a19170','#7d9c94','#a89ab6']
 
 def editor_stylesheet(font_css):

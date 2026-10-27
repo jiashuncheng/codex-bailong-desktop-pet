@@ -12,7 +12,7 @@ def signature(code):
 def check():
     archive=ZlibArchiveReader(str(ROOT/'build/BailongEnhanced/PYZ-00.pyz'))
     result={}
-    for name in ('storage_locations','program_location','wsl_codex','animation_updates','chat_protocol','chat_config','chat_transport','chat_probe','data_page_motion','material_removal','settings_controls','choice_controls','number_controls','quota_history','quota_compare_ui','week_cycle'):
+    for name in ('native_landing','tray_history','silent_notify','storage_locations','program_location','wsl_codex','animation_updates','chat_protocol','chat_config','chat_transport','chat_probe','data_page_motion','material_removal','settings_controls','choice_controls','number_controls','quota_history','quota_compare_ui','week_cycle'):
         source=compile((ROOT/'app'/f'{name}.py').read_text(encoding='utf-8-sig'),name+'.py','exec')
         result[name]=signature(source)==signature(archive.extract(name))
     for name in ('installation_cleanup','reset_presentation','reset_card','quick_actions','codex_startup','decode_runtime','program_updates','program_update_apply','material_probe','material_store','material_controller','card_surface_probe','linked_report_motion','sustained_probe','continuous_work','sustained_player','sustained_assets','native_coordinates','interaction_probe'):

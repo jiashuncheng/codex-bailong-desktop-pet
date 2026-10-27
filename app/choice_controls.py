@@ -21,6 +21,10 @@ class ChoiceCombo(QComboBox):
         if self._panel:
             panel=self._panel;self._panel=None;panel.dismiss()
     def hideEvent(self,event):self.hidePopup();super().hideEvent(event)
+    def wheelEvent(self,event):
+        # Scrolling a settings page must never edit the value under the cursor,
+        # including when a previous click left this choice focused.
+        event.ignore()
     def display_text(self):return self.currentText()
     def paintEvent(self,event):
         p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -86,6 +90,8 @@ class ChoiceSheet(QFrame):
     def finished(self):
         if self.closing:self.hide();self.deleteLater()
     def eventFilter(self,obj,event):
+        if event.type()==QEvent.Type.Wheel:
+            if not self.rect().contains(self.mapFromGlobal(event.globalPosition().toPoint())):self.owner.hidePopup()
         if event.type()==QEvent.Type.KeyPress:
             if event.key()==Qt.Key.Key_Escape:self.owner.hidePopup();self.owner.setFocus();return True
             if obj is self.search and event.key()==Qt.Key.Key_Down:self.list.setFocus();return True

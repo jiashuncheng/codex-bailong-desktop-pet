@@ -12,6 +12,7 @@ from chat_transport import ChatStream
 app = QCoreApplication.instance() or QCoreApplication([])
 KEY = 'synthetic-private-key-123'
 REQUESTS = []
+CANCEL_RELEASE = threading.Event()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -52,7 +53,7 @@ class Handler(BaseHTTPRequestHandler):
         elif case == 'malformed':
             chunks = [b'data: []\n\n']
         elif case == 'cancel':
-            chunks *= 15
+            chunks = chunks[:1]*15+chunks[1:]
         elif case == 'unfinished':
             chunks = chunks[:1]
         self.send_response(code)
@@ -62,9 +63,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(sum(map(len, chunks))))
         self.end_headers()
         try:
-            for chunk in chunks:
+            for index,chunk in enumerate(chunks):
                 self.wfile.write(chunk)
                 self.wfile.flush()
+                if case=='cancel' and index==0:CANCEL_RELEASE.wait(2)
                 time.sleep(.015)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
@@ -180,13 +182,15 @@ class TransportTests(unittest.TestCase):
         self.assertIn('重定向', errors[0])
 
     def test_cancel_prevents_late_updates(self):
+        CANCEL_RELEASE.clear()
         stream = ChatStream();done=[];errors=[];delta=[]
         stream.done.connect(done.append);stream.failed.connect(errors.append);stream.delta.connect(delta.append)
         stream.start(dict(base_url=self.url,model='cancel',timeout=5), KEY, [])
         for _ in range(40):
             QTest.qWait(10)
             if delta:break
-        stream.cancel();count=len(delta);QTest.qWait(350)
+        stream.cancel();CANCEL_RELEASE.set();count=len(delta);QTest.qWait(350)
+        self.assertTrue(delta)
         self.assertFalse(done or errors);self.assertEqual(len(delta),count);self.assertEqual(stream.key,'')
         stream.deleteLater()
 

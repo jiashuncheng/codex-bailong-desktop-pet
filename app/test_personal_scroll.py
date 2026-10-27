@@ -57,6 +57,52 @@ class ScrollTests(unittest.TestCase):
             APP.sendEvent(row,event)
         wheel(-120);self.assertNotEqual(before,list(self.b.status_view.rows))
         wheel(120);self.assertEqual(before,list(self.b.status_view.rows))
+    def test_capsule_timer_covers_all_sessions_and_hover_and_disabled_pause(self):
+        self.b.set_mode('mini');self.b.size_transition.complete();APP.processEvents()
+        self.assertTrue(self.b.status_view.isHidden())
+        self.b.conversation_timer.setInterval(30)
+        seen=set();pages=set();size=self.b.size();island=self.b.island
+        with patch('PySide6.QtGui.QCursor.pos',return_value=QPoint(-10000,-10000)):
+            for _ in range(30):
+                QTest.qWait(15)
+                chosen,_=self.b.roster.selection(self.b.status_indicator.unread)
+                seen.update(v['session'] for v in chosen);pages.add(self.b.roster.page)
+                if len(seen)==5:break
+        self.b.conversation_timer.stop()
+        self.assertEqual(len(seen),5);self.assertGreater(len(pages),1)
+        self.assertIs(self.b.island,island);self.assertEqual(self.b.size(),size)
+        self.assertTrue(self.b.is_island());self.assertTrue(self.b.status_view.isHidden())
+        page=self.b.roster.page
+        with patch('PySide6.QtGui.QCursor.pos',return_value=island.mapToGlobal(QPoint(5,5))):self.b._auto_cycle_conversations()
+        self.assertEqual(self.b.roster.page,page)
+        self.b.conversation_auto_scroll=False
+        with patch('PySide6.QtGui.QCursor.pos',return_value=QPoint(-10000,-10000)):self.b._auto_cycle_conversations()
+        self.assertEqual(self.b.roster.page,page)
+
+    def test_capsule_mixed_status_colors_follow_rotating_sessions(self):
+        from ui_theme import ISLAND_RUNNING,ON_ISLAND,ISLAND,contrast
+        from PySide6.QtGui import QColor
+        b=self.b;b.roster.items.clear()
+        b.roster.observe(dict(session='done',kind='complete'))
+        b.status_indicator.unread=[('done','turn')]
+        for sid in ('run-a','run-b'):b.roster.observe(dict(session=sid,state='working'))
+        b.set_mode('mini');b.size_transition.complete();APP.processEvents()
+        def verify():
+            selected,extra=b.roster.selection(b.status_indicator.unread)
+            label=b.island.text;formats=label.status_layout.formats()
+            self.assertEqual(len(formats),len(selected))
+            for fmt,item in zip(formats,selected):
+                expected=ISLAND_RUNNING if item['state']=='working' else ON_ISLAND
+                self.assertEqual(fmt.format.foreground().color(),QColor(expected))
+            self.assertTrue(label.text().endswith('+1'));self.assertEqual(extra,1)
+            image=label.grab().toImage()
+            # Verify the actual painted glyphs, not just color metadata.
+            pixels={image.pixelColor(x,y).name() for x in range(image.width()) for y in range(image.height())}
+            for fmt in formats:self.assertIn(fmt.format.foreground().color().name(),pixels)
+        verify()
+        with patch('PySide6.QtGui.QCursor.pos',return_value=QPoint(-10000,-10000)):
+            for _ in range(4):b._auto_cycle_conversations();verify()
+        self.assertGreaterEqual(contrast(ISLAND_RUNNING,ISLAND),4.5)
     def test_new_waiting_still_takes_priority(self):
         self.b.cycle_conversations()
         sid='11111111-2222-4333-8444-000000000004'

@@ -22,7 +22,7 @@ class QuotaComparePresentationTests(unittest.TestCase):
    m=cycle_messages(row(**changes),{});self.assertIn(expected,m['title']);self.assertFalse(m['show_coverage'])
  def test_real_change_is_labeled_as_estimate_not_official_quota(self):
   m=cycle_messages(row(drop=35,change=-30,baseline_count=2),{})
-  self.assertIn('推测总量减少 30.0%',m['title']);self.assertIn('前 2 轮',m['reason']);self.assertFalse(m['show_coverage'])
+  self.assertIn('推测总量减少 30.0%',m['title']);self.assertIn('上一周期',m['reason']);self.assertNotIn('前 2 轮',m['reason']);self.assertFalse(m['show_coverage'])
  def test_disclosure_selection_and_hover_preserve_view_geometry(self):
   v=QuotaCompareView();v.setFixedWidth(246);v.set_snapshot({'quota_history':{'cycles':[row(),row(id='old',closed=True,start=1791695200)]}});v.show();APP.processEvents()
   try:

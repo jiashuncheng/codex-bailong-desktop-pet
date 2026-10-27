@@ -40,6 +40,31 @@ def painted_text(widget):
 
 
 class QuotaCardTests(unittest.TestCase):
+    def test_increase_and_decline_use_distinct_green_and_red_badges(self):
+        cards=[]
+        try:
+            for value in (-19,15):
+                card=QuotaSummary([dict(name='一周',remaining=69)],anomaly=dict(change=value,description='本轮与上一周期比较'))
+                cards.append(card)
+            self.assertEqual(cards[0].alert_badge.text(),'-19%')
+            self.assertEqual(cards[1].alert_badge.text(),'+15%')
+            self.assertIn('#ffebec',cards[0].alert_badge.styleSheet())
+            self.assertIn('#e6f6eb',cards[1].alert_badge.styleSheet())
+            self.assertIn('上涨',cards[1].alert_badge.accessibleName())
+        finally:
+            for card in cards:card.deleteLater()
+            drain()
+    def test_decline_badge_is_inside_week_row_and_does_not_increase_card_height(self):
+        for windows in ([dict(name='一周',remaining=73)],
+                        [dict(name='5小时',remaining=40),dict(name='一周',remaining=73)]):
+            alert=dict(change=-25,description='较上一轮推测总量下降25%',text='推测总量 -25%')
+            card=QuotaSummary(windows,anomaly=alert);card.setFixedWidth(121);self.windows.append(card);card.show();drain()
+            self.assertEqual(card.height(),102);self.assertEqual(card.alert_badge.text(),'-25%')
+            self.assertTrue(card.row_rect(card.week_index).contains(card.alert_rect()))
+            events=[];card.anomalyRequested.connect(lambda:events.append('comparison'))
+            QTest.mouseClick(card.alert_badge,Qt.MouseButton.LeftButton)
+            self.assertEqual(events,['comparison']);self.assertIn('下降',card.accessibleDescription())
+
     def setUp(self):self.windows=[]
     def tearDown(self):
         for widget in self.windows:widget.close();widget.deleteLater()

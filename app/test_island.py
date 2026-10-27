@@ -81,6 +81,9 @@ class ModeTests(unittest.TestCase):
     def setUp(self):self.b=CompactBubble();self.b.move(100,550);self.b.show();APP.processEvents()
     def tearDown(self):self.b.size_transition.complete();self.b.close();self.b.deleteLater();APP.processEvents()
     def finish(self):self.b.size_transition.complete();APP.processEvents()
+    def test_stale_auto_collapse_never_changes_minimal_into_capsule(self):
+        self.b.auto_compact=True;self.b.bubble_mode='minimal';self.b.redraw()
+        self.assertTrue(self.b.is_minimal());self.assertFalse(self.b.is_island())
     def test_auto_idle_and_real_task_update_restore_original(self):
         self.b.evaluate_mode(self.b.last_task_update+91);self.finish();self.assertTrue(self.b.is_island())
         self.b.task_updated(dict(state='working'));self.finish();self.assertFalse(self.b.is_island())

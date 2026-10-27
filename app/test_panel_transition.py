@@ -10,8 +10,41 @@ APP=QApplication.instance() or QApplication([])
 
 
 class PanelTests(unittest.TestCase):
+    def test_handoff_bitmap_is_submitted_before_hiding_the_live_card(self):
+        from unittest.mock import patch
+        events=[];original=self.b.setWindowOpacity
+        def opacity(value):events.append(('opacity',value));return original(value)
+        def publish(widget,image):events.append(('raster',image is not None));return True
+        with patch('panel_transition.QApplication.platformName',return_value='windows'),patch('panel_transition.present_barrier'),\
+             patch('native_landing.publish',side_effect=publish),patch.object(self.b,'setWindowOpacity',side_effect=opacity):
+            self.b.toggle_details()
+        self.assertLess(events.index(('raster',True)),events.index(('opacity',0.)))
+    def test_native_canvas_is_invisible_until_start_frame_is_painted(self):
+        from unittest.mock import patch
+        b=self.b;b.setWindowOpacity(.8);opacity=b.windowOpacity();observed=[];original=b.setGeometry
+        def move(*args):
+            observed.append((b.windowOpacity(),b.size_transition.landing.image is not None));return original(*args)
+        with patch('panel_transition.QApplication.platformName',return_value='windows'),patch('panel_transition.present_barrier'),patch.object(b,'setGeometry',side_effect=move):
+            b.toggle_details()
+        self.assertTrue(observed);self.assertTrue(all(value==0 and guard for value,guard in observed))
+        self.assertEqual(b.windowOpacity(),opacity);b.size_transition.complete()
+    def test_native_resize_failure_restores_user_opacity(self):
+        from unittest.mock import patch
+        b=self.b;b.setWindowOpacity(.7);opacity=b.windowOpacity()
+        with patch('panel_transition.QApplication.platformName',return_value='windows'),patch('panel_transition.present_barrier'),patch.object(b,'setGeometry',side_effect=RuntimeError('synthetic native resize')):
+            with self.assertRaises(RuntimeError):b.toggle_details()
+        self.assertEqual(b.windowOpacity(),opacity);b.size_transition.cancel()
     def setUp(self):
+        from unittest.mock import patch
+        motion=patch('settings_controls.motion_enabled',return_value=True)
+        motion.start();self.addCleanup(motion.stop)
         self.b=CompactBubble();self.b.status='检查中';self.b.redraw();self.b.show();APP.processEvents()
+    def test_reduced_motion_finishes_equal_size_navigation_without_animation(self):
+        from unittest.mock import patch
+        b=self.b;b.show_page('chat',QWidget());b.size_transition.complete()
+        with patch('settings_controls.motion_enabled',return_value=False):b.show_page('settings',QWidget())
+        self.assertFalse(b.size_transition.running);self.assertTrue(b.content.isVisible())
+        self.assertEqual(b.panel_page,'settings')
     def tearDown(self):
         self.b.size_transition.complete();self.b.close();self.b.deleteLater();APP.processEvents()
     def test_details_and_collapse_have_real_intermediate_sizes(self):
@@ -76,6 +109,31 @@ class PanelTests(unittest.TestCase):
         b.size_transition.complete();self.assertEqual(b.size(),size)
         b.show_page('chat',chat);self.assertTrue(b.size_transition.running);self.assertEqual(b.size(),size)
         b.size_transition.complete();self.assertEqual(draft.text(),'draft')
+    def test_expanded_navigation_keeps_one_size_and_only_moves_the_body(self):
+        b=self.b;b.toggle_details();b.size_transition.complete();original=QRect(b.geometry())
+        chat=QWidget();QLineEdit('draft',chat)
+        for change in (lambda:b.show_page('chat',chat),lambda:b.show_page('settings',QWidget()),b.return_to_status):
+            change();t=b.size_transition
+            self.assertEqual(t.target_rect,original)
+            self.assertTrue(t.same_size_fade)
+            nav=b.layout.itemAt(1).widget()
+            self.assertGreater(t.cover.y(),nav.geometry().bottom())
+            for ms in (0,40,80,120):
+                t.animation.setCurrentTime(ms)
+                self.assertEqual(b.geometry(),original)
+                self.assertEqual(t.visible_geometry(),original)
+                self.assertEqual(b.grab().toImage().pixelColor(b.rect().center()).alpha(),255)
+            t.complete();self.assertEqual(b.geometry(),original)
+    def test_editor_handoff_preserves_body_origin_and_rounded_window_corners(self):
+        b=self.b;b.toggle_details();b.size_transition.complete()
+        for change in (lambda:b.show_page('chat',QWidget()),lambda:b.show_page('settings',QWidget()),b.return_to_status):
+            change();t=b.size_transition;body=QRect(t.cover.geometry())
+            for ms in (0,40,80,120):
+                t.animation.setCurrentTime(ms);image=b.grab().toImage();ratio=image.devicePixelRatioF()
+                for x,y in ((0,b.height()-1),(b.width()-1,b.height()-1),(2,b.height()-3)):
+                    self.assertEqual(image.pixelColor(round(x*ratio),round(y*ratio)).alpha(),0)
+            t.complete()
+            self.assertEqual(t.cover.geometry(),body,'Handoff moved the body raster over the header')
     def test_text_remains_dark_under_a_dark_system_palette(self):
         old=APP.palette();dark=QPalette(old)
         for role in (QPalette.ColorRole.WindowText,QPalette.ColorRole.Text,QPalette.ColorRole.ButtonText):dark.setColor(role,QColor('white'))
@@ -162,7 +220,9 @@ class PanelTests(unittest.TestCase):
         b=self.b;rec=Recorder();b.installEventFilter(rec)
         for change in (b.toggle_details,lambda:b.show_page('settings',QWidget()),lambda:b.show_status(False),lambda:b.set_mode('mini'),lambda:b.set_mode('auto')):
             rec.events=[];change();t=b.size_transition
-            self.assertTrue(t.running);self.assertTrue(rec.events)
+            self.assertTrue(t.running)
+            if t.same_size_fade:self.assertFalse(rec.events)
+            else:self.assertTrue(rec.events)
             self.assertTrue(all(not enabled for _,enabled in rec.events),rec.events)
             rec.events=[];t.complete()
             self.assertTrue(all(not enabled for _,enabled in rec.events),rec.events)

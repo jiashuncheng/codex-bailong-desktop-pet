@@ -10,6 +10,12 @@ from quota_history import WEEK,migrate,store,record_line,partition,summarize_cyc
 
 
 class QuotaHistoryTests(unittest.TestCase):
+    def test_notification_defaults_and_custom_threshold_validation(self):
+        from desktop_core import normalized
+        self.assertEqual(normalized({})['quota_decline_threshold'],10)
+        self.assertEqual(normalized({})['quota_increase_threshold'],15)
+        self.assertEqual(normalized(dict(quota_decline_threshold=float('nan')))['quota_decline_threshold'],10)
+        self.assertEqual(normalized(dict(quota_increase_threshold=999))['quota_increase_threshold'],100)
     def setUp(self):
         self.db=sqlite3.connect(':memory:');migrate(self.db)
         self.db.execute('''CREATE TABLE usage (stamp REAL,tokens INTEGER,model TEXT,
@@ -46,6 +52,33 @@ class QuotaHistoryTests(unittest.TestCase):
         rows=summarize_cycles(self.db,self.start+WEEK+172900)
         self.assertIsNone(rows[0]['change'])
         self.assertIn('模型',rows[0]['comparison_reason'])
+    def test_baseline_is_previous_cycle_not_median_or_an_older_match(self):
+        self.cycle(self.start,1200);self.cycle(self.start+WEEK,600);self.cycle(self.start+2*WEEK,300)
+        rows=summarize_cycles(self.db,self.start+2*WEEK+172900)
+        self.assertEqual(rows[0]['change'],-50);self.assertEqual(rows[0]['baseline'],rows[1]['estimated_total'])
+        self.assertEqual(rows[0]['baseline_cycle_id'],rows[1]['id']);self.assertEqual(rows[0]['baseline_count'],1)
+        self.db.execute("UPDATE usage SET model='model-b' WHERE stamp>? AND stamp<?",(self.start+WEEK,self.start+2*WEEK))
+        rows=summarize_cycles(self.db,self.start+2*WEEK+172900)
+        self.assertIsNone(rows[0]['change']);self.assertIn('上一周期',rows[0]['comparison_reason'])
+    def test_higher_estimate_has_a_positive_change_notice(self):
+        self.cycle(self.start,600);self.cycle(self.start+WEEK,1200)
+        rows=summarize_cycles(self.db,self.start+WEEK+172900)
+        self.assertEqual(rows[0]['change'],100);self.assertEqual(anomaly(rows,self.start+WEEK+172900)['change'],100)
+    def test_separate_custom_thresholds_include_exact_ten_and_fifteen_percent_boundaries(self):
+        self.cycle(self.start);self.cycle(self.start+WEEK,600)
+        now=self.start+WEEK+172900;rows=summarize_cycles(self.db,now);current,previous=rows[:2]
+        for ratio,decline,increase,expected in ((.9,10,15,-10),(.9,11,15,None),(1.15,10,15,15),(1.15,10,16,None)):
+            current['estimated_total']=previous['estimated_total']*ratio
+            current['estimate_low']=current['estimated_total']*.99;current['estimate_high']=current['estimated_total']*1.01
+            warning=anomaly(rows,now,decline,increase)
+            self.assertEqual(warning['change'] if warning else None,expected)
+    def test_visible_warning_uses_current_settings_even_without_a_cached_alert(self):
+        self.cycle(self.start);self.cycle(self.start+WEEK,972)
+        now=self.start+WEEK+172900;rows=summarize_cycles(self.db,now)
+        data=dict(quota_history=dict(cycles=rows,anomaly=None))
+        windows=[dict(name='一周',plan='pro',resetsAt=rows[0]['reset_at'])]
+        self.assertEqual(visible_anomaly(data,windows,now)['change'],-19)
+        self.assertIsNone(visible_anomaly(data,windows,now,decline_threshold=25))
     def test_sustained_refill_splits_but_single_delayed_read_does_not(self):
         deadline=self.start+WEEK
         def sample(t,r):return (self.start+t,deadline,r,'log','',None,'')
@@ -111,6 +144,44 @@ class QuotaHistoryTests(unittest.TestCase):
             (self.start+300,self.start+WEEK+260,80,'log','',None,''),
             (self.start+400,self.start+WEEK,75,'live','',None,'')])
         self.assertEqual(len(rows),1);self.assertEqual(len(rows[0]['samples']),4)
+    def test_restart_boundary_without_refill_keeps_full_observation_coverage(self):
+        s=self.start;deadline=s+WEEK;restart=s+200000
+        for stamp,r,boundary in [(s+1,100,None),(s+100000,62,None),
+                (restart,62,restart),(restart+100,60,restart)]:
+            store(self.db,stamp,deadline,r,'live',plan='pro',boundary=boundary,reset_kind='extra')
+        self.token(s+50000,3800);self.token(restart+50,200)
+        rows=summarize_cycles(self.db,restart+101)
+        self.assertEqual(len(rows),1);self.assertFalse(rows[0]['closed'])
+        self.assertEqual(rows[0]['drop'],40);self.assertEqual(rows[0]['used'],4000)
+        self.assertEqual(rows[0]['estimated_total'],10000);self.assertTrue(rows[0]['eligible'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM quota_observations').fetchone()[0],4)
+    def test_restart_boundary_with_falling_balance_and_deadline_jitter_is_not_reset(self):
+        s=self.start;deadline=s+WEEK;restart=s+200000
+        rows=partition([(s+1,deadline,100,'log','pro',None,''),
+            (s+100000,deadline,62,'log','',None,''),
+            (restart,deadline+12,61,'live','pro',restart,'extra')])
+        self.assertEqual(len(rows),1);self.assertEqual(len(rows[0]['samples']),3)
+        self.assertEqual(rows[0]['samples'][-1][2],61)
+    def test_confirmed_boundary_with_real_refill_still_starts_new_cycle(self):
+        s=self.start;deadline=s+WEEK;refill=s+200000
+        rows=partition([(s+1,deadline,100,'live','pro',None,''),
+            (s+100000,deadline,40,'live','pro',None,''),
+            (refill,deadline,85,'live','pro',refill,'extra'),
+            (refill+100,deadline,80,'live','pro',refill,'extra')])
+        self.assertEqual(len(rows),2);self.assertEqual(rows[-1]['start'],refill)
+        self.assertEqual(rows[-1]['kind'],'extra');self.assertEqual(rows[-1]['samples'][0][2],85)
+    def test_old_closed_cache_cannot_override_a_rejoined_live_cycle(self):
+        s=self.start;deadline=s+WEEK;restart=s+200000
+        for stamp,r,boundary in [(s+1,100,None),(s+100000,62,None),
+                (restart,62,restart),(restart+100,60,restart)]:
+            store(self.db,stamp,deadline,r,'live',plan='pro',boundary=boundary)
+        self.token(s+50000,3800);self.token(restart+50,200)
+        old=dict(summarize_cycles(self.db,restart+101)[0],closed=True,estimated_total=123)
+        self.db.execute('INSERT INTO quota_cycle_snapshots VALUES(?,?)',(old['id'],json.dumps(old)))
+        result=snapshot(self.db,None,restart+101,True,dict(pending=False,errors=0))
+        self.assertEqual(len(result['cycles']),1);self.assertFalse(result['cycles'][0]['closed'])
+        self.assertEqual(result['cycles'][0]['estimated_total'],10000)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM quota_observations').fetchone()[0],4)
     def test_missing_baseline_uses_observed_delta_not_full_cycle_division(self):
         start=self.start;deadline=start+WEEK
         self.token(start+10,5000) # Before the first quota sample; excluded from slope.

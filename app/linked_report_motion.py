@@ -34,11 +34,11 @@ class LinkedReportMotion(QObject):
     def begin(self):
         r=self.report
         if not r.isVisible() or not r.requested or r._animating:return
-        if hasattr(r,'page_fade'):r.page_fade.clear()
         if self.active:self.cancel()
         self.release();self.active=True;self.committed=False;self.progress=0.
         self.status_tracking=False;self.tracked_rect=None
         self.start=QRectF(r.content_geometry());self.old=self.capture()
+        if hasattr(r,'page_fade'):r.page_fade.clear()
         r.refresh_button.freeze_motion('host')
         if r.plot:r.plot.freeze_reveal()
         # Present the original pixels on an independent native surface before
@@ -53,16 +53,17 @@ class LinkedReportMotion(QObject):
         if not self.active:return
         r=self.report;enabled=r.updatesEnabled();r.setUpdatesEnabled(False)
         try:
-            r.surface.hide();r.surface.setFixedWidth(host.width())
-            if r.page=='overview' and getattr(r,'stats',None):r.stats.set_columns(host.width()-22)
-            r._measure_overview();area=(r.bubble.screen()).availableGeometry()
-            height=max(1,min(r.natural_height,host.y()-area.top()-r.GAP-r.PAD))
+            width=r.panel_width(host)
+            r.surface.hide();r.surface.setFixedWidth(width)
+            if r.page=='overview' and getattr(r,'stats',None):r.stats.set_columns(width-22)
+            r._measure_overview();target=r.geometry_for_host(host)
+            height=target.height()
             r.surface.setFixedHeight(height);r.layout.activate()
             for widget in [r.surface]+r.surface.findChildren(QWidget):
                 if widget.layout():widget.layout().activate()
             r.setUpdatesEnabled(enabled)
             self.new=self.capture();r.setUpdatesEnabled(False)
-            self.end=QRectF(host.x(),host.y()-r.GAP-height,host.width(),height)
+            self.end=QRectF(target)
             self.canvas=self.start.united(self.end).adjusted(-r.PAD,-r.PAD,r.PAD,r.PAD).toAlignedRect()
             self.committed=True
             ratio=r.devicePixelRatioF();self.frame=QPixmap(pixel_size(self.canvas.width(),ratio),pixel_size(self.canvas.height(),ratio));self.frame.setDevicePixelRatio(ratio);self.weighted=QPixmap(self.frame.size());self.weighted.setDevicePixelRatio(ratio)
@@ -80,8 +81,7 @@ class LinkedReportMotion(QObject):
         if self.active:self.commit(target);self.status_tracking=True
     def track_status(self,host,progress):
         if not self.active or not self.status_tracking:return
-        r=self.report;area=r.bubble.screen().availableGeometry();height=max(1,min(r.natural_height,host.y()-area.top()-r.GAP-r.PAD))
-        self.tracked_rect=QRectF(host.x(),host.y()-r.GAP-height,host.width(),height)
+        r=self.report;self.tracked_rect=QRectF(r.geometry_for_host(host))
         self.advance(min(.999999,float(progress)))
     def finish_status(self):
         if self.active and self.status_tracking:self.finish()

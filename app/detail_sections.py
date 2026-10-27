@@ -122,13 +122,14 @@ class DetailsTabs(QTabWidget):
             frame=self._page_fade.snapshot(old)
         self._page_fade.clear()
         if frame is None or new is None or not self.isVisible() or not motion_enabled():return
+        self._page_fade.hold(frame,self._page_stack.rect())
         widgets=[new]+new.findChildren(QWidget)
         for widget in reversed(widgets):
             widget.ensurePolished()
             if widget.layout():widget.layout().activate()
         QApplication.sendPostedEvents(None,QEvent.Type.LayoutRequest)
         target=self._page_fade.snapshot(new)
-        self._page_fade.present(frame,target,self._page_stack.rect())
+        self._page_fade.present(frame,target,self._page_stack.rect(),direction=1 if index>previous else -1)
         new.repaint()
     def hideEvent(self,event):
         if self._page_fade:self._page_fade.clear()

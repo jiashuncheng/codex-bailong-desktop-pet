@@ -124,10 +124,10 @@ def cycle_messages(c,history):
     elif c.get('model_share',0)<.7:title='模型使用较分散';reason='主模型用量占比达到 70% 后，再比较总量。'
     elif c.get('change') is not None:
         change=c['change'];title=('推测总量减少 ' if change<0 else '推测总量增加 ' if change>0 else '推测总量基本持平')+(f'{abs(change):.1f}%' if change else '')
-        reason=f"对照前 {c.get('baseline_count',1)} 轮条件相近的周期。"
+        reason='对照紧邻的上一周期，未混入更早的周期。'
     elif not estimate:title='有效用量不足';reason='缺少与额度读数对应的 Token，暂不能比较。'
     elif '套餐已变更' in c.get('comparison_reason',''):title='套餐变化，不直接比较';reason='改用当前套餐重新积累可比周期。'
-    else:title='暂无条件相近的历史周期';reason='等待同套餐、相近主模型及重置类型的历史记录。'
+    else:title='上一周期暂不能用于比较';reason=c.get('comparison_reason') or '等待上一周期的有效记录。'
     return dict(estimate=estimate_note,title=title,reason=reason,coverage=drop,show_coverage=show_coverage)
 
 
@@ -156,7 +156,7 @@ class QuotaCompareView(QWidget):
         self.detail=text_label();box.addWidget(self.detail)
         self.estimate_hint=text_label();self.estimate_hint.setWordWrap(True);box.addWidget(self.estimate_hint);layout.addWidget(metrics)
         comparison,box=self.section('quota_comparison_section')
-        box.addWidget(text_label('与历史周期比较总量',12,True))
+        box.addWidget(text_label('与上一周期比较总量',12,True))
         self.comparison=text_label('',12,True);self.comparison.setWordWrap(True);box.addWidget(self.comparison)
         self.comparison_reason=text_label();self.comparison_reason.setWordWrap(True);box.addWidget(self.comparison_reason)
         self.coverage_text=text_label();box.addWidget(self.coverage_text)
@@ -176,7 +176,7 @@ class QuotaCompareView(QWidget):
         self.rules_button.setAccessibleName('展开估算与历史对比条件');self.rules_button.setStyleSheet('QToolButton{'+FONT_CSS+f'border:0;border-radius:6px;padding:4px 2px;color:{PRIMARY};font-size:11px;}}QToolButton:hover{{background:{PANEL};}}QToolButton:pressed{{background:{SELECTED};}}');layout.addWidget(self.rules_button,0,Qt.AlignmentFlag.AlignLeft)
         rules=QWidget();box=QVBoxLayout(rules);box.setContentsMargins(0,0,0,0);box.setSpacing(6)
         self.note=text_label('估算总量：已记录的额度下降达到 5 个百分点，且对应 Token 记录完整、额度新鲜、读数连续。');self.note.setWordWrap(True);box.addWidget(self.note)
-        conditions=text_label('比较历史：两轮均观察至少 20 个百分点、至少 3 个不同余额读数；同套餐、相近主模型与输入输出比例，且重置类型一致。');conditions.setWordWrap(True);box.addWidget(conditions)
+        conditions=text_label('仅对比上一周期：两轮均观察至少 20 个百分点、至少 3 个不同余额读数；同套餐、相近主模型与输入输出比例，且重置类型一致。');conditions.setWordWrap(True);box.addWidget(conditions)
         caveat=text_label('主模型至少占 70%。缓存、任务差异和其他设备用量会影响估算，不能据此确认官方额度缩水。');caveat.setWordWrap(True);box.addWidget(caveat)
         self.quality=text_label();self.quality.setWordWrap(True);box.addWidget(self.quality)
         self.rules=AnimatedDisclosure(rules,background=PANEL);layout.addWidget(self.rules)

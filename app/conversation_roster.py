@@ -39,6 +39,8 @@ class ConversationRoster:
         for sid in disposable[64:]:self.items.pop(sid,None)
     def selection(self,unread):
         pending=list(dict.fromkeys(session_id(s) for s,t in reversed(unread)))
+        # An older completion must not replace this session's new running turn.
+        pending=[sid for sid in pending if not (self.items.get(sid,{}).get('state') in ACTIVE and self.items[sid].get('turn') and all(t!=self.items[sid]['turn'] for s,t in unread if session_id(s)==sid))]
         if set(pending)-self.pending:
             self.page=0;self.rotating=None;self.next_slot=0;self.cursor=None
         self.pending=set(pending)

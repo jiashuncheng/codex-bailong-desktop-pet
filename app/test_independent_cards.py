@@ -37,6 +37,9 @@ class IndependentTests(unittest.TestCase):
         p=self.pet;p.apply_settings(dict(character_visible=False));p.toggle_pet();self.assertFalse(p.bubble.isVisible())
         p.bubble.redraw();self.assertFalse(p.bubble.isVisible());p.recover();self.assertTrue(p.bubble.isVisible());self.assertFalse(p.isVisible())
         p.apply_settings(dict(character_visible=True));self.assertTrue(p.isVisible());self.assertTrue(p.tick.isActive());self.assertIsNotNone(p.player.thread)
+    def test_fullscreen_yield_hides_surfaces_but_tray_owner_stays_alive(self):
+        p=self.pet;p.set_fullscreen_yield(True);self.assertTrue(p._fullscreen_yielded);self.assertFalse(p.isVisible());self.assertFalse(p.bubble.isVisible())
+        p.set_fullscreen_yield(False);self.assertFalse(p._fullscreen_yielded);self.assertTrue(p.isVisible());self.assertTrue(p.bubble.isVisible())
     def test_modes_are_persistent_peers_and_minimal_has_only_one_button(self):
         p=self.pet;p.apply_settings(dict(character_visible=False));b=p.bubble
         for mode,size in [('minimal',54),('mini',222),('minimal',54),('auto',268)]:
@@ -75,5 +78,9 @@ class IndependentTests(unittest.TestCase):
         class Holder:pet=p
         self.assertTrue(VideoYield.owned(Holder(),p.bubble));self.assertEqual(normalized({'bubble_mode':'minimal'})['bubble_mode'],'minimal')
         self.assertEqual(normalized({'bubble_mode':'garbage'})['bubble_mode'],'auto')
+        self.assertEqual(normalized({'video_fullscreen_yield':False})['fullscreen_yield_mode'],'off')
+        self.assertEqual(normalized({'video_fullscreen_yield':True})['fullscreen_yield_mode'],'video')
+        self.assertEqual(normalized({'fullscreen_yield_mode':'all'})['fullscreen_yield_mode'],'game_video')
+        self.assertFalse(normalized({'fullscreen_yield_mode':'all'})['video_fullscreen_yield'])
 
 if __name__=='__main__':unittest.main()

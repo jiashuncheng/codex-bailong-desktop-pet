@@ -65,6 +65,17 @@ class ControlsTests(unittest.TestCase):
         self.assertIs(panel.parentWidget(),host);self.assertFalse(panel.isWindow());self.assertTrue(host.rect().contains(panel.geometry()))
         panel.search.setText('选项 11');self.assertFalse(panel.list.item(11).isHidden());self.assertTrue(panel.list.item(0).isHidden())
         panel.choose(panel.list.item(11));self.assertEqual(choice.currentData(),11);self.assertIsNone(choice._panel)
+    def test_choice_wheel_scrolls_outer_page_without_editing_even_when_focused(self):
+        from PySide6.QtWidgets import QScrollArea
+        host=QWidget();host.resize(360,300);outer=QVBoxLayout(host);area=QScrollArea();area.setWidgetResizable(True);outer.addWidget(area)
+        body=QWidget();layout=QVBoxLayout(body);choice=ChoiceCombo();choice.addItems(['A','B','C']);layout.addWidget(choice);layout.addSpacing(1200);area.setWidget(body)
+        host.show();APP.processEvents()
+        for focused in (False,True):
+            choice.setFocus() if focused else choice.clearFocus()
+            area.verticalScrollBar().setValue(0);APP.processEvents()
+            QTest.wheelEvent(host.windowHandle(),choice.mapTo(host,choice.rect().center()),QPoint(0,-120));APP.processEvents()
+            self.assertEqual(choice.currentIndex(),0)
+            self.assertGreater(area.verticalScrollBar().value(),0)
     def test_settings_still_keep_drafts_and_only_apply_on_request(self):
         from desktop_settings import SettingsDialog
         pet=PetStub()

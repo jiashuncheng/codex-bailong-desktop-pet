@@ -1,6 +1,6 @@
 # 项目协作
 
-这是 Windows/macOS 共用的白龙桌宠个性化源码工程。当前 v0.10.1 / UI88，合入上游 v1.1.0（0b36eb8），保留个人 Windows 修改与 Mac 适配。先阅读 README.md、NOTICE.md、docs/DEVELOPMENT.md 与 docs/迭代历史.txt。
+这是 Windows/macOS 共用的白龙桌宠个性化源码工程。当前 v0.13.0 / UI91，合入上游 v1.2.0（ba0b0a3），保留个人 Windows 修改与 Mac 适配。先阅读 README.md、NOTICE.md、docs/DEVELOPMENT.md 与 docs/迭代历史.txt。
 
 - 保持原角色比例、清晰度和动画播放边界；自动动作不发声。
 - 未读完成提醒优先于视频全屏让位；手动关闭置顶不得自动重开。
@@ -28,3 +28,6 @@
 
 - 素材可选本地高清快照与新目录迁移；界面状态必须使用已缓存的校验结果，实际启用前重新校验。
 - WSL 和 Windows 安装维护仅在 Windows 启用；Mac 系统路径通过 platform_support，保留普通窗口不抢焦点。
+
+- Windows 可主动选择游戏和视频全屏隐藏，该模式中完成提醒不打断全屏；默认仅视频模式维持原完成优先级。Mac 保留视频模式和普通窗口不抢焦点。
+- 上游修复公开后才对相应 issue 宣布公开交付；源码合并与本机实装不等同于重新发布冻结安装包。保留有效首次安装入口。

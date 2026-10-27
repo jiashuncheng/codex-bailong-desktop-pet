@@ -1,11 +1,11 @@
 """Small status island and quota satellite; no per-frame window movement."""
 import math,time,re
 from PySide6.QtCore import Qt,QRectF,QSize,QTimer,Signal,QPointF
-from PySide6.QtGui import QColor,QPainter,QPen,QFont,QFontMetrics,QFontMetricsF
+from PySide6.QtGui import QColor,QPainter,QPen,QFont,QFontMetrics,QFontMetricsF,QTextLayout,QTextCharFormat
 from PySide6.QtWidgets import QWidget,QHBoxLayout,QLabel,QToolButton
 from typography import ui_font,FONT_CSS
 from reset_watch import epoch
-from ui_theme import SURFACE,INK,MUTED,ACCENT,TRACK,ISLAND,ON_ISLAND,QUOTA_WEEK,QUOTA_LOW
+from ui_theme import SURFACE,INK,MUTED,ACCENT,TRACK,ISLAND,ON_ISLAND,ISLAND_RUNNING,QUOTA_WEEK,QUOTA_LOW
 from chart_reveal import ChartReveal
 
 WIDTH=222
@@ -39,6 +39,30 @@ def short_status(icon):
     if visual=='warning':return '已中断' if icon.state=='interrupted' else '未连接'
     return '待命'
 
+class IslandStatusText(QLabel):
+    """Keep plain accessible text while painting each session in its own color."""
+    def set_status(self,text,states):
+        self.setText(text)
+        self.status_layout=QTextLayout(text,self.font())
+        formats=[];offset=0
+        # Elision/shortening preserves slash-separated session order. Overflow
+        # counts and separators stay white, even after a running session.
+        for index,part in enumerate(text.split('/')):
+            label=re.split(r'\s*\+\d+$',part)[0]
+            color=ISLAND_RUNNING if index<len(states) and states[index] in ('thinking','working','responding','waiting') else ON_ISLAND
+            fmt=QTextCharFormat();fmt.setForeground(QColor(color))
+            span=QTextLayout.FormatRange();span.start=offset;span.length=len(label);span.format=fmt
+            formats.append(span);offset+=len(part)+1
+        self.status_layout.setFormats(formats)
+        self.status_layout.beginLayout();line=self.status_layout.createLine()
+        if line.isValid():line.setLineWidth(self.width())
+        self.status_layout.endLayout();self.update()
+    def paintEvent(self,event):
+        layout=getattr(self,'status_layout',None)
+        if layout is None:return super().paintEvent(event)
+        p=QPainter(self);p.setPen(QColor(ON_ISLAND))
+        layout.draw(p,QPointF(0,(self.height()-layout.boundingRect().height())/2))
+
 class StatusIsland(QWidget):
     expand=Signal()
     def __init__(self,icon,parent=None):
@@ -46,7 +70,7 @@ class StatusIsland(QWidget):
         self.setFixedSize(132,40);self.setCursor(Qt.CursorShape.PointingHandCursor)
         row=QHBoxLayout(self);row.setContentsMargins(12,0,10,0);row.setSpacing(5)
         row.addWidget(icon);icon.show()
-        self.text=QLabel();self.text.setFont(ui_font(12,True));self.text.setStyleSheet('color:'+ON_ISLAND+';background:transparent;')
+        self.text=IslandStatusText();self.text.setFont(ui_font(12,True));self.text.setStyleSheet('color:'+ON_ISLAND+';background:transparent;')
         self.text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents);row.addWidget(self.text,1)
         self.refresh()
     def refresh(self):
@@ -59,7 +83,8 @@ class StatusIsland(QWidget):
         if tail and metrics.horizontalAdvance(text)>budget:
             suffix=tail.group();text=metrics.elidedText(text[:tail.start()],Qt.TextElideMode.ElideRight,max(1,budget-metrics.horizontalAdvance(suffix)))+suffix
         else:text=metrics.elidedText(text,Qt.TextElideMode.ElideRight,budget)
-        self.text.setText(text);self.setAccessibleName('Codex · '+full+'；点击打开正常面板')
+        states=getattr(self.icon,'session_states',[]) if getattr(self.icon,'session_summary','') else [self.icon.state if self.icon.visual() in ('busy','waiting') else 'complete']
+        self.text.set_status(text,states);self.setAccessibleName('Codex · '+full+'；点击打开正常面板')
     def mouseReleaseEvent(self,event):
         window=self.window()
         if hasattr(window,'card_pointer_release') and window.card_pointer_release():event.accept();return

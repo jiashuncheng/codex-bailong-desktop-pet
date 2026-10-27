@@ -17,7 +17,8 @@ def run(destination):
     p=DesktopPet(monitor=False);p.apply_settings(dict(wandering=False,random_actions=False,self_talk=False,video_fullscreen_yield=False,update_checks=False))
     backdrop=QWidget(None,Qt.WindowType.Tool|Qt.WindowType.FramelessWindowHint);backdrop.setStyleSheet('background:#182436;');backdrop.setGeometry(app.primaryScreen().availableGeometry());backdrop.show();backdrop.lower()
     p.update_quota([dict(name='一周',remaining=73,resetsAt=time.time()+86400)],time.time(),'demo')
-    b=p.bubble;b.token_snapshot=sample();b.redraw();b.move(150,650)
+    b=p.bubble;b.set_mode('auto');b.size_transition.complete();app.processEvents()
+    b.token_snapshot=sample();b.redraw();b.move(150,650)
     from daily_report import DailyReport
     r=DailyReport(b);b.report=r;r.set_snapshot(sample())
     folder=Path(destination).parent;folder.mkdir(parents=True,exist_ok=True)
@@ -25,13 +26,30 @@ def run(destination):
     routes=[('to_mini',lambda:b.set_mode('mini')),('to_normal',lambda:b.set_mode('auto')),('reuse_mini',lambda:b.set_mode('mini')),('reuse_normal',lambda:b.set_mode('auto')),
             ('to_minimal',lambda:b.set_mode('minimal')),('minimal_normal',lambda:b.set_mode('auto')),('report_open',r.open),
             ('status_expand',lambda:b.status_view.set_status('正在分析并编辑较长的测试内容，检查日报是否随着正常卡片高度连续变化。'*2)),('status_shrink',lambda:b.status_view.set_status('正在思考')),
-            ('details_report',b.toggle_details),('normal_report',b.toggle_details),('report_close',r.dismiss)]
+            ('report_models',lambda:r.set_page('models')),('report_cycle',lambda:r.set_page('cycle')),('report_overview',lambda:r.set_page('overview')),
+            ('report_to_capsule',lambda:b.set_mode('mini')),('capsule_report_open',r.open),('capsule_report_models',lambda:r.set_page('models')),
+            ('capsule_report_cycle',lambda:r.set_page('cycle')),('capsule_report_overview',lambda:r.set_page('overview')),
+            ('report_to_minimal',lambda:b.set_mode('minimal')),('minimal_report_open',r.open),('minimal_report_models',lambda:r.set_page('models')),
+            ('minimal_report_normal',lambda:b.set_mode('auto')),('normal_report_reopen',r.open),
+            ('details_report',b.toggle_details),('normal_report',b.toggle_details),('report_close',r.dismiss),
+            ('quota_alert_open',p.open_quota_comparison),('quota_alert_models',lambda:r.set_page('models')),
+            ('quota_alert_cycle',p.open_quota_comparison),('quota_alert_close',r.dismiss),
+            ('details_editor',b.toggle_details),('chat_editor',p.open_chat),('settings_editor',p.open_settings),('status_editor',b.return_to_status)]
     class Recorder(QObject):
         def eventFilter(self,obj,event):
             nonlocal preparation_exposures
             if event.type()==QEvent.Type.Paint and b.size_transition.preparing and obj is not b and isinstance(obj,QWidget) and b.content.isAncestorOf(obj) and obj.isVisible():preparation_exposures+=1
             if obj is b and event.type() in (QEvent.Type.Resize,QEvent.Type.Move) and b.size_transition.target_rect is not None:
-                native_events.append(dict(type=event.type().name,updates=b.updatesEnabled(),preparing=b.size_transition.preparing,active=b.size_transition.active))
+                t=b.size_transition
+                native_events.append(dict(type=event.type().name,updates=b.updatesEnabled(),preparing=t.preparing,active=t.active,opacity=b.windowOpacity(),progress=t.raw_progress))
+                if t.canvas_morph and t.raw_progress==0. and app.platformName()=='windows':
+                    checks['nativeCanvasHiddenUntilFirstPaint']=checks.get('nativeCanvasHiddenUntilFirstPaint',True) and b.windowOpacity()==0. and t.landing.image is not None
+            if obj is r and event.type()==QEvent.Type.Show and app.platformName()=='windows':
+                checks['reportNativeShowStartsInvisible']=checks.get('reportNativeShowStartsInvisible',True) and r.windowOpacity()==0.
+            t=b.size_transition
+            if obj is t.cover and event.type() in (QEvent.Type.Move,QEvent.Type.Paint) and t.same_size_fade and t.cover.isVisible():
+                nav=b.layout.itemAt(1).widget()
+                checks['bodyNeverOverlapsHeaderAtHandoff']=checks.get('bodyNeverOverlapsHeaderAtHandoff',True) and t.cover.y()>nav.geometry().bottom()
             return False
     recorder=Recorder();app.installEventFilter(recorder)
     def compositor_sample(surface,image,point,label):
@@ -91,9 +109,13 @@ def run(destination):
                 frames.append(dict(route=name,progress=round(r.follow.progress,4)));return
             if t.running:
                 seen=True;geometry=t.visible_geometry();record=dict(route=name,at=round(time.monotonic()-started,3),progress=round(t.raw_progress,4),card=[geometry.x(),geometry.y(),geometry.width(),geometry.height()])
+                if t.same_size_fade:
+                    image=b.grab().toImage();ratio=image.devicePixelRatioF()
+                    alpha=[image.pixelColor(round(x*ratio),round(y*ratio)).alpha() for x,y in ((0,b.height()-1),(b.width()-1,b.height()-1),(2,b.height()-3))]
+                    checks['pageSlidesKeepRoundedCorners']=checks.get('pageSlidesKeepRoundedCorners',True) and all(a==0 for a in alpha)
                 if r.follow.active and r.follow.committed:
                     host=t.morph.geometry(t.raw_progress);q=r.follow.geometry()
-                    aligned=abs(q.left()-host.left())<.6 and abs(q.width()-host.width())<.6 and abs(q.bottom()+r.GAP-host.top())<=1
+                    aligned=q.width()>=min(r.MIN_WIDTH,r.bubble.screen().availableGeometry().width()-2*r.PAD)-.6 and abs(q.center().x()-host.center().x())<1.1 and abs(q.bottom()+r.GAP-host.top())<=1
                     checks['reportAlignedEverySample']=checks.get('reportAlignedEverySample',True) and aligned
                     record['report']=[round(q.x(),2),round(q.y(),2),round(q.width(),2),round(q.height(),2)]
                     if previous_report:
@@ -108,9 +130,17 @@ def run(destination):
                 if frame_index%5==0:save(name+'-'+str(frame_index))
                 frames.append(record);frame_index+=1;return
             if r._animating:seen=True;return
+            if r.page_fade.animation.state()==r.page_fade.animation.State.Running:
+                seen=True
+                frames.append(dict(route=name,progress=round(r.page_fade.progress,4)))
+                if frame_index%2==0:save(name+'-'+str(frame_index))
+                frame_index+=1;return
             if t.landing.image is not None or r.follow.landing.image is not None:return
             if seen:
                 checks[name]=True;save(name+'-end')
+                checks['mainOpacityRestored']=checks.get('mainOpacityRestored',True) and b.windowOpacity()==1.
+                if name in ('details_editor','chat_editor','settings_editor','status_editor'):
+                    checks['sharedEditorSize']=checks.get('sharedEditorSize',True) and b.width()==360 and b.height()==480
                 if name in ('details_report','normal_report'):
                     compositor_sample(r,r.grab(),(r.width()/2,r.PAD+7),name+'-live')
                     checks['liveReportOpacityRestored']=checks.get('liveReportOpacityRestored',True) and r.windowOpacity()==1.

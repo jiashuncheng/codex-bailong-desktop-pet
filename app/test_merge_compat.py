@@ -34,3 +34,21 @@ class MergeCompatibilityTests(unittest.TestCase):
         alias=Path('/var')/state.relative_to('/private/var')
         with patch('platform_support.data_dir',return_value=alias):
             self.assertEqual(destination(self.fixture.root/'new-materials','materials',self.fixture.store.cache),self.fixture.root/'new-materials')
+
+class Upstream12PlatformTests(unittest.TestCase):
+    def test_mac_preserves_video_policy_when_given_windows_game_mode(self):
+        from desktop_core import normalized
+        with patch('sys.platform','darwin'):
+            values=normalized(dict(fullscreen_yield_mode='game_video',conversation_scroll_seconds=4))
+        self.assertEqual(values['fullscreen_yield_mode'],'video')
+        self.assertTrue(values['video_fullscreen_yield'])
+        self.assertEqual(values['conversation_scroll_seconds'],4)
+    def test_existing_disabled_video_policy_stays_disabled(self):
+        from desktop_core import normalized
+        values=normalized(dict(video_fullscreen_yield=False))
+        self.assertEqual(values['fullscreen_yield_mode'],'off')
+        self.assertFalse(values['video_fullscreen_yield'])
+    def test_mac_native_landing_never_enters_win32_even_with_mocked_backend(self):
+        import native_landing
+        with patch('sys.platform','darwin'),patch.object(native_landing.QApplication,'platformName',return_value='windows'),patch.object(native_landing,'api') as api:
+            self.assertFalse(native_landing.publish(None,None));api.assert_not_called()

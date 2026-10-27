@@ -106,4 +106,25 @@ class ProgramMigrationTests(unittest.TestCase):
         restore.assert_called_once_with(self.source,{'old':True},True)
         self.assertEqual(launch.call_args.args[0],[str(self.old)]);self.assertTrue(self.old.exists())
 
+    def test_migration_uses_the_actual_startup_receipt_contract(self):
+        from program_location import move_program
+        from deployment_state import write_ready_receipt,wait_ready
+        # Exercise the producer and consumer together instead of mocking the
+        # readiness check, which concealed the installation-root path mismatch.
+        def launch(args,**kwargs):
+            process=Mock(pid=os.getpid());process.poll.return_value=None
+            if len(args)==1:
+                receipt=Path(kwargs['env']['BAILONG_DEPLOY_RECEIPT'])
+                self.assertEqual(receipt.parent,Path(args[0]).parent)
+                with patch.dict(os.environ,kwargs['env']),patch('sys.executable',args[0]),patch('desktop_core.VERSION','1.1.0'):
+                    write_ready_receipt(Mock(winId=lambda:1),Mock(isListening=lambda:True))
+                self.assertTrue(receipt.is_file())
+            return process
+        def ready(*args):return wait_ready(*args,timeout=.5,stable_seconds=0)
+        with patch('installer.stop_existing',return_value=self.old),patch('installer.register'),patch('deployment_state.capture_entries',return_value={}),patch('deployment_state.wait_ready',side_effect=ready),patch('program_location.subprocess.Popen',side_effect=launch):
+            exe=move_program(self.source,self.target,False)
+        self.assertEqual(exe.parent.parent.parent,self.target)
+        self.assertFalse(list(exe.parent.glob('.ready-*.json')))
+        self.assertTrue(self.old.is_file())
+
 if __name__=='__main__':unittest.main()

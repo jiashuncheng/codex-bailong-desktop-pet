@@ -18,6 +18,21 @@ def settle():
     app.processEvents()
 
 class BubbleTests(unittest.TestCase):
+    def test_pet_speech_temporarily_replaces_rows_then_restores_latest_session(self):
+        b=self.bubble;b.show();settle()
+        b.roster.observe(dict(session='a',state='working',title='任务A',display='正在编辑文件'))
+        b.refresh_status();self.assertIn('正在编辑文件',b.status_view.text())
+        b.message('测试点击台词',speech=True);self.assertEqual(b.status_view.text(),'测试点击台词')
+        b.roster.observe(dict(session='a',state='working',title='任务A',display='正在运行命令'));b.refresh_status()
+        self.assertEqual(b.status_view.text(),'测试点击台词')
+        b.set_activity_text('等待 Codex 新消息');self.assertIn('正在运行命令',b.status_view.text())
+    def test_speech_survives_redraw_and_does_not_acknowledge_completion(self):
+        b=self.bubble;b.show();settle()
+        b.roster.observe(dict(session='a',state='complete',title='任务A',text='完成'))
+        b.status_indicator.notify_complete(dict(session='a',turn='done-1'))
+        b.message('测试自动台词',speech=True);b.redraw()
+        self.assertEqual(b.status_view.text(),'测试自动台词');self.assertEqual(len(b.status_indicator.unread),1)
+        b.set_activity_text('完成');self.assertEqual(len(b.status_indicator.unread),1)
     def setUp(self):self.bubble=CompactBubble();self.bubble.status='正在检查代码';self.bubble.heading='Codex · 处理中'
     def tearDown(self):self.bubble.close();self.bubble.deleteLater();settle()
     def test_single_quota_uses_adjacent_default_token_chart(self):

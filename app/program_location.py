@@ -23,7 +23,9 @@ def move_program(source,target,startup,progress=lambda text:None,wait_pid=None):
             folder=checked_version(target,name)
             if (folder/'payload-manifest.json').is_file():verify_payload(folder,name.split('-')[0])
         new=checked_version(target,manifest['current'])/'BailongEnhanced.exe'
-        token=uuid.uuid4().hex;receipt=target/('.ready-'+token+'.json')
+        # Startup only accepts nonce receipts beside its own executable.
+        # The installation root is two levels higher and is deliberately rejected.
+        token=uuid.uuid4().hex;receipt=new.parent/('.ready-'+token+'.json')
         env=dict(os.environ,BAILONG_DEPLOY_TOKEN=token,BAILONG_DEPLOY_RECEIPT=str(receipt))
         progress('正在确认新位置的窗口与本地服务…')
         process=subprocess.Popen([str(new)],cwd=new.parent,env=env,creationflags=0x08000000)

@@ -17,6 +17,18 @@ def ssl_runtime_data(ssl_module=None):
         raise OSError('构建运行时缺少必需的TLS证书数据，已停止构建')
     return []
 
+def windows_version_resource(version):
+    validate_new_version(version)
+    numbers=tuple(int(n) for n in version.split('.'))+(0,)
+    fields=dict(FileDescription='白龙桌宠增强版',ProductName='白龙桌宠增强版',
+                FileVersion=version,ProductVersion=version,OriginalFilename='BailongEnhanced.exe',
+                InternalName='BailongEnhanced')
+    strings=','.join('StringStruct('+repr(k)+','+repr(v)+')' for k,v in fields.items())
+    return ('VSVersionInfo(ffi=FixedFileInfo(filevers='+repr(numbers)+',prodvers='+repr(numbers)+
+            ',mask=0x3f,flags=0,OS=0x40004,fileType=1,subtype=0,date=(0,0)),'
+            'kids=[StringFileInfo([StringTable(\'080404b0\',['+strings+'])]),'
+            'VarFileInfo([VarStruct(\'Translation\',[2052,1200])])])')
+
 def build_windows_bundle(version):
     """Create the user-facing Windows ZIP (installer plus docs) and combined checksums."""
     output=ROOT/'release';name=f'bailong-desktop-pet-{version}-windows-x64.zip'
@@ -56,7 +68,9 @@ def build(legacy_formats=False,application_only=True):
     from build_materials import build as build_materials,DEST
     catalog=build_materials()
     tls_data=ssl_runtime_data()
-    subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--windowed','--icon',str(ROOT/'app/branding/bailong.ico'),'--onedir','--name','BailongEnhanced','--distpath','release','--workpath','build','--specpath','build','--paths','app','--exclude-module','imageio_ffmpeg',*tls_data,'app/enhanced.py'],cwd=ROOT,check=True)
+    (ROOT/'build').mkdir(exist_ok=True)
+    version_info=ROOT/'build/windows-version-info.txt';version_info.write_text(windows_version_resource(VERSION),encoding='utf-8')
+    subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--windowed','--icon',str(ROOT/'app/branding/bailong.ico'),'--version-file',str(version_info),'--onedir','--name','BailongEnhanced','--distpath','release','--workpath','build','--specpath','build','--paths','app','--exclude-module','imageio_ffmpeg',*tls_data,'app/enhanced.py'],cwd=ROOT,check=True)
     release=ROOT/'release/BailongEnhanced'
     (release/'app/branding').mkdir(parents=True,exist_ok=True)
     shutil.copy2(ROOT/'app/branding/bailong.ico',release/'app/branding/bailong.ico')

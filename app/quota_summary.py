@@ -2,7 +2,7 @@
 import math,time
 from PySide6.QtCore import Qt,QRectF,QSize,QPoint,Signal,QTimer,QVariantAnimation,QEasingCurve,QAbstractAnimation
 from PySide6.QtGui import QPainter,QPen,QColor,QFontMetrics,QPixmap
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QWidget,QToolButton
 from compact_bubble import font,INK,MUTED
 from quota_summary_data import quota_items,today_tokens
 from reset_watch import local_time
@@ -26,14 +26,26 @@ def quota_color(item):
 
 class QuotaSummary(QWidget):
     expand=Signal()
+    anomalyRequested=Signal()
     resetDue=Signal(float)
     def __init__(self,windows,caption='',parent=None,progress_cache=None,clock=None,anomaly=None):
         super().__init__(parent);self.setObjectName('quota_summary');self.setFixedHeight(HEIGHT);self.setMinimumWidth(106)
         self.windows=[dict(w) for w in windows];self.caption=caption;self.clock=clock or time.time
         self.items=quota_items(self.windows,self.clock());self.cache=progress_cache if progress_cache is not None else {}
         self.anomaly=anomaly;self.week_index=next((i for i,w in enumerate(self.items) if w['name']=='一周'),None)
-        self.alert_height=20 if anomaly and self.week_index is not None else 0
-        self.setFixedHeight(HEIGHT+self.alert_height)
+        self.alert_height=0
+        self.alert_badge=QToolButton(self);self.alert_badge.setObjectName('week_quota_alert')
+        badge_text=f"{anomaly.get('change',0):+.0f}%" if anomaly else ''
+        self.alert_badge.setText(badge_text);self.alert_badge.setFont(font(11,True))
+        self.alert_badge.setFixedSize(max(38,QFontMetrics(self.alert_badge.font()).horizontalAdvance(badge_text)+10),18)
+        self.alert_badge.setCursor(Qt.CursorShape.PointingHandCursor)
+        increase=bool(anomaly and anomaly.get('change',0)>0)
+        self.alert_badge.setAccessibleName('周额度推测总量'+('上涨' if increase else '下降')+'提醒，查看额度对比')
+        colors=('#e6f6eb','#218358','#d6f1df','#c4e8d1') if increase else ('#ffebec','#ce2c31','#ffdbdc','#ffcdce')
+        self.alert_badge.setStyleSheet('QToolButton{background:'+colors[0]+';color:'+colors[1]+';border:0;border-radius:7px;padding:0;}QToolButton:hover{background:'+colors[2]+';}QToolButton:pressed{background:'+colors[3]+';}')
+        self.alert_badge.clicked.connect(self.anomalyRequested.emit)
+        self.alert_badge.setVisible(bool(anomaly and self.week_index is not None))
+        if anomaly:self.alert_badge.setAccessibleDescription(anomaly['description'])
         self.active=None;self.pressed=False;self.values={};self.starts={};self.targets={};self._due_sent=set()
         self._static_key=None;self._revision=0;self.layer_builds=0
         self.setMouseTracking(True);self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -48,13 +60,16 @@ class QuotaSummary(QWidget):
     def sizeHint(self):return QSize(121,HEIGHT+self.alert_height)
     def _accessible(self):
         text='\n'.join(i['description'] for i in self.items)+'\n'+self.caption
-        if self.alert_height:text+='\n'+self.anomaly['description']
+        if self.anomaly and self.week_index is not None:text+='\n'+self.anomaly['description']
         self.setAccessibleName('账户剩余额度；点击查看额度详情');self.setAccessibleDescription(text)
     def row_rect(self,index):
         shift=self.row_shift(index)
         return QRectF(3,3+shift,self.width()-6,96) if len(self.items)==1 else QRectF(3,3+index*48+shift,self.width()-6,47)
-    def row_shift(self,index):return self.alert_height if self.week_index is not None and index>=self.week_index else 0
-    def alert_rect(self):return QRectF(7,(0 if len(self.items)==1 else (self.week_index or 0)*48)+3,self.width()-14,18)
+    def row_shift(self,index):return 0
+    def alert_rect(self):return QRectF(self.width()-self.alert_badge.width()-7,(0 if len(self.items)==1 else (self.week_index or 0)*48)+6,self.alert_badge.width(),18)
+    def resizeEvent(self,event):
+        self.alert_badge.move(self.alert_rect().topLeft().toPoint())
+        super().resizeEvent(event)
     def _schedule(self):
         if not self.isVisible():return
         now=self.clock();future=[i['reset_at']-now for i in self.items if i['reset_at'] and i['reset_at']>now]
@@ -121,10 +136,6 @@ class QuotaSummary(QWidget):
         image=QPixmap(max(1,int(self.width()*ratio+.5)),max(1,int(self.height()*ratio+.5)));image.setDevicePixelRatio(ratio);image.fill(Qt.GlobalColor.transparent)
         p=QPainter(image);p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor('#f5f2f7'));p.drawRoundedRect(QRectF(self.rect()),10,10)
-        if self.alert_height:
-            rect=self.alert_rect();p.setBrush(QColor('#eee0e5'));p.drawRoundedRect(rect,4,4)
-            p.setFont(font(10,True));p.setPen(QColor('#98566d'))
-            p.drawText(rect,Qt.AlignmentFlag.AlignCenter,self.anomaly['text'])
         single=len(self.items)==1
         for index,item in enumerate(self.items):
             rect=self.row_rect(index)
@@ -132,10 +143,13 @@ class QuotaSummary(QWidget):
                 p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor('#e6dcec' if self.pressed else '#ede7f2'));p.drawRoundedRect(rect,7,7)
             y=(0 if single else index*48)+self.row_shift(index)
             p.setFont(font(11,True));p.setPen(MUTED)
-            label=item['label'];p.drawText(QRectF(10,y+7,self.width()-20,18),Qt.AlignmentFlag.AlignVCenter,label)
+            label='周' if not single and index==self.week_index and self.anomaly else item['label']
+            p.drawText(QRectF(10,y+7,self.width()-20,18),Qt.AlignmentFlag.AlignVCenter,label)
             value=item['display'];color=quota_color(item) if item['low'] else INK
             p.setPen(color);p.setFont(font(28 if single else 18,True))
             value_rect=QRectF(10,26+y,self.width()-20,34) if single else QRectF(58,y+4,self.width()-68,24)
+            if not single and index==self.week_index and self.anomaly:
+                value_rect=QRectF(28,y+4,self.alert_rect().left()-32,24)
             # Very long custom decimal percentages remain legible and contained.
             if QFontMetrics(p.font()).horizontalAdvance(value)>value_rect.width():p.setFont(font(22 if single else 14,True))
             p.drawText(value_rect,Qt.AlignmentFlag.AlignVCenter|(Qt.AlignmentFlag.AlignLeft if single else Qt.AlignmentFlag.AlignRight),value)

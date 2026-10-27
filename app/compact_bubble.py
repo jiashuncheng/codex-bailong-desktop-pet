@@ -452,6 +452,14 @@ class CompactBubble(Bubble):
         self.status_view.heightChanged.connect(self._status_height_changed)
         self.status_view.animation.finished.connect(self._status_height_finished)
         self.setWindowTitle('白龙增强版 · 状态气泡');self.redraw()
+    def setUpdatesEnabled(self,enabled):
+        super().setUpdatesEnabled(enabled)
+        content=getattr(self,'content',None)
+        # The logical root moves between QWidget parenting and a graphics
+        # proxy. Mirror both gates explicitly: reparenting during a transition
+        # can otherwise leave it disabled after either kind of handoff.
+        if content is not None:
+            content.setUpdatesEnabled(enabled)
     def clear(self):
         # Headers are rebuilt; the tiny task animation must keep its clock.
         self._plot_resume=None;self.deck=None

@@ -72,6 +72,30 @@ class PanelScaleTests(unittest.TestCase):
     def test_scaled_capsule_keeps_transparent_outside_corners(self):
         b=self.b;b.set_role_scale(1.6);b.set_mode('mini');self.finish()
         image=b.grab().toImage();self.assertEqual(image.pixelColor(0,0).alpha(),0)
+    def test_return_from_editor_keeps_scaled_content_painting(self):
+        b=self.b
+        for role in (.7,1.6,1.):
+            b.set_role_scale(role);self.finish()
+            for mode in ('auto','mini','minimal'):
+                with self.subTest(role=role,mode=mode):
+                    b.set_mode(mode);self.finish()
+                    b.show_page('settings',QWidget());self.finish()
+                    self.assertEqual(b.ui_scale,1.)
+                    self.assertTrue(b.content.updatesEnabled())
+                    b.return_to_status();self.finish()
+                    self.assertTrue(b.content.updatesEnabled())
+                    self.assertTrue(b.content.isVisible())
+                    # A background alone is opaque too. Require the restored
+                    # live content to paint actual non-transparent pixels.
+                    frame=b.content.grab().toImage()
+                    self.assertTrue(any(frame.pixelColor(x,y).alpha()>0
+                        for y in range(0,frame.height(),4) for x in range(0,frame.width(),4)))
+    def test_shell_update_gate_reaches_embedded_content(self):
+        b=self.b;b.set_role_scale(.7);self.finish()
+        b.setUpdatesEnabled(False)
+        try:self.assertFalse(b.content.updatesEnabled())
+        finally:b.setUpdatesEnabled(True)
+        self.assertTrue(b.content.updatesEnabled())
     def test_scaling_status_does_not_take_focus_from_another_window(self):
         other=QWidget();other.show();QApplication.setActiveWindow(other);APP.processEvents()
         try:

@@ -1,7 +1,17 @@
 """Relative public reset estimates; reaching a date is never confirmation."""
 import math
 import time
+from PySide6.QtCore import QDateTime,QTimeZone
 from reset_watch import pending_reset,locally_reset,epoch,local_time,schedule_text
+
+PACIFIC=QTimeZone(b'America/Los_Angeles')
+
+def pacific_now(now):
+    # Qt supplies IANA zone support on Windows too; no fixed UTC offset or
+    # optional Python tzdata installation.
+    if not PACIFIC.isValid():return None
+    current=QDateTime.fromMSecsSinceEpoch(math.floor(now*1000),PACIFIC)
+    return current if current.isValid() else None
 
 def reset_view(snapshot,error=False,now=None):
     now=time.time() if now is None else now
@@ -9,13 +19,20 @@ def reset_view(snapshot,error=False,now=None):
     item=pending_reset(snapshot);stamp=epoch((item or {}).get('scheduled'))
     title='备用重置' if (item or {}).get('reset_type')=='banked' else '额外重置'
     phase='loading';eyebrow=title;value='查询中';unit='';minutes=None;note='正在连接公告';next_change=None
+    remaining=None;day=None
     if snapshot is None:
         if error:phase='unavailable';value='暂不可用';note='稍后重试'
-    elif not item:phase='empty';value='暂无安排';note='有新公告会提醒'
+    elif not item:
+        phase='empty';value='暂无安排';note='有新公告会提醒'
+        day=pacific_now(now)
+        if day is not None:
+            eyebrow='美西现在';value=day.toString('HH:mm');note='美西 '+day.toString('MM/dd')
+            next_change=60-now%60
     elif stamp is None:phase='undated';eyebrow='已有重置安排';value='时间待定';note='等待公布具体时间'
     elif stamp<=now:phase='pending';eyebrow='预计时间已过';value='待确认';note='等待公告确认'
     else:
         phase='scheduled';eyebrow='预计还有';remaining=stamp-now;note='最晚 '+local_time(stamp)
+    if remaining is not None:
         total_minutes=math.ceil(remaining/60)
         if total_minutes>=60:
             hours,minute=divmod(total_minutes,60);unit='小时'
@@ -27,15 +44,21 @@ def reset_view(snapshot,error=False,now=None):
         if remaining==60:next_change=.001  # The next visible value is “<1”.
     if locally_reset(snapshot):
         phase='local_reset';eyebrow='本机额度';value='已重置';unit='';minutes=None;note='公告仍待确认';next_change=None
-    if error and snapshot is not None and details.get('code')!='cache_write':
+    if error and snapshot is not None and details.get('code')!='cache_write' and day is None:
         eyebrow='上次安排 · 预计' if phase=='scheduled' else '上次公告记录'
     if details:
         note={'timeout':'连接超时 · 保留旧值','certificate':'证书验证失败','cache_write':'最新公告 · 缓存未保存','schema':'公告格式变化','network':'网络连接失败 · 保留旧值','runtime_file':'联网组件缺失 · 请更新'}.get(details.get('code'),'公告服务暂不可用')
+    if day is not None and error:note=day.toString('MM/dd')+' · '+('未缓存' if details.get('code')=='cache_write' else '查询失败')
     parts=[(value,unit)]+([(minutes,'分钟')] if minutes is not None else [])
     main=' '.join(number+(' '+label if label else '') for number,label in parts)
-    description=title+'；'+eyebrow+' '+main+'；'+schedule_text(snapshot,now)
-    description+='\n北京时间 · Codex Resets（第三方）；预计安排不代表账户额度已到账。'
+    description=title+'；'+eyebrow+' '+main
+    if day is not None:
+        description+='\n暂无重置安排；洛杉矶 '+day.toString('yyyy/MM/dd HH:mm')+' UTC'+day.toString('ttt')+'（America/Los_Angeles）。'
+        description+='\n显示美西当地时间，自动处理夏令时；这不是额度重置时间。'
+    else:
+        description+='；'+schedule_text(snapshot,now)
+        description+='\n北京时间 · Codex Resets（第三方）；预计安排不代表账户额度已到账。'
     if item and item.get('text'):description+='\n'+str(item['text'])
     if error:description+='\n'+details['message'] if details.get('message') else '\n更新失败，保留上次记录。' if snapshot is not None else '\n公告暂不可用，请稍后重试。'
     return dict(title=title,phase=phase,eyebrow=eyebrow,value=value,unit=unit,parts=parts,display=main,note=note,
-                description=description,next_change=next_change)
+                description=description,next_change=next_change,pacific_clock=day is not None)

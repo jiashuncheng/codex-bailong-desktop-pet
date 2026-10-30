@@ -165,7 +165,7 @@ class QuotaCompareView(QWidget):
         layout.addWidget(comparison)
         chart,box=self.section('quota_history_section',False)
         line=QHBoxLayout();line.setSpacing(5)
-        self.readout=text_label('历史周期',12,True);self.readout.setFixedHeight(18);self.readout.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed);line.addWidget(self.readout,1)
+        self.readout=text_label('本机历史周期',12,True);self.readout.setFixedHeight(18);self.readout.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed);line.addWidget(self.readout,1)
         self.legend=QWidget();legend=QHBoxLayout(self.legend);legend.setContentsMargins(0,0,0,0);legend.setSpacing(4)
         for title,color in [('已用',ACCENT),('推测',SELECTED)]:
             swatch=QWidget();swatch.setFixedSize(7,7);swatch.setStyleSheet(f'background:{color};border-radius:2px;');legend.addWidget(swatch);legend.addWidget(text_label(title))
@@ -182,7 +182,7 @@ class QuotaCompareView(QWidget):
         self.rules=AnimatedDisclosure(rules,background=PANEL);layout.addWidget(self.rules)
         self.rules_button.toggled.connect(self.toggle_rules)
     def show_plot_readout(self,value):
-        self.legend.setVisible(not value);self.readout.setText(value or '历史周期');self.plot.setAccessibleDescription(value)
+        self.legend.setVisible(not value);self.readout.setText(value or '本机历史周期');self.plot.setAccessibleDescription(value)
     def section(self,name,filled=True):
         card=QWidget();card.setObjectName(name);card.setStyleSheet(f'QWidget#{name}{{background:{PANEL if filled else "transparent"};border-radius:8px;}}')
         box=QVBoxLayout(card);box.setContentsMargins(8 if filled else 0,6 if filled else 0,8 if filled else 0,6 if filled else 0);box.setSpacing(3)

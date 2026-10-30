@@ -64,5 +64,25 @@ class ResetCardTests(unittest.TestCase):
             self.assertEqual(opened.call_count,1);self.assertEqual(opened.call_args.args[0].toString(),SOURCE_URL)
         self.assertFalse(expanded);self.assertEqual(card.size(),size)
         self.assertEqual(card.view['parts'],[('12','小时'),('30','分钟')])
+    def test_pacific_clock_card_fits_and_rolls_over_after_hiding(self):
+        from datetime import datetime
+        clock=[datetime.fromisoformat('2026-10-30T06:59:40+00:00').timestamp()]
+        card=Announcement({},False,dense=True,with_refresh=False,clock=lambda:clock[0])
+        card.resize(106,78);card.show();app.processEvents();bounds=card.geometry()
+        self.assertTrue(card.timer.isActive());self.assertEqual(card.view['parts'],[('23:59','')])
+        self.assertIn('不是额度重置时间',card.accessibleDescription())
+        card.hide();self.assertFalse(card.timer.isActive());clock[0]+=20
+        card.show();app.processEvents()
+        self.assertEqual(card.view['note'],'美西 10/30');self.assertEqual(card.view['value'],'00:00');self.assertEqual(card.geometry(),bounds)
+        self.assertTrue(card.timer.isActive())
+        note,rect=card.note_layout()
+        self.assertLessEqual(QFontMetricsF(__import__('typography').ui_font(10,True)).horizontalAdvance(note),rect.width())
+        for text,font,origin in card.text_runs():
+            self.assertTrue(QRectF(card.rect()).contains(QFontMetricsF(font).tightBoundingRect(text).translated(origin)))
+    def test_empty_reset_details_explain_clock_is_not_a_quota_deadline(self):
+        bubble=CompactBubble();bubble.reset_snapshot={};bubble.show_reset_details()
+        bubble.size_transition.complete();bubble.size_transition.release_landing();app.processEvents()
+        texts=[w.text() for w in bubble.findChildren(QLabel)]
+        self.assertTrue(any('洛杉矶当地时间' in text and '不是额度重置时间' in text for text in texts))
 
 if __name__=='__main__':unittest.main()

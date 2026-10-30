@@ -71,7 +71,8 @@ class ResetCard(QWidget):
     def text_runs(self):
         """Fit hours and minutes on one baseline; compact labels keep digits large."""
         v=self.view;left=5 if self.dense else 0;available=max(1,self.width()-left-(4 if self.dense else 0))
-        value_size=28 if self.dense and v['unit'] else 19 if self.dense else 36 if v['unit'] else 27
+        numeric=bool(v['unit'] or v.get('pacific_clock'))
+        value_size=28 if self.dense and numeric else 19 if self.dense else 36 if numeric else 27
         parts=[(number,{'小时':'时','分钟':'分'}.get(label,label) if self.dense and len(v['parts'])>1 else label) for number,label in v['parts']]
         unit_font=ui_font(11 if self.dense else 13,True);gap=2 if len(parts)>1 else 4 if v['unit'] else 0
         def width(size):

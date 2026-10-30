@@ -30,7 +30,7 @@ class QuotaComparePresentationTests(unittest.TestCase):
    v.rules_button.click();v.rules.complete();APP.processEvents();self.assertTrue(v.note.isVisible());self.assertIn('5 个百分点',v.note.text())
    v.rules_button.click();v.rules.complete();APP.processEvents();self.assertTrue(v.rules.isHidden())
    before=v.sizeHint();v.show_plot_readout('10/18 已用 15M / 推测 100M');APP.processEvents();self.assertEqual(v.sizeHint(),before)
-   v.show_plot_readout('');self.assertEqual(v.readout.text(),'历史周期')
+   v.show_plot_readout('');self.assertEqual(v.readout.text(),'本机历史周期')
    v.previous.click();self.assertEqual(v.selected_id,'old');self.assertIn('不能用于历史对比',v.comparison_reason.text())
   finally:v.close()
 if __name__=='__main__':unittest.main()

@@ -113,8 +113,45 @@ class ClientTests(unittest.TestCase):
         config=json.loads((self.state/'token-sync.json').read_text());config['view']='local';atomic(self.state/'token-sync.json',config)
         with patch('token_sync.token_for',return_value='fixture-token'),patch('token_sync.request',side_effect=self.api):result=apply_sync(dict(all_total=20),self.state,self.home)
         self.assertEqual(result['all_total'],20);self.assertEqual(self.store.snapshot()['all_total'],300)
+    def test_global_tokens_keep_local_quota_without_uploading_or_caching_it(self):
+        local=dict(all_total=20,quota_history=dict(cycles=[dict(id='local',remaining=68)]),week_cycle=dict(used=20,remaining=68))
+        with patch('token_sync.token_for',return_value='fixture-token'),patch('token_sync.request',side_effect=self.api):
+            result=apply_sync(local,self.state,self.home)
+        self.assertEqual(result['all_total'],300);self.assertEqual(result['scope'],'all')
+        for key in ('quota_history','week_cycle'):
+            self.assertEqual(result[key],local[key]);self.assertNotIn(key,self.store.snapshot())
+            self.assertNotIn(key,json.loads((self.state/'token-sync-cache.json').read_text()))
+    def test_offline_cloud_cache_uses_current_local_quota_not_old_cached_quota(self):
+        atomic(self.state/'token-sync-cache.json',dict(all_total=300,scope='all',quota_history=dict(cycles=[]),week_cycle=dict(used=999)))
+        local=dict(all_total=30,quota_history=dict(cycles=[dict(id='current',remaining=67)]),week_cycle=dict(used=30))
+        with patch('token_sync.token_for',return_value='fixture-token'),patch('token_sync.request',side_effect=SyncError('offline')):
+            result=apply_sync(local,self.state,self.home)
+        self.assertEqual(result['all_total'],300);self.assertTrue(result['sync_stale'])
+        self.assertEqual(result['quota_history'],local['quota_history']);self.assertEqual(result['week_cycle'],local['week_cycle'])
+    def test_missing_local_quota_is_not_invented_from_cloud(self):
+        with patch('token_sync.sync_once',return_value=dict(scope='all',all_total=300,quota_history=dict(cycles=[dict(id='foreign')]),week_cycle=dict(used=999))):
+            result=apply_sync(dict(all_total=20),self.state,self.home)
+        self.assertEqual(result['all_total'],300)
+        self.assertNotIn('quota_history',result);self.assertNotIn('week_cycle',result)
 
 class CloudUiTests(unittest.TestCase):
+    def test_global_view_displays_existing_local_quota_cycles(self):
+        from PySide6.QtWidgets import QApplication
+        from quota_compare_ui import QuotaCompareView
+        app=QApplication.instance() or QApplication([])
+        now=time.time()
+        cycle=dict(id='local-now',start=now-3600,end=now,through=now,reset_at=now+86400,
+            closed=False,kind='natural',remaining=68,used=2000,estimated_total=None,drop=2,
+            complete=True,fresh=True,plan='pro',distinct_readings=2,model='fixture',model_share=1,output_share=.2,change=None)
+        with tempfile.TemporaryDirectory() as folder,patch('token_sync.read_config',return_value=dict(enabled=True,view='all')),patch('token_sync.sync_once',return_value=dict(scope='all',all_total=5000)):
+            result=apply_sync(dict(all_total=2000,quota_history=dict(cycles=[cycle])),folder,folder)
+        view=QuotaCompareView()
+        try:
+            view.set_snapshot(result)
+            self.assertEqual(view.choice.count(),1);self.assertEqual(view.choice.title,'本轮额度')
+            self.assertIn('剩余 68%',view.detail.text());self.assertIn('本机',view.readout.text())
+            self.assertEqual(result['all_total'],5000);self.assertEqual(view.cycles[0]['used'],2000)
+        finally:view.close();view.deleteLater();app.processEvents()
     def test_aggregate_card_and_overview_handle_unknown_message_counts(self):
         from PySide6.QtWidgets import QApplication
         from dashboard_cards import CardDeck

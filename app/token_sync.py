@@ -121,19 +121,29 @@ def sync_once(state,home,stop=lambda:False,budget=4):
     atomic(state/'token-sync-status.json',dict(connected=True,checked=time.time(),uploaded=uploaded,more=more,scan_errors=scan['errors'],total=snapshot['all_total'],devices=snapshot.get('devices',[])))
     return snapshot
 
+def with_local_quota(cloud,local):
+    # Account quota observations are collected locally, not by the Token
+    # aggregation service. Keep their local Token denominator and history
+    # together, including when the global Token view uses an offline cache.
+    result=dict(cloud)
+    for key in ('quota_history','week_cycle'):
+        if key in local:result[key]=local[key]
+        else:result.pop(key,None)
+    return result
+
 def apply_sync(local,state,home,stop=lambda:False):
     config=read_config(state)
     if not config.get('enabled'):return local
     try:
         cloud=sync_once(state,home,stop)
         if config.get('view','all')=='local':return dict(local,sync_connected=True)
-        return cloud
+        return with_local_quota(cloud,local)
     except (OSError,ValueError,KeyError,sqlite3.Error) as error:
         status=dict(connected=False,checked=time.time(),error=str(error) if isinstance(error,SyncError) else '同步暂不可用，稍后重试。')
         atomic(Path(state)/'token-sync-status.json',status)
         if config.get('view','all')!='local':
             try:
                 cloud=json.loads((Path(state)/'token-sync-cache.json').read_text(encoding='utf-8'))
-                return dict(cloud,partial=True,sync_stale=True,sync_connected=False,source='多端 Codex 日志（离线缓存）')
+                return with_local_quota(dict(cloud,partial=True,sync_stale=True,sync_connected=False,source='多端 Codex 日志（离线缓存）'),local)
             except (OSError,ValueError,TypeError):pass
         return dict(local,sync_connected=False,source='本机 Codex 日志（多端同步暂不可用）')

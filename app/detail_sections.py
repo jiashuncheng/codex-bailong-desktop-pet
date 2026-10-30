@@ -77,6 +77,8 @@ class DetailsTabs(QTabWidget):
         countdown=Announcement(bubble.reset_snapshot,getattr(bubble,'reset_error_details',None) or bubble.reset_feed_error,with_refresh=False)
         card=self.card(reset,countdown.view['title'])
         card.body.addWidget(countdown)
+        if countdown.view.get('pacific_clock'):
+            card.text('当前记录暂无额外重置安排。显示洛杉矶当地时间，自动处理夏令时；这不是额度重置时间。',size=11,muted=True)
         if countdown.view['phase']=='pending':card.text(schedule_text(bubble.reset_snapshot),size=10,muted=True)
         if pending and pending.get('text'):card.text(pending['text'])
         if bubble.reset_feed_error:card.text((getattr(bubble,'reset_error_details',None) or {}).get('message') or ('重置消息连接失败 · 显示上次记录' if bubble.reset_snapshot else '重置消息暂不可用，稍后自动重试'),size=11,warning=True)

@@ -121,8 +121,50 @@ def bridge_conversation_names(home,ids):
     return found
 
 
+_index_name_cache={}
+
+def indexed_conversation_names(home,ids):
+    """Read actual names published by Codex, never prompt or rollout text."""
+    path=Path(home)/'session_index.jsonl'
+    try:
+        stat=path.stat();signature=(stat.st_ino,stat.st_size,stat.st_mtime_ns)
+        cached=_index_name_cache.get(str(path))
+        if not cached or cached[0]!=signature:
+            names={}
+            with path.open('rb') as stream:
+                offset=max(0,stat.st_size-4*1024*1024);stream.seek(offset)
+                if offset:stream.readline()
+                for line in stream:
+                    if not line.endswith(b'\n'):break
+                    try:
+                        row=json.loads(line)
+                        if not isinstance(row,dict):continue
+                        sid=session_id(row.get('id') or row.get('session_id') or '')
+                        name=row.get('thread_name') or row.get('name')
+                        if sid and isinstance(name,str) and name.strip():names[sid]=re.sub(r'\s+',' ',name).strip()[:200]
+                    except (ValueError,TypeError,AttributeError):continue
+            if len(_index_name_cache)>=8:_index_name_cache.pop(next(iter(_index_name_cache)))
+            cached=(signature,names);_index_name_cache[str(path)]=cached
+        return {sid:cached[1][sid] for sid in ids if sid in cached[1]}
+    except OSError:return {}
+
+
+def catalog_conversation_names(home,ids):
+    """The local desktop catalog also covers chats absent from state_5."""
+    found={}
+    try:
+        path=Path(home)/'sqlite/codex.db'
+        with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=.1)) as db:
+            for start in range(0,len(ids),128):
+                chunk=ids[start:start+128]
+                rows=db.execute('SELECT thread_id,display_title FROM local_thread_catalog WHERE host_id=? AND thread_id IN ('+','.join('?' for _ in chunk)+')',['local',*chunk])
+                found.update({sid:title.strip() for sid,title in rows if isinstance(title,str) and title.strip()})
+    except (OSError,sqlite3.Error,ValueError):pass
+    return found
+
+
 def conversation_names(home,ids):
-    """Prefer desktop names; restore missing SSH names from bridge logs."""
+    """Prefer current desktop names; restore missing SSH names from bridge logs."""
     ids=list(dict.fromkeys(session_id(sid) for sid in ids if sid))
     if not ids:return {}
     found={}
@@ -132,6 +174,8 @@ def conversation_names(home,ids):
                 chunk=ids[start:start+128];rows=db.execute('SELECT id,name,title FROM threads WHERE id IN ('+','.join('?' for _ in chunk)+')',chunk)
                 found.update({sid:(name or title).strip() for sid,name,title in rows if (name or title or '').strip()})
     except (OSError,sqlite3.Error,ValueError):pass
+    found.update(indexed_conversation_names(home,ids))
+    found.update(catalog_conversation_names(home,ids))
     found.update(bridge_conversation_names(home,[sid for sid in ids if sid not in found]))
     return found
 

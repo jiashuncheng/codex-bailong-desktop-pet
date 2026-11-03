@@ -73,6 +73,14 @@ class SharedTests(unittest.TestCase):
         self.assertEqual(DISPLAY_VERSION,UPSTREAM_VERSION+'.'+CUSTOM_VERSION)
         self.assertEqual(version_tuple(VERSION),(0,18,1))
         self.assertEqual(material_compatibility(VERSION),UPSTREAM_VERSION)
+    def test_turn_identity_keeps_its_namespace_and_unknown_linux_never_becomes_gpu228(self):
+        from shared_state import wire_turn,origin_name
+        from unittest.mock import patch
+        turn='turn-00000000-0000-0000-0000-000000000001'
+        self.assertEqual(wire_turn(turn),h(turn))
+        with patch('shared_state.sys.platform','linux'),patch.dict('os.environ',{'WSL_DISTRO_NAME':''}),patch('platform.release',return_value='generic-linux'):
+            with self.assertRaises(ValueError):origin_name()
+            self.assertEqual(origin_name(dict(origin='gpu228')),'gpu228')
     def test_outbox_is_monotonic_and_only_removes_exact_ack(self):
         state=Path(self.temp.name);remember_reads(state,[('session','one'),('session','two')])
         rows=pending_reads(state);acknowledge_reads(state,rows[:1]);self.assertEqual(len(pending_reads(state)),1)

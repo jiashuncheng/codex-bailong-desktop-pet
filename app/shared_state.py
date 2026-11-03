@@ -19,15 +19,17 @@ def wire_id(value):
     value=session_id(value)
     return value if re.fullmatch('[0-9a-f]{64}',value) else hashed(value)
 
+def wire_turn(value):
+    value=str(value)
+    return value if re.fullmatch('[0-9a-f]{64}',value) else hashed(value)
+
 def origin_name(config=None):
     chosen=(config or {}).get('origin')
     if chosen in ('win','wsl','mac','gpu228'):return chosen
     if sys.platform=='win32':return 'win'
     if sys.platform=='darwin':return 'mac'
     if os.environ.get('WSL_DISTRO_NAME') or 'microsoft' in __import__('platform').release().lower():return 'wsl'
-    # This deployment has one Linux server collector; other installations should
-    # configure origin explicitly rather than inheriting the aggregator label.
-    return 'gpu228'
+    raise ValueError('请在采集器配置中设置真实来源：win、wsl、mac 或 gpu228。')
 
 def public(value,limit=180):
     from shared_sync_store import public_text
@@ -40,7 +42,7 @@ def remember_reads(state,keys):
     path=Path(state)/'shared-read-outbox.sqlite3';path.parent.mkdir(parents=True,exist_ok=True)
     with closing(sqlite3.connect(path,timeout=2)) as db,db:
         db.execute('CREATE TABLE IF NOT EXISTS reads(session TEXT,turn TEXT,stamp REAL,PRIMARY KEY(session,turn))')
-        db.executemany('INSERT OR IGNORE INTO reads VALUES(?,?,?)',[(wire_id(s),wire_id(t),time.time()) for s,t in keys if s and t])
+        db.executemany('INSERT OR IGNORE INTO reads VALUES(?,?,?)',[(wire_id(s),wire_turn(t),time.time()) for s,t in keys if s and t])
 
 def pending_reads(state):
     path=Path(state)/'shared-read-outbox.sqlite3'

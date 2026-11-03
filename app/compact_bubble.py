@@ -206,7 +206,7 @@ class StatusScroller(QLabel):
         title=source_title(self.conversation_title,self.conversation_source) if self.expanded_row else source_title(title_keywords(self.conversation_title),self.conversation_source)
         available=max(1,budget-metrics.horizontalAdvance(self.title_suffix))
         prefix=('['+display_source(self.conversation_source)+'] ') if self.conversation_source and self.conversation_source!='未知' else ''
-        if self.expanded_row and prefix:
+        if prefix and metrics.horizontalAdvance(prefix)<=available:
             # A platform is provenance, not part of the elidable chat name.
             # Reserve its complete label before shortening a long title.
             name=title[len(prefix):]

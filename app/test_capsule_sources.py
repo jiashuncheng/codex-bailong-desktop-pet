@@ -110,6 +110,22 @@ class CapsuleSourceUiTests(unittest.TestCase):
                 self.assertEqual(row.conversation_title,title)
                 view.close();view.deleteLater();APP.processEvents()
 
+    def test_normal_card_preserves_platform_before_eliding_chat_name(self):
+        from compact_bubble import StatusScroller
+        from PySide6.QtGui import QFontMetrics
+        for source,label in [('mac','mac'),('win','win'),('wsl','wsl'),('gpu228','228')]:
+            for width in (136,188,246,330):
+                view=StatusScroller(width);view.show();APP.processEvents()
+                title='图片上下留白和排版调整的长会话名称'
+                view.set_conversations([('session','正在处理任务')],metadata={'session':dict(title=title,state='working',source_label=source)})
+                row=view.rows['session'];prefix='['+label+'] '
+                self.assertFalse(row.expanded_row)
+                self.assertTrue(row.short_title.startswith(prefix),(source,width,row.short_title))
+                self.assertLessEqual(row.title_width,min(112,round(row.width()*.42)))
+                self.assertIn(title,row.accessibleName())
+                self.assertLess(row.text_left(),row.width())
+                view.close();view.deleteLater();APP.processEvents()
+
     def test_single_row_and_idle_fallback_keep_fixed_height(self):
         self.b.roster.observe(dict(session='a',state='working',source_label='本机',source_kind='local'))
         self.b.set_mode('mini');self.b.size_transition.complete();APP.processEvents()

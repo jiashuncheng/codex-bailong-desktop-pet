@@ -17,7 +17,7 @@ def capsule_columns(width,metrics,names,statuses,extra,count_metrics=None):
     gap=2;count_gap=2 if extra else 0
     # QFontMetrics rounds advances; leave room for the elider's fractional width.
     name_wanted=max((min(metrics.horizontalAdvance(n)+2,52 if re.fullmatch(r'(?i)jsc[-_]\d+',n) else 30) for n in names),default=22)
-    source_width=max(14,min(41,width-name_wanted-status_width-count_width-2*gap-count_gap))
+    source_width=max(14,min(27,width-name_wanted-status_width-count_width-2*gap-count_gap))
     name_width=max(1,width-source_width-status_width-count_width-2*gap-count_gap)
     name_x=source_width+gap;status_x=name_x+name_width+gap
     return dict(source_width=source_width,name_x=name_x,name_width=name_width,status_x=status_x,status_width=status_width,count_x=status_x+status_width+count_gap,count_width=count_width)

@@ -39,12 +39,19 @@ class SharedStore:
             CREATE TABLE IF NOT EXISTS accounting_devices(device TEXT PRIMARY KEY,ready INTEGER,seen REAL);
             CREATE TABLE IF NOT EXISTS raw_workload(session TEXT,total INTEGER,cached INTEGER,speed TEXT,effort TEXT,PRIMARY KEY(session,total));
             ''')
+            if 'label' not in {r[1] for r in db.execute('PRAGMA table_info(shared_devices)')}:
+                db.execute("ALTER TABLE shared_devices ADD COLUMN label TEXT NOT NULL DEFAULT ''")
+        from state_events import StateEvents
+        self.events=StateEvents(self)
     def ingest(self,device,payload,now=None):
         now=time.time() if now is None else now
-        if not isinstance(payload,dict) or set(payload)-{'origin','sessions','reads','ready','accounting_ready'}:raise ValueError('unexpected state fields')
+        if not isinstance(payload,dict) or set(payload)-{'origin','sessions','reads','ready','accounting_ready','rates','label'}:raise ValueError('unexpected state fields')
+        label=public_text(payload['label'],40) if 'label' in payload else None
         origin=payload.get('origin');rows=payload.get('sessions');reads=payload.get('reads',[])
         if origin not in ORIGINS or (type(payload.get('ready')) is not bool or type(payload.get('accounting_ready')) is not bool):raise ValueError('invalid source')
         if not isinstance(rows,list) or len(rows)>128 or not isinstance(reads,list) or len(reads)>512:raise ValueError('invalid batch')
+        from shared_rates import validate,replace
+        rates=validate(payload.get('rates',[]),now) if 'rates' in payload else None
         clean=[];receipt=[]
         for row in rows:
             if not isinstance(row,dict) or set(row)-{'session','turn','updated','state','title','summary','display','thread'} or not {'session','turn','updated','state','title','summary','display'}<=set(row):raise ValueError('unexpected session fields')
@@ -58,8 +65,15 @@ class SharedStore:
             receipt.append((identity(row['session']),identity(row['turn']),now))
         with closing(self.store.connect()) as db,db:
             db.execute('BEGIN IMMEDIATE')
-            db.execute('INSERT OR REPLACE INTO shared_devices VALUES(?,?,?,?,?)',(device,origin,now,int(payload['ready']),int(payload['accounting_ready'])))
+            previous_device=db.execute('SELECT origin,seen,ready,label FROM shared_devices WHERE device=?',(device,)).fetchone()
+            label=label if label is not None else previous_device[3] if previous_device else ''
+            changed=not previous_device or previous_device[0]!=origin or bool(previous_device[2])!=payload['ready'] or now-previous_device[1]>90 or previous_device[3]!=label
+            db.execute('INSERT OR REPLACE INTO shared_presence VALUES(?,?)',(device,int(payload['ready'])))
+            db.execute('INSERT OR REPLACE INTO shared_devices(device,origin,seen,ready,accounting_ready,label) VALUES(?,?,?,?,?,?)',(device,origin,now,int(payload['ready']),int(payload['accounting_ready']),label))
             for row in clean:
+                old=db.execute('SELECT device,session,turn,origin,updated,state,title,summary,display,thread FROM shared_sessions WHERE device=? AND session=?',(device,row[1])).fetchone()
+                accepted=old is None or row[4]>old[4] or (row[4]==old[4] and (old[5] not in ('complete','interrupted') or row[5] in ('complete','interrupted')))
+                changed=changed or bool(accepted and tuple(row)!=old)
                 db.execute('''INSERT INTO shared_sessions VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(device,session) DO UPDATE SET
                 turn=excluded.turn,origin=excluded.origin,updated=excluded.updated,state=excluded.state,title=excluded.title,summary=excluded.summary,display=excluded.display,thread=excluded.thread
                 WHERE excluded.updated>shared_sessions.updated OR (excluded.updated=shared_sessions.updated AND
@@ -68,27 +82,39 @@ class SharedStore:
             if payload['ready']:
                 wanted={r[1] for r in clean}
                 for sid, in db.execute('SELECT session FROM shared_sessions WHERE device=?',(device,)).fetchall():
-                    if sid not in wanted:db.execute('DELETE FROM shared_sessions WHERE device=? AND session=?',(device,sid))
+                    if sid not in wanted:
+                        db.execute('DELETE FROM shared_sessions WHERE device=? AND session=?',(device,sid));changed=True
+            if rates is not None:changed=replace(db,device,rates) or changed
+            before=db.total_changes
             db.executemany('INSERT OR IGNORE INTO shared_reads VALUES(?,?,?)',receipt)
-            db.execute('UPDATE devices SET name=?,last_seen=? WHERE id=?',(origin,now,device))
+            changed=changed or db.total_changes>before
+            if label:db.execute('UPDATE devices SET name=?,last_seen=? WHERE id=?',(label,now,device))
+            else:db.execute('UPDATE devices SET last_seen=? WHERE id=?',(now,device))
             db.execute('DELETE FROM shared_reads WHERE stamp<?',(now-90*86400,))
+            if changed:self.events.bump(db)
+        if changed:self.events.notify()
         return self.snapshot(now)
     def snapshot(self,now=None):
         now=time.time() if now is None else now
+        self.events.expire(now)
         with closing(self.store.connect()) as db:
             db.execute('BEGIN')
+            revision=self.events.revision(db);usage_revision=self.events.usage_revision(db)
+            from shared_rates import snapshot
+            rates=snapshot(db,now)
             rows=db.execute('''SELECT s.session,s.turn,s.origin,s.updated,s.state,s.title,s.summary,s.display,d.seen,d.ready,s.device,s.thread
             FROM shared_sessions s JOIN shared_devices d ON d.device=s.device ORDER BY s.updated DESC,
               CASE WHEN s.state IN ('complete','interrupted') THEN 0 ELSE 1 END,d.seen DESC''').fetchall()
             sessions={}
+            labels={d:label for d,label in db.execute('SELECT device,label FROM shared_devices')}
             for sid,turn,origin,updated,state,title,summary,display,seen,ready,device,thread in rows:
                 if sid in sessions or now-updated>86400:continue
                 stale=not ready or now-seen>90
                 if stale and state in ACTIVE:state='offline';display='来源离线，等待同步'
-                sessions[sid]=dict(session=sid,turn=turn,origin=origin,updated=updated,state=state,title=title,summary=summary,display=display,stale=stale,device_id=device,thread=thread)
+                sessions[sid]=dict(session=sid,turn=turn,origin=origin,source_label=labels.get(device) or origin,updated=updated,state=state,title=title,summary=summary,display=display,stale=stale,device_id=device,thread=thread)
             reads=[dict(session=s,turn=t) for s,t in db.execute('SELECT session,turn FROM shared_reads WHERE stamp>? ORDER BY stamp DESC LIMIT 4096',(now-90*86400,))]
             devices=[dict(device_id=d,origin=o,last_seen=s,ready=bool(r)) for d,o,s,r in db.execute('SELECT device,origin,seen,ready FROM shared_devices')]
-        return dict(schema=2,checked=now,sessions=list(sessions.values())[:256],reads=reads,devices=devices)
+        return dict(schema=2,usage_revision=usage_revision,live_output_rate=rates,revision=revision,stream_id=self.events.epoch,checked=now,sessions=list(sessions.values())[:256],reads=reads,devices=devices)
     def quotas(self,device,rows):
         from quota_history import valid_sample,store
         if not isinstance(rows,list) or len(rows)>1000:raise ValueError('invalid quota batch')
@@ -101,7 +127,14 @@ class SharedStore:
             if boundary is not None and (type(boundary) not in (int,float) or not math.isfinite(boundary) or not r['deadline']-604800-300<=boundary<=r['stamp']):raise ValueError('invalid boundary')
             clean.append(r)
         with closing(self.store.connect()) as db,db:
-            for r in clean:store(db,r['stamp'],r['deadline'],r['remaining'],'log',r['plan'],r['boundary'],r['reset_kind'])
+            changed=False
+            for r in clean:
+                old=db.execute('SELECT plan,boundary,reset_kind FROM quota_observations WHERE stamp=? AND deadline=? AND remaining=?',(r['stamp'],r['deadline'],r['remaining'])).fetchone()
+                store(db,r['stamp'],r['deadline'],r['remaining'],'log',r['plan'],r['boundary'],r['reset_kind'])
+                current=db.execute('SELECT plan,boundary,reset_kind FROM quota_observations WHERE stamp=? AND deadline=? AND remaining=?',(r['stamp'],r['deadline'],r['remaining'])).fetchone()
+                changed=changed or old!=current
+            if changed:self.events.usage_bump(db)
+        if changed:self.events.notify()
         return dict(accepted=len(clean))
     def records(self,device,rows):
         from quota_workload import SPEEDS,EFFORTS,store
@@ -115,7 +148,7 @@ class SharedStore:
             base.append({k:v for k,v in r.items() if k not in ('cached','speed','effort')})
             extras.append((r.get('session'),r.get('total'),cached,speed,effort))
         # ingest validates the entire base before writing. Extras were validated above.
-        result=self.store.ingest(device,base)
+        result=self.store.ingest(device,base,notify=False);changed=result['changed']
         with closing(self.store.connect()) as db,db:
             for sid,total,cached,speed,effort in extras:
                 old=db.execute('SELECT cached,speed,effort FROM raw_workload WHERE session=? AND total=?',(sid,total)).fetchone()
@@ -123,6 +156,7 @@ class SharedStore:
                 if old:
                     conflict=any(a not in (None,'') and b not in (None,'') and a!=b for a,b in zip(old,vals))
                     vals=(-1,'','') if conflict or old[0]==-1 else tuple(a if a not in (None,'') else b for a,b in zip(old,vals))
+                changed=changed or old is None or tuple(old)!=vals
                 db.execute('INSERT OR REPLACE INTO raw_workload VALUES(?,?,?,?,?)',(sid,total,*vals))
             for sid in {r[0] for r in extras}:
                 previous=0;pc=0
@@ -130,11 +164,17 @@ class SharedStore:
                     dc=cached-pc if cached is not None and pc is not None and cached>=0 and pc>=0 else None
                     store(db,sid+':'+str(total),model,total-previous,dc if dc is not None and dc>=0 else None,dict(speed=speed or '',effort=effort or ''))
                     previous=total;pc=cached
+            if changed:self.events.usage_bump(db)
+        if changed:self.events.notify()
         return result
     def progress(self,device,ready):
         if type(ready) is not bool:raise ValueError('invalid progress')
         with closing(self.store.connect()) as db,db:
+            old=db.execute('SELECT ready FROM accounting_devices WHERE device=?',(device,)).fetchone()
             db.execute('INSERT OR REPLACE INTO accounting_devices VALUES(?,?,?)',(device,int(ready),time.time()))
+            changed=ready and (old is None or not old[0])
+            if changed:self.events.usage_bump(db)
+        if changed:self.events.notify()
         return dict(accepted=True)
     def quota_snapshot(self,db,now=None):
         from quota_history import summarize_cycles,anomaly

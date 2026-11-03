@@ -14,6 +14,22 @@ def load_tool(name,path):
     spec=spec_from_file_location(name,ROOT/path);module=module_from_spec(spec);spec.loader.exec_module(module);return module
 
 class SourcePlatformTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform=='win32','Windows console regression')
+    def test_windowless_launcher_children_have_no_native_console(self):
+        import json
+        tool=load_tool('source_launcher_hidden','launch.py')
+        result=tool.run_child([sys.executable,'-c','import ctypes,json; print(json.dumps(dict(console=bool(ctypes.windll.kernel32.GetConsoleWindow()))))'],capture_output=True,text=True,timeout=10,check=True)
+        self.assertFalse(json.loads(result.stdout)['console'])
+
+    def test_bootstrap_children_hide_on_windows_and_keep_posix_options(self):
+        tool=load_tool('source_launcher_flags','launch.py')
+        with patch.object(tool.sys,'platform','win32'),patch.object(tool.subprocess,'run') as child:
+            tool.run_child(['python','-c','pass'],creationflags=0x200,capture_output=True,timeout=5)
+            self.assertEqual(child.call_args.kwargs['creationflags'],0x08000200)
+        with patch.object(tool.sys,'platform','darwin'),patch.object(tool.subprocess,'run') as child:
+            tool.run_child(['python','-c','pass'],capture_output=True,timeout=5)
+            self.assertNotIn('creationflags',child.call_args.kwargs)
+
     def test_source_readiness_handles_real_venv_child_pid(self):
         import json,time
         tool=load_tool('source_launcher_ready','launch.py')

@@ -4,7 +4,7 @@
 
 在 Windows 和 Mac 上使用同一份 Python 源码，查看 Codex 任务状态、接收完成提醒、统计额度与 Token，并与白龙互动。保留源码和一键执行脚本，方便后续修改、更新及两端同步。
 
-**当前源码版本：v1.4.2.18.6 / UI99**。版本号前 3 段是上游基线（1.4.2），后 2 段是本 fork 定制号（18.6，对应内部更新版本 0.18.6）；同步功能更新前的组合号示例为 v1.4.2.17.3。已合入 [Wunsch2048 增强版](https://github.com/Wunsch2048/codex-bailong-desktop-pet) 的 **v1.4.2**（`fc0ce47`），保留本仓库的 Windows/macOS 适配、Token 同步、SSH、会话轮换和随机动作。角色与原始桌宠来自 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet)。
+**当前源码版本：v1.4.2.19.3 / UI99**。版本号前 3 段是上游基线（1.4.2），后 2 段是本 fork 定制号（19.3，对应内部更新版本 0.19.3）；同步功能更新前的组合号示例为 v1.4.2.17.3。已合入 [Wunsch2048 增强版](https://github.com/Wunsch2048/codex-bailong-desktop-pet) 的 **v1.4.2**（`fc0ce47`），保留本仓库的 Windows/macOS 适配、Token 同步、SSH、会话轮换和随机动作。角色与原始桌宠来自 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet)。
 
 [源码使用与更新](docs/跨平台源码使用.md) · [上游 v1.4.2 更新](docs/releases/v1.4.2.md) · [来源与授权](NOTICE.md) · [反馈问题](https://github.com/jiashuncheng/codex-bailong-desktop-pet/issues)
 
@@ -24,7 +24,7 @@
 | 本地高清素材接入 | 导入已下载的 720px 高清包，逐文件校验并建立独立快照；有完整轻量素材时支持部分高清回退，补齐后再次更新即可 |
 | Mac 系统集成 | 适配应用发现、登录启动、系统钥匙串、菜单栏及基于辅助功能的视频全屏让位 |
 | 美西时钟 | 重置公告暂无安排时，显示洛杉矶当地时间与日期，自动处理夏令时；有安排时仍按原方式显示重置消息与倒计时 |
-| 多端统一同步 | `win`、`wsl`、`mac` 和实际服务器来源经同一 HTTPS 通道共享去重 Token、额度观测、会话名称／状态／公开摘要及回合已读标记；GPU228 汇总计算，阿里云仅中转。详见[同步说明](docs/多端Token同步.md) |
+| 多端统一同步 | `win`、`wsl`、`mac` 和实际服务器来源经同一 HTTPS 通道共享去重 Token 与额度；会话名称／状态／公开摘要及回合已读变更立即上报，由持续连接实时推送；GPU228 汇总计算，阿里云仅中转。详见[同步说明](docs/多端Token同步.md) |
 | 安全同步源码 | 从本人的 fork 快进更新；工作区有未提交修改或历史分叉时停止，避免覆盖本地修改；更新后自动重启 |
 
 ## 已合入的上游新功能

@@ -89,7 +89,7 @@ class IslandStatusText(QLabel):
                 y=top+index*line_height+6*(1-progress)
                 p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor('#443b50'))
                 p.drawRoundedRect(QRectF(0,y+1,c['source_width'],15),4,4)
-                draw(row['source'],1,y,c['source_width']-2,'#d6cadd')
+                draw(row['source'],1,y,c['source_width']-2,'#d6cadd',Qt.AlignmentFlag.AlignHCenter)
                 draw(row['name'],c['name_x'],y,c['name_width'],ON_ISLAND)
                 draw(row['status'],c['status_x'],y,c['status_width'],ISLAND_RUNNING if row['running'] else ON_ISLAND)
             if self.extra:

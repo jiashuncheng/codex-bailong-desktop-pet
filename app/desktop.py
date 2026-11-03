@@ -1413,6 +1413,10 @@ class DesktopPet(EnhancedPet):
         value['ui_revision']=99
         from version import DISPLAY_VERSION,UPSTREAM_VERSION
         value.update(display_version=DISPLAY_VERSION,upstream_version=UPSTREAM_VERSION,custom_version=VERSION)
+        shared=getattr(getattr(self,'activity',None),'shared_worker',None)
+        value['session_sync']=dict(mode='push' if getattr(shared,'push_connected',False) else 'poll',connected=bool(shared and shared.connected),revision=getattr(shared,'revision',None),stream_id=getattr(shared,'epoch',None),last_received=getattr(shared,'last_received',None))
+        rate=getattr(self.bubble,'live_output_rate',{}) or {}
+        value['token_push']=dict(usage_revision=(self.bubble.token_snapshot or {}).get('usage_revision'),rate_scope=rate.get('scope','local'),rate=rate.get('rate'),rate_sessions=rate.get('sessions',0),source_width_max=27)
         atomic_json(path,value)
 
     def closeEvent(self,event):

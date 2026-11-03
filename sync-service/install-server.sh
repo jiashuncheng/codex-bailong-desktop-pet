@@ -9,7 +9,9 @@ command -v openssl >/dev/null
 if ! id bailong-sync >/dev/null 2>&1; then useradd --system --home-dir /var/lib/bailong-token-sync --shell /usr/sbin/nologin bailong-sync; fi
 install -d -o bailong-sync -g bailong-sync -m 700 /var/lib/bailong-token-sync
 install -d -m 755 /opt/bailong-token-sync/current/app
-for source_file in token_sync_server.py token_calendar.py token_analytics.py sync_ledger.py token_sync.py log_catalog.py performance_metrics.py; do
+for source_path in "$SOURCE_ROOT"/app/*.py; do
+  source_file="$(basename -- "$source_path")"
+  [[ "$source_file" == test_* ]] && continue
   install -m 644 "$SOURCE_ROOT/app/$source_file" "/opt/bailong-token-sync/current/app/$source_file"
 done
 install -d -m 700 /etc/bailong-token-sync
@@ -55,6 +57,15 @@ server {
     client_max_body_size 1m;
     client_body_timeout 15s;
     access_log off;
+    location = /v3/events {
+        proxy_pass http://127.0.0.1:8769;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host \$host;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 45s;
+    }
     location / {
         limit_req zone=bailong_token_sync burst=20 nodelay;
         proxy_pass http://127.0.0.1:8769;

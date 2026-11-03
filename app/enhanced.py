@@ -47,9 +47,9 @@ class ActivityThread(QThread):
     def __init__(self,parent=None,home=None):
         super().__init__(parent)
         self.stop=threading.Event()
-        self.tail=RolloutTail(home)
+        self.tail=RolloutTail(home);self.tail.catalog.interval=1
         from live_rate import LiveOutputRate
-        self.output_rate=LiveOutputRate();self.tail.rate_observer=self.output_rate.ingest;self.last_output_rate=None
+        self.output_rate=LiveOutputRate();self.tail.rate_observer=self.observe_tokens;self.last_output_rate=None
         from codex_connection import is_wsl_source
         from wsl_codex import state_dir
         self.wsl=is_wsl_source(self.tail.home);self.session_dir=state_dir(STATE_DIR,self.tail.home)
@@ -63,6 +63,9 @@ class ActivityThread(QThread):
         self.last_health_scan=-10
         from activity_targets import ActivityTargets
         self.targets=ActivityTargets();self.context_lock=threading.Lock();self.displayed=();self.visited=();self.last_active_scan=-20
+    def observe_tokens(self,sid,payload,stamp,**kw):
+        self.output_rate.ingest(sid,payload,stamp,**kw)
+        if payload.get('type')=='token_count' and not kw.get('historical'):self.token_wake.set()
     def run(self):
         from shared_state import SharedWorker
         self.shared_worker=SharedWorker(STATE_DIR,self.tail.home,self.stop,self.event.emit)
@@ -102,19 +105,22 @@ class ActivityThread(QThread):
                 history_due=time.monotonic()-self.last_active_scan>=15
                 if history_due:
                     self.last_active_scan=time.monotonic();seeds=[] if self.wsl else active_conversations(self.tail.home)
-                    existing={session_id(s) for s in self.tail.reducer.sessions}
-                    for e in seeds:
-                        if session_id(e['session']) not in existing:
-                            self.tail.reducer.sessions[e['session']]=Session(title=e['title'],state='working',turn=e['turn'],done=False,updated=time.monotonic())
                 with self.context_lock:displayed=self.displayed;visited=self.visited
                 self.targets.sync(self.tail.reducer.sessions,pending,displayed,visited)
-                self.tail.set_pins(self.targets.pinned());batch=self.tail.poll()
+                self.tail.set_pins([*self.targets.pinned(),*(e['session'] for e in seeds)]);batch=self.tail.poll()
+                if seeds:
+                    from session_read_state import restore_active_turns
+                    batch.extend(restore_active_turns(self.tail.home,self.tail.reducer,seeds))
                 live_rate=self.output_rate.snapshot()
                 for item in live_rate['details']:
                     record=self.tail.reducer.sessions.get(item['session'])
                     item['name']=self.conversation_names.get(session_id(item['session'])) or (record.title if record else '') or '会话 '+session_id(item['session'])[:8]
+                self.shared_worker.update_rates(live_rate)
                 if live_rate!=self.last_output_rate:
-                    self.last_output_rate=live_rate;self.event.emit(dict(kind='live_output_rate',value=live_rate))
+                    self.last_output_rate=live_rate
+                    from token_sync import read_config
+                    cfg=read_config(STATE_DIR)
+                    if not (cfg.get('enabled') and cfg.get('view','all')=='all' and self.shared_worker.has_shared):self.event.emit(dict(kind='live_output_rate',value=live_rate))
                 if not self.seed_status_sent:
                     self.seed_status_sent=True
                     states={session_id(sid):v for sid,v in self.tail.reducer.sessions.items()}
@@ -147,6 +153,7 @@ class ActivityThread(QThread):
                         self.conversation_names.update(names)
                         self.conversation_names={sid:name for sid,name in self.conversation_names.items() if sid in self.targets.entries}
                         self.event.emit(dict(kind='conversation_names',names=names,sources=sources))
+                self.shared_worker.update_local(self.tail,self.conversation_names)
                 from session_read_state import session_id
                 for event in batch:
                     if event.get('kind') in ('status','complete') and event.get('session'):
@@ -156,7 +163,7 @@ class ActivityThread(QThread):
                         event['source_label']='wsl' if self.wsl else origin_name()
                     name=self.conversation_names.get(session_id(event.get('session','')))
                     if name:event['title']=name;event['conversation_name']=name
-                    self.event.emit(event)
+                    if event.get('kind') not in ('status','complete') or not self.shared_worker.connected:self.event.emit(event)
                 if self.desktop_open is not True:self.read_acknowledgements.first_read.clear()
                 if self.desktop_open is True and time.monotonic()-self.last_read_scan>=2:
                     self.last_read_scan=time.monotonic()
@@ -172,7 +179,7 @@ class ActivityThread(QThread):
             except Exception:
                 self.event.emit({'kind':'monitor_error','text':'状态监听暂时不可用，稍后重试'})
                 self.event.emit(dict(kind='connection_health',capabilities={key:dict(state='unavailable',code='logs_unreadable') for key in ('tasks','completion')}))
-            due=time.monotonic()-self.last_token_scan>=30 or self.token_wake.is_set()
+            due=time.monotonic()-self.last_token_scan>=30 or (self.token_wake.is_set() and time.monotonic()-self.last_token_scan>=2)
             if due and not self.stop.is_set() and (self.token_reader is None or not self.token_reader.is_alive()):
                 self.last_token_scan=time.monotonic();self.token_wake.clear()
                 self.token_runs.reserve()
@@ -723,6 +730,10 @@ class EnhancedPet(Pet):
                 if isValid(card):card.set_data(event['value'])
         elif kind=='token_usage':
             snapshot=event['snapshot']
+            shared=getattr(getattr(self,'activity',None),'shared_worker',None)
+            if shared and shared.epoch and snapshot.get('stream_id') and snapshot['stream_id']!=shared.epoch:return
+            previous=self.bubble.token_snapshot or {}
+            if snapshot.get('stream_id')==previous.get('stream_id') and snapshot.get('usage_revision',-1)<previous.get('usage_revision',-1):return
             if snapshot.get('unavailable') and self.bubble.token_snapshot:
                 snapshot=dict(self.bubble.token_snapshot,partial=True,refresh_failed=True)
             self.bubble.token_snapshot=snapshot;self.bubble.redraw();self.position_bubble()

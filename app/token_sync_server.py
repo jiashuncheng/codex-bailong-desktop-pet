@@ -58,7 +58,7 @@ class SyncStore:
             row=db.execute('SELECT expires,used FROM invites WHERE hash=?',(digest(code),)).fetchone()
             if not row or row[0]<time.time() or row[1]:raise ValueError('连接文件已使用或过期，请重新导出。')
             result=self.add_device(name,db);db.execute('UPDATE invites SET used=1 WHERE hash=?',(digest(code),));return result
-    def ingest(self,device,records):
+    def ingest(self,device,records,notify=True):
         if not isinstance(records,list) or len(records)>1000:raise ValueError('invalid batch')
         clean=[]
         for r in records:
@@ -87,7 +87,9 @@ class SyncStore:
                         db.execute('UPDATE raw SET stamp=?,model=?,input=?,output=? WHERE session=? AND total=?',(*new,sid,total));changed.add(sid)
             for sid in changed:self.rebuild(db,sid)
             db.execute('UPDATE devices SET last_seen=? WHERE id=?',(time.time(),device))
-        return dict(accepted=len(clean),inserted=inserted)
+            if changed and notify:self.shared.events.usage_bump(db)
+        if changed and notify:self.shared.events.notify()
+        return dict(accepted=len(clean),inserted=inserted,changed=bool(changed))
     @staticmethod
     def rebuild(db,sid):
         # Union of cumulative checkpoints. A late intermediate checkpoint only
@@ -102,6 +104,7 @@ class SyncStore:
         with closing(self.connect()) as db:
             db.execute('BEGIN')
             value=TokenUsageIndex.snapshot(SimpleNamespace(),db)
+            value.update(usage_revision=self.shared.events.usage_revision(db),stream_id=self.shared.events.epoch)
             value.update(self.shared.quota_snapshot(db))
             devices=[dict(device_id=i,name=n,last_seen=t) for i,n,t in db.execute('SELECT id,name,last_seen FROM devices ORDER BY name')]
         value.update(source='多端 Codex 日志（已去重）',scope='all',devices=devices,timezone='Asia/Shanghai',messages_available=False)
@@ -125,12 +128,36 @@ class Handler(BaseHTTPRequestHandler):
         return self.server.store.authenticate(header[7:]) if header.startswith('Bearer ') and len(header)<512 else None
     def do_GET(self):
         try:
-            if self.path=='/health':return self.respond(200,dict(status='ok',schema=2,version=DISPLAY_VERSION,custom_version=VERSION,upstream_version=UPSTREAM_VERSION,capabilities=['records','quota','sessions','reads']))
+            if self.path=='/health':return self.respond(200,dict(status='ok',schema=2,version=DISPLAY_VERSION,custom_version=VERSION,upstream_version=UPSTREAM_VERSION,capabilities=['records','quota','sessions','reads','state_events','usage_events','live_rates']))
             if not self.device():return self.respond(401,dict(error='设备认证失败，请重新导入连接文件。'))
+            if self.path=='/v3/events':return self.stream_state()
             if self.path=='/v2/state':return self.respond(200,self.server.store.shared.snapshot())
             if self.path=='/v1/snapshot':return self.respond(200,self.server.store.snapshot())
             self.respond(404,dict(error='not found'))
         except (OSError,sqlite3.Error):self.respond(503,dict(error='同步服务暂不可用'))
+    def stream_state(self):
+        # Credentials stay in the Authorization header; TLS is terminated by the
+        # existing proxy. No event log, request text or query-string token.
+        self.send_response(200)
+        self.send_header('Content-Type','text/event-stream; charset=utf-8')
+        self.send_header('Cache-Control','no-cache, no-store')
+        self.send_header('X-Accel-Buffering','no')
+        self.end_headers()
+        self.connection.settimeout(20);last=None
+        try:
+            while True:
+                value=self.server.store.shared.snapshot()
+                key=(value['stream_id'],value['revision'])
+                if key!=last:
+                    data=json.dumps(value,ensure_ascii=False,separators=(',',':')).encode()
+                    self.wfile.write(b'event: state\nid: '+str(value['revision']).encode()+b'\ndata: '+data+b'\n\n');last=key
+                else:self.wfile.write(b': keepalive\n\n')
+                self.wfile.flush()
+                self.server.store.shared.events.wait(value['revision'],10)
+                if not self.device():break
+        except (OSError,ValueError,sqlite3.Error):pass
+        self.close_connection=True
+
     def do_POST(self):
         try:
             if self.path=='/v1/enroll':

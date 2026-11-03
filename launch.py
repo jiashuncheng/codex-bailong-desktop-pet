@@ -26,6 +26,12 @@ def background_options():
     return dict(creationflags=0x08000200) if sys.platform=='win32' else dict(start_new_session=True)
 
 
+def run_child(command,**options):
+    """A windowless launcher must also keep its short-lived console children hidden."""
+    if sys.platform=='win32':options['creationflags']=options.get('creationflags',0)|0x08000000
+    return subprocess.run(command,**options)
+
+
 def ensure_environment():
     if not (3, 12) <= sys.version_info[:2] < (3, 14):
         raise RuntimeError('需要 Python 3.12 或 3.13。可在 python.org 安装，或设置 BAILONG_PYTHON。')
@@ -38,13 +44,13 @@ def ensure_environment():
     receipt = ROOT / '.venv/.bailong-requirements.sha256'
     valid = receipt.is_file() and receipt.read_text().strip() == digest
     if valid:
-        check = subprocess.run([str(python), '-c',
+        check = run_child([str(python), '-c',
                                 'import PySide6,PIL,psutil,msgspec; '+('import AppKit,Quartz,Security' if sys.platform=='darwin' else 'import comtypes')],
                                capture_output=True, timeout=20)
         valid = check.returncode == 0
     if not valid:
         print('正在安装 / 核对本机运行依赖（首次需要联网）…', flush=True)
-        subprocess.run([str(python), '-m', 'pip', 'install', '--disable-pip-version-check',
+        run_child([str(python), '-m', 'pip', 'install', '--disable-pip-version-check',
                         '--no-cache-dir', '-r', str(requirements)], check=True)
         receipt.write_text(digest + '\n')
     return python
@@ -64,7 +70,7 @@ def is_running(state, python):
     script = ('import json,psutil,sys; '
               'p=psutil.Process(int(sys.argv[1])); '
               'print(json.dumps(p.cmdline()))')
-    found = subprocess.run([str(python), '-c', script, str(pid)], capture_output=True, text=True, timeout=5)
+    found = run_child([str(python), '-c', script, str(pid)], capture_output=True, text=True, timeout=5)
     if found.returncode:
         return False
     try:
@@ -76,7 +82,7 @@ def is_running(state, python):
 def stop_pet(python):
     # Graceful, app-owned local socket. Never kill an unverified or reused PID.
     previous=read_runtime().get('pid')
-    subprocess.run([str(python), str(ROOT / 'run_source.py'), '--quit'], check=True, timeout=35)
+    run_child([str(python), str(ROOT / 'run_source.py'), '--quit'], check=True, timeout=35)
     if not isinstance(previous,int) or previous<=1:return
     # A new checkout can replace an older source directory. Wait for that
     # recorded pet too, so it releases the shared local server before restart.
@@ -87,7 +93,7 @@ try:
  if any(Path(a).name.lower() in ('run_source.py','enhanced.py','bailongenhanced.exe') for a in p.cmdline()):p.wait(25)
 except psutil.NoSuchProcess:pass
 '''
-    subprocess.run([str(python),'-c',wait_script,str(previous)],check=True,timeout=30)
+    run_child([str(python),'-c',wait_script,str(previous)],check=True,timeout=30)
 
 
 def bridge_config():
@@ -101,7 +107,7 @@ def bridge_config():
 def bridge_action(python, stop=False):
     entry = ROOT / 'ssh-bridge/bridge.py'
     if stop:
-        subprocess.run([str(python), str(entry), '--stop'], check=True, timeout=10)
+        run_child([str(python), str(entry), '--stop'], check=True, timeout=10)
         return
     if not bridge_config().get('enabled'):
         return
@@ -124,7 +130,7 @@ def started_source_is_ready(state, process, python):
 def start_pet(python, autostart=False):
     if autostart and is_running(read_runtime(), python):
         return
-    subprocess.run([str(python),str(ROOT/'tools/prepare_source_assets.py')],check=True)
+    run_child([str(python),str(ROOT/'tools/prepare_source_assets.py')],check=True)
     stop_pet(python)
     bridge_action(python, stop=True)
     bridge_action(python)
@@ -160,7 +166,7 @@ def main():
         return 0
     python = ensure_environment()
     if args.action=='update':
-        return subprocess.run([str(python),str(ROOT/'tools/sync_source.py')]).returncode
+        return run_child([str(python),str(ROOT/'tools/sync_source.py')]).returncode
     if args.action == 'setup':
         print('运行环境已准备好。双击“一键启动.command”即可运行。')
         return 0
@@ -179,18 +185,18 @@ def main():
         elif args.action == 'settings':
             if not is_running(read_runtime(), python):
                 start_pet(python)
-            subprocess.run([str(python), str(ROOT / 'run_source.py'), '--settings'], check=True)
+            run_child([str(python), str(ROOT / 'run_source.py'), '--settings'], check=True)
         elif args.action == 'bridge-restart':
             bridge_action(python, stop=True)
             bridge_action(python)
             print('SSH 配置已应用。连接结果可在桌宠状态区和数据目录 ssh-bridge/status.json 查看。')
         elif args.action == 'local-hd':
-            subprocess.run([str(python),str(ROOT/'tools/import_local_hd.py')],check=True)
+            run_child([str(python),str(ROOT/'tools/import_local_hd.py')],check=True)
             start_pet(python)
         elif args.action == 'diagnose':
-            subprocess.run([str(python), str(ROOT / 'tools/check_mac.py'), '--connection'], check=True)
+            run_child([str(python), str(ROOT / 'tools/check_mac.py'), '--connection'], check=True)
         elif args.action == 'check':
-            subprocess.run([str(python), str(ROOT / 'tools/check_mac.py')], check=True)
+            run_child([str(python), str(ROOT / 'tools/check_mac.py')], check=True)
     return 0
 
 

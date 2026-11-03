@@ -19,7 +19,7 @@ class SharedTests(unittest.TestCase):
     def test_origin_is_actual_device_and_duplicate_session_has_one_owner(self):
         self.state(self.a,'win');value=self.state(self.b,'mac',self.now+1)
         self.assertEqual(len(value['sessions']),1);self.assertEqual(value['sessions'][0]['origin'],'mac')
-        with closing(self.store.connect()) as db:self.assertEqual(db.execute('SELECT name FROM devices WHERE id=?',(self.a,)).fetchone()[0],'win')
+        with closing(self.store.connect()) as db:self.assertEqual(db.execute('SELECT name FROM devices WHERE id=?',(self.a,)).fetchone()[0],'old-Windows')
     def test_stale_running_snapshot_cannot_resurrect_terminal_turn(self):
         self.state(self.a,'win',state='complete');value=self.state(self.b,'mac',self.now-1)
         self.assertEqual(value['sessions'][0]['state'],'complete')
@@ -71,7 +71,7 @@ class SharedTests(unittest.TestCase):
         from version import VERSION,DISPLAY_VERSION,UPSTREAM_VERSION,CUSTOM_VERSION,material_compatibility
         from app_updates import version_tuple
         self.assertEqual(DISPLAY_VERSION,UPSTREAM_VERSION+'.'+CUSTOM_VERSION)
-        self.assertEqual(version_tuple(VERSION),(0,18,6))
+        self.assertEqual(version_tuple(VERSION),(0,19,3))
         self.assertEqual(material_compatibility(VERSION),UPSTREAM_VERSION)
     def test_turn_identity_keeps_its_namespace_and_unknown_linux_never_becomes_gpu228(self):
         from shared_state import wire_turn,origin_name

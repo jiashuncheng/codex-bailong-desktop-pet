@@ -54,4 +54,15 @@ class NameUiTests(unittest.TestCase):
         self.assertEqual([r['name'] for r in text.source_rows],['jsc-10','jsc-11'])
         self.assertEqual(self.b.ui_scale,.85)
 
+    def test_three_character_device_badges_are_narrow_and_complete(self):
+        size=self.b.size();icon_rect=self.b.status_indicator.geometry()
+        for source in ('win','mac','wsl','gpu228'):
+            icon=self.b.status_indicator
+            icon.session_entries=[dict(source_label=source,title='jsc-10',state='working')]
+            icon.session_states=['working'];icon.session_summary='执行';self.b.island.refresh();APP.processEvents()
+            text=self.b.island.text
+            self.assertLessEqual(text.row_columns['source_width'],27)
+            self.assertEqual(text.source_rows[0]['source'],'228' if source=='gpu228' else source)
+            self.assertEqual(self.b.size(),size);self.assertEqual(icon.geometry(),icon_rect)
+
 if __name__=='__main__':unittest.main()

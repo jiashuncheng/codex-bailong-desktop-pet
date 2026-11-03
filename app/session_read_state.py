@@ -281,3 +281,31 @@ def active_conversations(home):
         eligible={sid:title for sid,title in eligible.items() if sid not in excluded}
         return [dict(kind='status',session=sid,turn=turn,state='working',title=eligible[sid],text='任务正在进行',active=len([x for x,t in active if x in eligible]),historical_snapshot=True) for sid,turn in active if sid in eligible]
     except (OSError,sqlite3.Error,ValueError):return []
+
+
+def restore_active_turns(home,reducer,seeds):
+    """Bind DB-confirmed active turns when a bounded log tail missed their start."""
+    from enhanced_core import Session
+    events=[]
+    for seed in seeds:
+        sid=session_id(seed['session']);turn=str(seed.get('turn') or '')
+        if not turn:continue
+        alias=next((key for key in reducer.sessions if session_id(key)==sid),sid)
+        current=reducer.sessions.get(alias)
+        if current and (current.source_subagent or current.turn==turn or current.closed_turn==turn):continue
+        if current and current.turn:
+            # A lagging DB must not roll a newer observed log turn backwards.
+            try:
+                with closing(sqlite3.connect((Path(home)/'thread_history_1.sqlite').as_uri()+'?mode=ro',uri=True,timeout=.1)) as db:
+                    order=dict(db.execute('SELECT turn_id,MAX(rollout_ordinal) FROM thread_turns WHERE thread_id=? AND turn_id IN (?,?) GROUP BY turn_id',(sid,current.turn,turn)))
+                if current.turn not in order or turn not in order or order[turn]<=order[current.turn]:continue
+            except (OSError,sqlite3.Error,ValueError):continue
+        if current is None:
+            current=Session(title=seed.get('title') or 'Codex 对话');reducer.sessions[alias]=current
+        restart=current.done or bool(current.turn)
+        current.turn=turn;current.closed_turn='';current.done=False;current.updated=time.monotonic()
+        current.runtime_active=None;current.runtime_turn=''
+        if restart or current.state not in ('thinking','working','responding','waiting'):
+            current.state='working';current.display=current.message='任务正在进行';current.public_summary='';current.waiting_reason='';current.compacting=False;current.calls.clear()
+        events.append(dict(reducer._status(alias,current),historical_snapshot=True))
+    return events

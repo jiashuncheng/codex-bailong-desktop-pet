@@ -3,7 +3,7 @@ import json
 import time
 from pathlib import Path
 from PySide6.QtCore import QThread,Signal,QTimer
-from PySide6.QtWidgets import QWidget,QVBoxLayout,QCheckBox,QComboBox,QPushButton,QLabel,QFileDialog
+from PySide6.QtWidgets import QWidget,QVBoxLayout,QCheckBox,QComboBox,QPushButton,QLabel,QFileDialog,QLineEdit
 from platform_support import data_dir
 from token_sync import read_config,config_path,atomic,import_connection,export_connection
 
@@ -19,10 +19,12 @@ class TokenSyncPanel(QWidget):
         super().__init__();self.pet=pet;self.job=None;layout=QVBoxLayout(self);layout.setContentsMargins(0,0,0,0)
         config=read_config(data_dir());self.enabled=QCheckBox('启用多端统一同步');self.enabled.setChecked(bool(config.get('enabled')));layout.addWidget(self.enabled)
         self.scope=QComboBox();self.scope.addItem('显示全部设备去重汇总','all');self.scope.addItem('显示本机统计（后台仍同步）','local');self.scope.setCurrentIndex(max(0,self.scope.findData(config.get('view','all'))));layout.addWidget(self.scope)
+        layout.addWidget(QLabel('设备显示名称'))
+        self.device_name=QLineEdit(str(config.get('device_name','')));self.device_name.setMaxLength(40);self.device_name.setPlaceholderText('自定义名称，例如 mac、win、228');layout.addWidget(self.device_name)
         self.controls=[]
         for title,callback in [('导入同步连接文件…',self.import_file),('导出另一台设备连接文件…',self.export_file),('保存并立即同步',self.apply)]:
             button=QPushButton(title);button.clicked.connect(callback);layout.addWidget(button);self.controls.append(button)
-        self.note=QLabel('首次在另一台设备导入连接文件即可加入。连接文件限一次使用，7 天有效。计数与额度约 30 秒、会话与公开摘要约 5 秒同步，断网自动补传；不上传原始日志、完整聊天或凭据。');self.note.setWordWrap(True);layout.addWidget(self.note)
+        self.note=QLabel('首次在另一台设备导入连接文件即可加入。连接文件限一次使用，7 天有效。计数、实时速率和会话变化主动同步，断网重连补传并定期校验；不上传原始日志、完整聊天或凭据。设备名称可自定义，长名称在胶囊中省略显示。');self.note.setWordWrap(True);layout.addWidget(self.note)
         self.status=QLabel();self.status.setWordWrap(True);layout.addWidget(self.status)
         self.timer=QTimer(self);self.timer.setInterval(5000);self.timer.timeout.connect(self.refresh_status);self.timer.start();self.refresh_status()
     def refresh_status(self):
@@ -36,6 +38,11 @@ class TokenSyncPanel(QWidget):
             when=time.strftime('%H:%M:%S',time.localtime(status.get('checked',0)))
             self.status.setText(f"已连接 · {len(status.get('devices',[]))} 台设备 · {when} 更新"+(' · 正在补传历史记录' if status.get('more') else '')+(' · 部分日志不可读' if status.get('scan_errors') else ''))
         else:self.status.setText(status.get('error','同步暂不可用，稍后自动重试。'))
+        try:
+            shared=json.loads((data_dir()/'shared-state-status.json').read_text())
+            if shared.get('push_connected'):self.status.setText(self.status.text()+'\n会话实时推送已连接 · 版本 '+str(shared.get('revision','—')))
+            elif shared.get('connected'):self.status.setText(self.status.text()+'\n会话推送重连中，暂用轮询')
+        except (OSError,ValueError):pass
     def wake(self):
         self.pet.refresh_tokens()
     def start_job(self,operation):
@@ -60,4 +67,6 @@ class TokenSyncPanel(QWidget):
     def apply(self):
         config=read_config(data_dir())
         if self.enabled.isChecked() and not config.get('device_id'):self.status.setText('请先导入连接文件。');return
-        config.update(enabled=self.enabled.isChecked(),view=self.scope.currentData());atomic(config_path(data_dir()),config);self.wake();self.refresh_status()
+        config.update(enabled=self.enabled.isChecked(),view=self.scope.currentData())
+        if self.device_name.text().strip():config['device_name']=self.device_name.text().strip()
+        atomic(config_path(data_dir()),config);self.wake();self.refresh_status()

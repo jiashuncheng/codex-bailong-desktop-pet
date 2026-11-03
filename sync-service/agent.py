@@ -30,7 +30,9 @@ def main():
         if args.once:
             if snapshot:worker.once()
             return 0
-        stop.wait(2 if snapshot and snapshot.get('sync_more') else max(15,args.interval))
+        worker.token_wake.wait(2 if snapshot and snapshot.get('sync_more') else max(15,args.interval))
+        worker.token_wake.clear()
+        stop.wait(1)
     return 0
 
 if __name__=='__main__':raise SystemExit(main())

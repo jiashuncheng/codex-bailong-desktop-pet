@@ -53,7 +53,7 @@ def save_connection(state,config,token):
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self,*args,**kwargs):raise SyncError('同步地址发生重定向，请检查连接配置。')
 
-def request(config,path,payload=None,token='',timeout=8):
+def connection(config):
     url=str(config.get('url','')).rstrip('/');parts=urlsplit(url)
     if parts.scheme!='https' or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment or parts.path not in ('','/'):
         raise SyncError('同步服务必须使用 HTTPS 主地址。')
@@ -62,6 +62,10 @@ def request(config,path,payload=None,token='',timeout=8):
     if ca:context.load_verify_locations(cadata=ca)
     else:context.load_default_certs()
     opener=build_opener(ProxyHandler({}),HTTPSHandler(context=context),NoRedirect())
+    return url,opener
+
+def request(config,path,payload=None,token='',timeout=8):
+    url,opener=connection(config)
     body=json.dumps(payload,separators=(',',':')).encode() if payload is not None else None
     headers={'Accept':'application/json','User-Agent':'BailongTokenSync/1'}
     if body is not None:headers['Content-Type']='application/json'
@@ -116,7 +120,7 @@ def sync_once(state,home,stop=lambda:False,budget=4,cycle=None):
         ledger.acknowledge(target,batch[-1]['seq']);uploaded+=len(batch)
     more=bool(ledger.batch(target,1)) or scan['more']
     if unified:
-        request(config,'/v2/progress',dict(ready=False),token)
+        if uploaded or more:request(config,'/v2/progress',dict(ready=False),token)
         from shared_quota import upload
         more=upload(state,home,config,token,request,stop,cycle) or more
     if unified:request(config,'/v2/progress',dict(ready=not more and not scan['errors']),token)
@@ -127,6 +131,14 @@ def sync_once(state,home,stop=lambda:False,budget=4,cycle=None):
     atomic(state/'token-sync-cache.json',snapshot)
     atomic(state/'token-sync-status.json',dict(connected=True,checked=time.time(),uploaded=uploaded,more=more,scan_errors=scan['errors'],total=snapshot['all_total'],devices=snapshot.get('devices',[])))
     return snapshot
+
+def fetch_snapshot(state):
+    state=Path(state);config=read_config(state)
+    value=request(config,'/v1/snapshot',token=token_for(state,config))
+    if value.get('scope')!='all' or type(value.get('all_total')) is not int or not isinstance(value.get('history_days'),dict):raise SyncError('汇总响应无效')
+    value.update(sync_checked=time.time(),sync_connected=True)
+    atomic(state/'token-sync-cache.json',value)
+    return value
 
 def with_local_quota(cloud,local):
     result=dict(cloud)
@@ -153,3 +165,26 @@ def apply_sync(local,state,home,stop=lambda:False,cycle=None):
                 return with_local_quota(dict(cloud,partial=True,sync_stale=True,sync_connected=False,source='多端 Codex 日志（离线缓存）'),local)
             except (OSError,ValueError,TypeError):pass
         return dict(local,sync_connected=False,source='本机 Codex 日志（多端同步暂不可用）')
+
+
+def state_events(config,token,stop):
+    """Bounded SSE decoder. Authorization never enters URLs or event payloads."""
+    url,opener=connection(config)
+    headers={'Accept':'text/event-stream','Authorization':'Bearer '+token,'Cache-Control':'no-cache'}
+    with opener.open(Request(url+'/v3/events',headers=headers),timeout=20) as response:
+        if response.headers.get_content_type()!='text/event-stream':raise SyncError('推送响应类型无效')
+        data=[];size=0
+        while not stop():
+            line=response.readline(8*1024*1024+1)
+            if not line:raise SyncError('推送连接已断开')
+            if len(line)>8*1024*1024:raise SyncError('推送消息过大')
+            if line in (b'\n',b'\r\n'):
+                if data:
+                    value=json.loads(b'\n'.join(data))
+                    if not isinstance(value,dict) or value.get('schema')!=2 or not isinstance(value.get('sessions'),list):raise SyncError('推送快照无效')
+                    yield value
+                data=[];size=0
+            elif line.startswith(b'data:'):
+                part=line[5:].strip();size+=len(part)
+                if size>8*1024*1024:raise SyncError('推送消息过大')
+                data.append(part)

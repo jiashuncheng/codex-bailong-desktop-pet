@@ -71,7 +71,7 @@ class SharedTests(unittest.TestCase):
         from version import VERSION,DISPLAY_VERSION,UPSTREAM_VERSION,CUSTOM_VERSION,material_compatibility
         from app_updates import version_tuple
         self.assertEqual(DISPLAY_VERSION,UPSTREAM_VERSION+'.'+CUSTOM_VERSION)
-        self.assertEqual(version_tuple(VERSION),(0,18,0))
+        self.assertEqual(version_tuple(VERSION),(0,18,1))
         self.assertEqual(material_compatibility(VERSION),UPSTREAM_VERSION)
     def test_outbox_is_monotonic_and_only_removes_exact_ack(self):
         state=Path(self.temp.name);remember_reads(state,[('session','one'),('session','two')])

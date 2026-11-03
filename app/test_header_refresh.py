@@ -3,7 +3,8 @@ import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 import unittest,copy,time
 from PySide6.QtCore import Qt,QPoint,QRect,QEvent,QAbstractAnimation
-from PySide6.QtWidgets import QApplication,QToolButton
+from PySide6.QtWidgets import QApplication,QToolButton,QWidget,QToolTip
+from PySide6.QtTest import QTest
 from compact_bubble import CompactBubble
 from daily_report import DailyReport
 from refresh_indicator import RefreshButton
@@ -19,6 +20,22 @@ class HeaderRefreshTests(unittest.TestCase):
     def tearDown(self):
         self.bubble.close();self.bubble.deleteLater()
         APP.sendPostedEvents(None,QEvent.Type.DeferredDelete);APP.processEvents()
+    def test_header_hover_works_without_activating_the_card(self):
+        b=self.bubble;b.show();settle(b)
+        other=QWidget();other.move(800,40);other.show();APP.setActiveWindow(other);APP.processEvents()
+        try:
+            self.assertFalse(b.isActiveWindow())
+            button=b._header_actions[1]
+            QTest.mouseMove(button,QPoint(5,5))
+            deadline=time.monotonic()+2
+            popup=b.inline_explanations.popup
+            while not popup.isVisible() and time.monotonic()<deadline:QTest.qWait(20)
+            self.assertTrue(popup.isVisible())
+            self.assertEqual(popup.title,'数据')
+            self.assertFalse(QToolTip.isVisible())
+            self.assertFalse(b.isActiveWindow())
+        finally:
+            b.inline_explanations.dismiss(True);other.close();other.deleteLater();APP.processEvents()
     def event(self,state='working',session='a',**extra):
         data=dict(session=session,state=state,active=1,display='正在编辑文件',**extra)
         self.bubble.roster.observe(data);self.bubble.status_indicator.observe(data)
@@ -27,13 +44,13 @@ class HeaderRefreshTests(unittest.TestCase):
     def assert_header_fits(self):
         b=self.bubble;targets=b._header_actions;name=b._status_title.parentWidget()
         for target in targets:
-            self.assertEqual((target.width(),target.height()),(28,28))
+            self.assertEqual((target.width(),target.height()),(26,26))
             self.assertEqual(target.text(),'');self.assertTrue(target.accessibleName())
             self.assertTrue(b.rect().contains(self.bounds(target)))
             self.assertFalse(self.bounds(name).intersects(self.bounds(target)))
         for i,target in enumerate(targets):
             for other in targets[i+1:]:self.assertFalse(self.bounds(target).intersects(self.bounds(other)))
-        self.assertEqual(b._status_title.height(),28)
+        self.assertEqual(b._status_title.height(),26)
     def test_common_headings_fit_on_first_paint_and_live_updates(self):
         b=self.bubble
         for expanded in (False,True):

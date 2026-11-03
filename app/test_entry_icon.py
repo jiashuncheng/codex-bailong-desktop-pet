@@ -1,36 +1,53 @@
-"""Real Windows shortcut serialization, isolated from installed entry points."""
-import json,os,subprocess,sys,tempfile,unittest
+"""Real native Shell links; never launch an interpreter or an entry target."""
+import os,sys,tempfile,unittest,threading
 from pathlib import Path
-from installer import shortcut_script,entry_script,ps_string
+from unittest.mock import patch
+from windows_entries import write_shortcut,read_shortcut,install_entries,startup_entry,legacy_command
 
 @unittest.skipUnless(sys.platform=='win32','Windows shell shortcuts')
 class EntryIconTests(unittest.TestCase):
- def test_replaces_old_arguments_and_sets_icon_in_chinese_path(self):
+ def test_replaces_arguments_and_icon_in_chinese_path_without_shell_process(self):
   with tempfile.TemporaryDirectory(prefix='bailong-entry-') as folder:
-   root=Path(folder)/"中文 空格's";root.mkdir();link=root/'nested/白龙.lnk';link.parent.mkdir()
+   root=Path(folder)/"中文 空格's";root.mkdir();link=root/'nested/白龙.lnk'
    exe=Path(os.environ['WINDIR'])/'System32/notepad.exe'
-   seed="$s=New-Object -ComObject WScript.Shell;$l=$s.CreateShortcut("+ps_string(link)+");$l.TargetPath="+ps_string(exe)+";$l.Arguments='--quit';$l.Save();"
-   script=seed+shortcut_script(exe,[ps_string(link)])+"\n$l=$s.CreateShortcut("+ps_string(link)+");@{target=$l.TargetPath;args=$l.Arguments;icon=$l.IconLocation;cwd=$l.WorkingDirectory}|ConvertTo-Json -Compress"
-   result=subprocess.run(['powershell.exe','-NoProfile','-Command',script],capture_output=True,check=True)
-   data=json.loads(result.stdout);self.assertEqual(data['args'],'');self.assertEqual(data['icon'].casefold(),(str(exe)+',0').casefold());self.assertEqual(data['cwd'].casefold(),str(exe.parent).casefold())
- def test_upgrade_keeps_one_managed_desktop_alias_and_preserves_unrelated_links(self):
+   with patch('subprocess.run',side_effect=AssertionError('No shell')),patch('subprocess.Popen',side_effect=AssertionError('No process')):
+    write_shortcut(link,exe,'--quit');write_shortcut(link,exe);data=read_shortcut(link)
+   self.assertEqual(data['arguments'],'');self.assertEqual(data['target'].casefold(),str(exe).casefold())
+   self.assertEqual(data['icon'].casefold(),str(exe).casefold());self.assertEqual(data['iconIndex'],0)
+   self.assertEqual(data['cwd'].casefold(),str(exe.parent).casefold())
+ def test_upgrade_preserves_unrelated_links_and_retires_only_owned_alias(self):
   with tempfile.TemporaryDirectory(prefix='bailong-alias-') as folder:
-   base=Path(folder)/'Programs'/'BailongEnhanced';old_exe=base/'versions'/'0.8.7-test'/'BailongEnhanced.exe';new_exe=base/'versions'/'0.8.8-test'/'BailongEnhanced.exe';old_exe.parent.mkdir(parents=True);new_exe.parent.mkdir(parents=True);old_exe.write_bytes(b'old');new_exe.write_bytes(b'new')
-   desktop=Path(folder)/'Desktop';start=Path(folder)/'StartMenu'/'Programs';desktop.mkdir();start.mkdir(parents=True)
-   shell="$s=New-Object -ComObject WScript.Shell;";owned=desktop/'白龙桌宠.lnk';main=desktop/'白龙桌宠增强版.lnk';menu=start/'白龙桌宠增强版.lnk';unrelated=desktop/'OtherPet.lnk'
-   for path,target in ((owned,old_exe),(unrelated,Path(os.environ['WINDIR'])/'System32/notepad.exe')):
-    script=shell+"$l=$s.CreateShortcut("+ps_string(path)+");$l.TargetPath="+ps_string(target)+";$l.Save()"
-    subprocess.run(['powershell.exe','-NoProfile','-Command',script],check=True,capture_output=True)
-   script="$desktop="+ps_string(desktop)+";$startmenu="+ps_string(start)+";"+entry_script(new_exe,'$desktop','$startmenu')
-   script+=";@{main=$s.CreateShortcut("+ps_string(main)+").TargetPath;menu=$s.CreateShortcut("+ps_string(menu)+").TargetPath;old=(Test-Path -LiteralPath "+ps_string(owned)+");unrelated=(Test-Path -LiteralPath "+ps_string(unrelated)+")}|ConvertTo-Json -Compress"
-   result=subprocess.run(['powershell.exe','-NoProfile','-Command',script],capture_output=True,check=True);data=json.loads(result.stdout)
-   self.assertEqual(Path(data['main']),new_exe);self.assertEqual(Path(data['menu']),new_exe);self.assertFalse(data['old']);self.assertTrue(data['unrelated'])
-
- def test_save_error_is_nonzero(self):
+   base=Path(folder)/'BailongEnhanced';old=base/'versions/old/BailongEnhanced.exe';new=base/'versions/new/BailongEnhanced.exe'
+   desktop=Path(folder)/'Desktop';menu=Path(folder)/'Programs';desktop.mkdir();menu.mkdir()
+   alias=desktop/'白龙桌宠.lnk';other=desktop/'OtherPet.lnk';write_shortcut(alias,old);write_shortcut(other,Path(sys.executable));before=other.read_bytes()
+   install_entries(new,desktop,menu)
+   self.assertEqual(Path(read_shortcut(desktop/'白龙桌宠增强版.lnk')['target']),new)
+   self.assertEqual(Path(read_shortcut(menu/'白龙桌宠增强版.lnk')['target']),new)
+   self.assertFalse(alias.exists());self.assertEqual(other.read_bytes(),before)
+ def test_save_error_is_propagated(self):
   with tempfile.TemporaryDirectory() as folder:
    blocker=Path(folder)/'file';blocker.write_text('blocked')
-   script=shortcut_script(Path(sys.executable),[ps_string(blocker/'bad.lnk')])
-   result=subprocess.run(['powershell.exe','-NoProfile','-Command',script],capture_output=True)
-   self.assertNotEqual(result.returncode,0)
+   with self.assertRaises(OSError):write_shortcut(blocker/'bad.lnk',Path(sys.executable))
+ def test_worker_thread_owns_com_apartment(self):
+  with tempfile.TemporaryDirectory() as folder:
+   link=Path(folder)/'worker.lnk';errors=[]
+   def worker():
+    try:write_shortcut(link,Path(sys.executable),'--worker');self.assertEqual(read_shortcut(link)['arguments'],'--worker')
+    except Exception as error:errors.append(error)
+   thread=threading.Thread(target=worker);thread.start();thread.join(5)
+   self.assertFalse(thread.is_alive());self.assertEqual(errors,[])
+ def test_startup_migrates_known_script_and_preserves_foreign_script(self):
+  with tempfile.TemporaryDirectory() as folder:
+   root=Path(folder);old=root/'versions/old/BailongEnhanced.exe';new=root/'versions/new/BailongEnhanced.exe';link=root/'auto.lnk';vbs=root/'BailongEnhanced.vbs'
+   vbs.write_text('Set s=CreateObject("WScript.Shell")\ns.Run """'+str(old)+'""",0,False\n',encoding='utf-16')
+   self.assertEqual(legacy_command(vbs),[str(old)])
+   startup_entry(link,vbs,[str(new)],True);self.assertFalse(vbs.exists());self.assertEqual(Path(read_shortcut(link)['target']),new)
+   vbs.write_text('MsgBox "unrelated"',encoding='utf-16');before=vbs.read_bytes()
+   startup_entry(link,vbs,[str(new)],False);self.assertFalse(link.exists());self.assertEqual(vbs.read_bytes(),before)
+ def test_foreign_named_startup_link_is_not_overwritten(self):
+  with tempfile.TemporaryDirectory() as folder:
+   link=Path(folder)/'auto.lnk';write_shortcut(link,Path(sys.executable));before=link.read_bytes()
+   with self.assertRaises(OSError):startup_entry(link,link.with_suffix('.vbs'),[str(Path(folder)/'versions/new/BailongEnhanced.exe')],True)
+   self.assertEqual(link.read_bytes(),before)
 
 if __name__=='__main__':unittest.main()

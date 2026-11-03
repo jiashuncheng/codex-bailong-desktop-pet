@@ -14,7 +14,7 @@ def entry_paths(root,system):
             if ctypes.windll.shell32.SHGetFolderPathW(None,csidl,None,0,buffer):raise OSError('无法确定快捷方式目录')
             return Path(buffer.value)
         desktop=folder(16);start=folder(11);startup=folder(7)
-        paths.extend([desktop/'白龙桌宠增强版.lnk',desktop/'白龙桌宠.lnk',start/'Programs/白龙桌宠增强版.lnk',startup/'BailongEnhanced.vbs',startup/'白龙桌宠增强版.lnk',startup/'BailongCodexSync.vbs'])
+        paths.extend([desktop/'白龙桌宠增强版.lnk',desktop/'白龙桌宠.lnk',start/'Programs/白龙桌宠增强版.lnk',startup/'BailongEnhanced.vbs',startup/'白龙桌宠增强版.lnk',startup/'BailongCodexSync.vbs',startup/'BailongCodexSync.lnk'])
     return paths
 
 REGISTRY=r'Software\Microsoft\Windows\CurrentVersion\Uninstall\BailongEnhanced'
@@ -41,8 +41,9 @@ def capture_entries(root,system):
 
 def restore_entries(root,snapshot,system):
     expected={str(p) for p in entry_paths(root,system)}
-    legacy={p for p in expected if not p.endswith('BailongCodexSync.vbs')}
-    if set(snapshot['files']) not in (expected,legacy):raise ValueError('恢复入口范围无效')
+    optional={p for p in expected if Path(p).name in ('BailongCodexSync.vbs','BailongCodexSync.lnk')}
+    files=set(snapshot['files'])
+    if not expected-optional<=files<=expected:raise ValueError('恢复入口范围无效')
     for name,value in snapshot['files'].items():
         path=Path(name)
         if path.is_symlink():raise ValueError('恢复入口不能是符号链接')
@@ -114,7 +115,9 @@ def recover(root,system=False):
     path.unlink()
     if journal.get('old_running'):
         old=owned_destination(root,journal['old_running'])/'BailongEnhanced.exe'
-        if old.is_file():subprocess.Popen([str(old)],cwd=str(old.parent),creationflags=0x08000000)
+        if old.is_file():
+            from process_launch import launch_own
+            launch_own([str(old)],independent=True,cwd=str(old.parent),creationflags=0x08000000)
     return True
 
 def verify_payload(dest,version):
@@ -131,7 +134,8 @@ def verify_payload(dest,version):
 def wait_ready(process,exe,receipt,token,version,timeout=25,stable_seconds=1):
     deadline=time.monotonic()+timeout;first=None
     while time.monotonic()<deadline:
-        if process.poll() is not None:raise OSError('新版桌宠在就绪前退出，安装未提交')
+        code=process.poll()
+        if code is not None:raise OSError(f'新版桌宠在就绪前退出（0x{code & 0xffffffff:08X}），安装未提交')
         try:data=json.loads(receipt.read_text(encoding='utf-8'))
         except (OSError,ValueError):data={}
         if not isinstance(data,dict):data={}

@@ -49,6 +49,16 @@ class MaterialControllerTests(unittest.TestCase):
         self.assertIn('本地高清',panel.summary.text())
         self.assertFalse(panel.action.isEnabled())
         panel.close();panel.deleteLater()
+    def test_unready_or_card_only_panel_defaults_to_saved_hd_without_saving(self):
+        for card_only in (False,True):
+            with self.subTest(cardOnly=card_only):
+                self.store.current=None;self.store.preferred='hd';self.store.card_only=card_only
+                panel=MaterialPanel(self.c)
+                try:
+                    self.assertEqual(panel.choice.currentData(),'hd')
+                    self.assertTrue(panel.action.isEnabled())
+                    self.assertFalse(self.store.preference.exists())
+                finally:panel.close();panel.deleteLater();APP.processEvents()
     def test_material_location_move_cleans_old_cache_and_survives_restart(self):
         from material_store import MaterialStore
         old=self.store.cache;target=self.fixture.root/'external/BailongMaterials'

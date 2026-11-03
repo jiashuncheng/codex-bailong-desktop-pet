@@ -14,7 +14,7 @@ WATCH_FLAG='--watch-codex'
 def data_dir():return __import__('platform_support').data_dir()
 def install_root():return __import__('storage_locations').install_root()
 def preference_path():return data_dir()/'codex-startup.json'
-def startup_path():return Path(os.environ['APPDATA'])/'Microsoft/Windows/Start Menu/Programs/Startup/BailongCodexSync.vbs'
+def startup_path():return Path(os.environ['APPDATA'])/'Microsoft/Windows/Start Menu/Programs/Startup/BailongCodexSync.lnk'
 def read_json(path):
     try:
         value=json.loads(Path(path).read_text(encoding='utf-8'))
@@ -33,16 +33,12 @@ def supports_watcher(exe):
     try:return tuple(map(int,Path(exe).parent.name.split('-')[0].split('.'))) >= (0,8,1)
     except ValueError:return False
 
-def register(exe=None):
+def register(exe=None,previous_root=None):
     """Installer calls this inside its existing recoverable entry transaction."""
     path=startup_path()
-    if not enabled() or (exe is not None and not supports_watcher(exe)):
-        path.unlink(missing_ok=True);return
     command=[str(exe)] if exe is not None else app_command()
-    command=subprocess.list2cmdline(command+[WATCH_FLAG])
-    script='Option Explicit\nDim s\nSet s=CreateObject("WScript.Shell")\ns.Run "'+command.replace('"','""')+'",0,False\n'
-    path.parent.mkdir(parents=True,exist_ok=True)
-    temp=path.with_suffix('.tmp');temp.write_text(script,encoding='utf-16');os.replace(temp,path)
+    from windows_entries import startup_entry
+    startup_entry(path,path.with_suffix('.vbs'),command+[WATCH_FLAG],enabled() and (exe is None or supports_watcher(exe)),previous_root)
 
 def ensure_watcher(executable=None):
     if enabled():
@@ -51,7 +47,8 @@ def ensure_watcher(executable=None):
 def spawn(command):
     env=os.environ.copy()
     for key in ('BAILONG_DEPLOY_TOKEN','BAILONG_DEPLOY_RECEIPT'):env.pop(key,None)
-    return subprocess.Popen(command,creationflags=0x08000000,close_fds=True,env=env)
+    from process_launch import launch_own
+    return launch_own(command,independent=True,remove_environment=('BAILONG_DEPLOY_TOKEN','BAILONG_DEPLOY_RECEIPT'),creationflags=0x08000000,close_fds=True,env=env)
 
 def stop_watchers(root=None):
     root=Path(root or install_root()).resolve();manifest=read_json(root/'installations.json')
@@ -68,9 +65,10 @@ def stop_watchers(root=None):
 
 def configure(value,executable=None):
     """Keep prior preference and startup registration if the OS refuses a write."""
-    pref=preference_path();entry=startup_path()
+    pref=preference_path();entry=startup_path();legacy=entry.with_suffix('.vbs')
     before=pref.read_bytes() if pref.exists() else None
     old_entry=entry.read_bytes() if entry.exists() else None
+    old_legacy=legacy.read_bytes() if legacy.exists() else None
     try:
         atomic(pref,dict(enabled=bool(value)));register(executable)
         if value:ensure_watcher(executable)
@@ -79,6 +77,8 @@ def configure(value,executable=None):
         else:pref.write_bytes(before)
         if old_entry is None:entry.unlink(missing_ok=True)
         else:entry.write_bytes(old_entry)
+        if old_legacy is None:legacy.unlink(missing_ok=True)
+        else:legacy.write_bytes(old_legacy)
         raise
 
 def desktop_executable(path):
@@ -135,22 +135,36 @@ def main():
     path=data_dir()/'codex-watch-state.json';replacement=None
     try:
         while enabled():
-            # Install/rollback owns its launch transaction; do not race it.
-            if not (install_root()/'deployment-journal.json').exists():
-                command=current_command()
-                if command is None:break
-                if getattr(sys,'frozen',False) and Path(command[0]).resolve()!=Path(sys.executable).resolve():
-                    replacement=command;break
-                sessions=desktop_sessions()
-                if gate.observe(sessions):
-                    try:
-                        spawn(command+['--from-codex'])
-                        state.update(launches=state['launches']+1,last_launch=time.time());state.pop('error',None)
-                    except OSError as error:
-                        state['error']=str(error)[:180];gate.sessions=set()
-                previous=state.get('codex_open');state['codex_open']=None if sessions is None else bool(sessions)
-                if previous!=state['codex_open'] or 'written' not in state or state.get('last_launch',0)>state['written']:
-                    state['written']=time.time();atomic(path,state)
+            try:
+                # Install/rollback owns its launch transaction; do not race it.
+                state['paused_for_deployment']=(install_root()/'deployment-journal.json').exists()
+                if not state['paused_for_deployment']:
+                    command=current_command()
+                    if command is None:
+                        raise OSError('当前安装入口暂不可用，等待下次检查')
+                    if getattr(sys,'frozen',False) and Path(command[0]).resolve()!=Path(sys.executable).resolve():
+                        replacement=command;break
+                    sessions=desktop_sessions()
+                    if gate.observe(sessions):
+                        try:
+                            spawn(command+['--from-codex'])
+                            state.update(launches=state['launches']+1,last_launch=time.time())
+                        except OSError:
+                            gate.sessions=set()
+                            raise
+                    state['codex_open']=None if sessions is None else bool(sessions)
+                state.pop('error',None)
+            except (OSError,ValueError,psutil.Error) as error:
+                # A temporary process/entry read failure must not kill the
+                # independent listener needed for the next Codex launch.
+                state['error']=str(error)[:180]
+            now=time.time()
+            signature=(state.get('codex_open'),state.get('paused_for_deployment'),state.get('error'),state['launches'])
+            if signature!=state.get('_signature') or now-state.get('written',0)>=30:
+                state['_signature']=signature;state['written']=now
+                try:atomic(path,{k:v for k,v in state.items() if k!='_signature'})
+                except OSError:
+                    state.pop('_signature',None) # retry diagnostics next poll
             time.sleep(POLL_SECONDS)
     finally:kernel.CloseHandle(handle)
     if replacement and enabled():spawn(replacement+[WATCH_FLAG])
@@ -160,7 +174,9 @@ def main():
 class ExitGate:
     """Only close after this run actually observed Codex, never on unknown data."""
     def __init__(self):self.reset()
-    def reset(self):self.seen=False;self.absent=0
+    def reset(self):
+        self.generation=getattr(self,'generation',-1)+1
+        self.seen=False;self.absent=0
     def observe(self,current):
         if current is None:self.absent=0;return False
         if current:self.seen=True;self.absent=0;return False

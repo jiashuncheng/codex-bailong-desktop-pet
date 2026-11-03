@@ -16,6 +16,17 @@ class MaterialStoreTests(unittest.TestCase):
                 self.assertEqual(restored.preferred,'light')
                 self.assertEqual(restored.current,'light')
                 self.assertEqual(self.store.preference.read_bytes(),content)
+    def test_source_upgrade_keeps_verified_legacy_hd_instead_of_hiding_pet(self):
+        self.store.import_hd(self.source);self.store.preference.write_text('{"tier":"hd"}')
+        (self.app/'app/legacy_material_catalog.json').write_text(json.dumps(self.catalog))
+        import copy
+        newer=copy.deepcopy(self.catalog)
+        for tier in newer['tiers'].values():
+            tier['id']='new'+tier['id'];tier['files'][0]['bytes']+=1
+        (self.app/'app/material_catalog.json').write_text(json.dumps(newer))
+        restored=MaterialStore(self.app,self.state)
+        self.assertEqual(restored.current,'hd');self.assertTrue(restored.legacy_assets)
+        restored.verify(restored.root,'hd')
     def test_cached_display_hint_does_not_authorize_corrupt_materials(self):
         root=self.store.import_hd(self.source)
         self.assertTrue(self.store.known_available('hd'))
@@ -102,9 +113,10 @@ class MaterialStoreTests(unittest.TestCase):
             self.store.ensure('hd',opener=lambda *a:urlopen('http://127.0.0.1:'+str(server.server_port),timeout=3))
             self.assertTrue(self.store.available('hd'))
         finally:server.shutdown();server.server_close();thread.join()
-    def test_unpublished_error_does_not_change_preference(self):
+    def test_missing_download_address_does_not_claim_unpublished_or_change_preference(self):
         def missing(*a):raise HTTPError('fixture',404,'missing',{},None)
-        with self.assertRaisesRegex(MaterialError,'尚未公开发布'):self.store.ensure('hd',opener=missing)
+        with self.assertRaisesRegex(MaterialError,'下载地址暂不可用') as failure:self.store.ensure('hd',opener=missing)
+        self.assertNotIn('尚未公开',str(failure.exception))
         self.assertEqual(self.store.current,'light');self.assertFalse(self.store.preference.exists())
     def test_bad_hash_never_activates(self):
         wrong=dict(self.payload);wrong['quality/action.webp']=b'X'*len(wrong['quality/action.webp'])

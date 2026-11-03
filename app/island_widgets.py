@@ -1,6 +1,8 @@
 """Small status island and quota satellite; no per-frame window movement."""
+from theme_registry import color as theme_color
+from settings_controls import play_animation
 import math,time,re
-from PySide6.QtCore import Qt,QRectF,QSize,QTimer,Signal,QPointF
+from PySide6.QtCore import Qt,QRectF,QSize,QTimer,Signal,QPointF,QVariantAnimation,QAbstractAnimation,QEasingCurve
 from PySide6.QtGui import QColor,QPainter,QPen,QFont,QFontMetrics,QFontMetricsF,QTextLayout,QTextCharFormat
 from PySide6.QtWidgets import QWidget,QHBoxLayout,QLabel,QToolButton
 from typography import ui_font,FONT_CSS
@@ -80,8 +82,10 @@ class IslandStatusText(QLabel):
             def draw(text,x,y,width,color,align=Qt.AlignmentFlag.AlignLeft):
                 rect=QRectF(x,y,width,line_height);p.save();p.setClipRect(rect)
                 p.setPen(QColor(color));p.drawText(rect,Qt.AlignmentFlag.AlignVCenter|align,text);p.restore()
+            progress=self.property('captionProgress');progress=1. if progress is None else float(progress)
+            p.setClipRect(self.rect());p.setOpacity(.55+.45*progress)
             for index,row in enumerate(self.source_rows):
-                y=top+index*line_height
+                y=top+index*line_height+6*(1-progress)
                 p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor('#443b50'))
                 p.drawRoundedRect(QRectF(0,y+1,c['source_width'],15),4,4)
                 draw(row['source'],1,y,c['source_width']-2,'#d6cadd')
@@ -105,7 +109,20 @@ class StatusIsland(QWidget):
         row.addWidget(icon);icon.show()
         self.text=IslandStatusText();self.text.setFont(ui_font(12,True));self.text.setStyleSheet('color:'+ON_ISLAND+';background:transparent;')
         self.text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents);row.addWidget(self.text,1)
+        self._holds=set();self._last_status=None
+        self.animation=QVariantAnimation(self);self.animation.setDuration(250);self.animation.setStartValue(0.);self.animation.setEndValue(1.)
+        self.animation.valueChanged.connect(lambda value:self._caption_frame(value));self.animation.finished.connect(lambda:self._caption_frame(1.))
         self.refresh()
+    def _caption_frame(self,value):
+        self.text.setProperty('captionProgress',value);self.text.update()
+    def freeze_motion(self,reason='surface'):
+        self._holds.add(reason)
+        if self.animation.state()==QAbstractAnimation.State.Running:self.animation.pause()
+    def resume_motion(self,reason='surface'):
+        self._holds.discard(reason)
+        if not self._holds and self.isVisible() and self.animation.state()==QAbstractAnimation.State.Paused:self.animation.resume()
+    def hideEvent(self,event):
+        self.animation.stop();self._caption_frame(1.);super().hideEvent(event)
     def refresh(self):
         full=short_status(self.icon);budget=self.width()-12-10-16-5-2
         self.text.setFixedWidth(budget);self.text.setFont(ui_font(12,True));text=full
@@ -119,7 +136,14 @@ class StatusIsland(QWidget):
         states=getattr(self.icon,'session_states',[]) if getattr(self.icon,'session_summary','') else [self.icon.state if self.icon.visual() in ('busy','waiting') else 'complete']
         entries=getattr(self.icon,'session_entries',[])
         tail=re.search(r'\+(\d+)$',full);extra=int(tail.group(1)) if tail else 0
+        signature=(text,repr(entries),extra)
+        changed=self._last_status is not None and signature!=self._last_status
+        self.text.previous_rows=list(getattr(self.text,'source_rows',[]))
         self.text.set_status(text,states,entries,extra)
+        from settings_controls import motion_enabled
+        if changed and self.isVisible() and not self._holds and motion_enabled():play_animation(self.animation)
+        else:self.animation.stop();self._caption_frame(1.)
+        self._last_status=signature
         if entries:
             description='；'.join((str(v.get('source_label') or '未知')+' · '+str(v.get('title') or '')+' · '+{'thinking':'思考中','working':'执行中','responding':'回复中','waiting':'待操作','complete':'已完成','offline':'重连中'}.get(v['state'],'待命')).replace(' ·  · ',' · ') for v in entries)
             full=description+(f'；另有 {extra} 个会话' if extra else '')
@@ -148,9 +172,10 @@ class QuotaSatellite(QToolButton):
     resetDue=Signal(float)
     def __init__(self,windows,caption,parent=None):
         super().__init__(parent);self.setObjectName('island_quota');self.windows=windows;self.caption=caption
-        self.setFixedSize(40,40);self.setCursor(Qt.CursorShape.PointingHandCursor);self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setFixedSize(38,38);self.setCursor(Qt.CursorShape.PointingHandCursor);self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.window=selected_quota(windows)
         self.reveal=ChartReveal(self)
+        self._reveal_resume_ms=None
         value=self.window.get('remaining')
         exact=f'{value:g}%' if valid_percent(value) else '等待更新' if self.window.get('pending') else '未知'
         self.setAccessibleName(self.window.get('name','额度')+'剩余 '+exact+'；点击展开详情')
@@ -160,11 +185,24 @@ class QuotaSatellite(QToolButton):
         self.reset=epoch((five or self.window).get('resetsAt'))
     def showEvent(self,event):
         super().showEvent(event)
+        # Showing a hidden compact surface is a new entry. The bubble owns
+        # preparation; never spend the reveal clock under its morph/landing.
+        if self.reveal.pending or self._reveal_resume_ms is not None:QTimer.singleShot(0,self,self.start_reveal)
         if self.reset:
             self.timer.start(max(1,min(2147483647,math.ceil((self.reset-time.time())*1000))))
-    def begin_reveal(self):self.reveal.prepare()
-    def start_reveal(self):self.reveal.start()
-    def hideEvent(self,event):self.timer.stop();self.reveal.stop();super().hideEvent(event)
+    def begin_reveal(self):self._reveal_resume_ms=None;self.reveal.prepare()
+    def start_reveal(self):
+        transition=getattr(QWidget.window(self),'size_transition',None)
+        if transition and (transition.preparing or transition.running or transition.landing.image is not None):return
+        if self._reveal_resume_ms is not None and self.isVisible():
+            elapsed=self._reveal_resume_ms;self._reveal_resume_ms=None
+            from settings_controls import play_animation
+            play_animation(self.reveal.animation);self.reveal.animation.setCurrentTime(elapsed);return
+        self.reveal.start()
+    def hideEvent(self,event):
+        self.timer.stop()
+        if self.reveal.animation.state()==self.reveal.animation.State.Running:self._reveal_resume_ms=self.reveal.animation.currentTime()
+        self.reveal.stop();super().hideEvent(event)
     def _due(self):self.resetDue.emit(self.reset)
     def value_text(self):
         value=self.window.get('remaining')
@@ -172,13 +210,13 @@ class QuotaSatellite(QToolButton):
         if 0<value<1:return '<1%'
         return f'{100 if value==100 else min(99,int(value+.5))}%'
     def _prepare_dial(self):
-        # The selected open-arc design has one continuous 270-degree track.
+        # The compact preview uses a full circular track with a lighter stroke.
         # Cache all text measurements; reveal frames only change the arc span.
         self._label=self.value_text()
         number=self._label.removesuffix('%');suffix='%' if self._label.endswith('%') else ''
-        small=ui_font(11)
-        for size in (14,13,12,11,10):
-            main=ui_font(size,True);main.setWeight(QFont.Weight.DemiBold);main.setStretch(90)
+        small=ui_font(11);small.setPixelSize(9)
+        for size in (12,11,10):
+            main=ui_font(size);main.setPixelSize(size);main.setWeight(QFont.Weight.Medium);main.setStretch(100)
             metrics=QFontMetricsF(main);bounds=metrics.tightBoundingRect(number)
             suffix_x=metrics.horizontalAdvance(number)+.6
             if suffix:bounds=bounds.united(QFontMetricsF(small).tightBoundingRect(suffix).translated(suffix_x,0))
@@ -189,21 +227,22 @@ class QuotaSatellite(QToolButton):
         self._label_bounds=bounds.translated(origin)
         value=self.window.get('remaining')
         self._fraction=value/100 if valid_percent(value) else 0.
-        self._color=QColor(QUOTA_LOW if valid_percent(value) and value<=15 else ACCENT)
-        self._arc=QRectF(3.4,3.4,33.2,33.2)
-        self._track_pen=QPen(QColor(TRACK),4.6,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap)
-        self._value_pen=QPen(self._color,4.6,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap)
+        from theme_registry import palette,quota_ring_color
+        colors=palette();self._color=QColor(quota_ring_color(value if valid_percent(value) else None))
+        self._arc=QRectF(5,5,30,30)
+        self._track_pen=QPen(QColor(theme_color(colors['pillTrack'])),2.8,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap)
+        self._value_pen=QPen(self._color,2.8,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap)
     def paintEvent(self,event):
-        p=QPainter(self);self.paint_dial(p)
+        p=QPainter(self);p.scale(self.width()/40,self.height()/40);self.paint_dial(p)
     def paint_dial(self,p):
         p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor('#e9e1ef' if self.isDown() else '#f3eef7' if self.underMouse() else SURFACE))
+        p.setBrush(QColor(theme_color(ISLAND)))
         p.drawEllipse(QRectF(.5,.5,39,39));p.setBrush(Qt.BrushStyle.NoBrush)
         fraction=self._fraction*self.reveal.progress
-        p.setPen(self._track_pen);p.drawArc(self._arc,225*16,-270*16)
+        p.setPen(theme_color(self._track_pen));p.drawArc(self._arc,90*16,-360*16)
         if fraction>0:
-            p.setPen(self._value_pen);p.drawArc(self._arc,225*16,-max(1,round(270*16*fraction)))
-        p.setPen(QColor(INK))
+            p.setPen(theme_color(self._value_pen));p.drawArc(self._arc,90*16,-max(1,round(360*16*fraction)))
+        p.setPen(QColor(theme_color(ON_ISLAND)))
         for font,text,origin in self._text_runs:
             p.setFont(font);p.drawText(origin,text)
 

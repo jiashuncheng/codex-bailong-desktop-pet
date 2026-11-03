@@ -1,9 +1,11 @@
 """Fixed native canvas, blended snapshots and queued explicit navigation."""
+from settings_controls import play_animation
+from theme_registry import color as theme_color
 from PySide6.QtCore import QObject,QVariantAnimation,QEasingCurve,QRect,QRectF,QPoint,Qt,QEvent,QTimer
 from PySide6.QtGui import QPainter,QPainterPath,QColor,QPen,QPixmap,QRegion
 from PySide6.QtWidgets import QWidget,QApplication
 from spring_motion import container_progress,dismiss_progress,EXPAND_MS,SHRINK_MS,DISMISS_MS
-from surface_morph import SurfaceState,SurfaceMorph,pixel_size,complete_frame
+from surface_morph import SurfaceState,SurfaceMorph,pixel_size,complete_frame,valid_widget
 from data_page_motion import paint_pages
 
 
@@ -16,6 +18,20 @@ def present_barrier():
     import ctypes
     result=ctypes.windll.dwmapi.DwmFlush()
     return result == 0
+
+
+def settle_visible(root):
+    """Settle this page, not inactive QStackedWidget/settings/report pages.
+
+    isVisibleTo ignores the deliberately hidden root used during preparation,
+    while rejecting explicitly hidden descendants and their entire subtrees.
+    """
+    widgets=[root]+[w for w in root.findChildren(QWidget) if w.isVisibleTo(root)]
+    for widget in reversed(widgets):
+        widget.ensurePolished()
+        if widget.layout():widget.layout().activate()
+    for widget in widgets:QApplication.sendPostedEvents(widget,QEvent.Type.LayoutRequest)
+    return widgets
 
 
 class TransitionCover(QWidget):
@@ -66,7 +82,7 @@ class NativeLanding(QWidget):
         try:self.native_published=publish(self,self.image);self.native_error=''
         except OSError as error:self.native_published=False;self.native_error=str(error)
     def present(self,image,rect):
-        self.image=image;self.paints=0;self.prepare(rect);self.repaint()
+        self.image=image;self.paints=0;self.prepare(rect)
     def paintEvent(self,event):
         p=QPainter(self);p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source);p.fillRect(self.rect(),Qt.GlobalColor.transparent)
         if self.image is not None:p.drawPixmap(0,0,self.image)
@@ -103,15 +119,22 @@ class PanelTransition(QObject):
     @property
     def running(self):return self.active
     def _hold_icon(self,hold):
-        for name in ('status_indicator','refresh_button'):
+        for name in ('status_indicator','refresh_button','island'):
             icon=getattr(self.bubble,name,None)
-            if icon:
+            if valid_widget(icon):
                 if hold:icon.freeze_motion()
                 else:icon.resume_motion()
     def _page_state(self):
         b=self.bubble
         return (b.panel_page,b.expanded,b.bubble_mode,b.auto_compact,b._minimal_normal_open,b.detail_tab)
     def begin(self):
+        try:self._prepare()
+        except Exception:
+            # A failed capture/polish must never strand a transparent/frozen
+            # window. Preserve the original error after restoring live input.
+            self.cancel()
+            raise
+    def _prepare(self):
         b=self.bubble
         self.release_landing()
         self._hold_icon(True)
@@ -120,7 +143,9 @@ class PanelTransition(QObject):
         self.cover.next_image=None;self.cover.blend=0.
         self.old_surface=None;self.morph=None
         if b.isVisible():
-            self.before=b.grab();self.start_rect=QRect(b.geometry());self.old_surface=SurfaceState.capture(b,frame=self.before)
+            self.before=b.grab();self.start_rect=QRect(b.geometry())
+            content=self.before if b.content.pos().isNull() and self.before.deviceIndependentSize()==b.content.size() else None
+            self.old_surface=SurfaceState.capture(b,frame=self.before,content=content)
         else:self.before=None;self.start_rect=None
         if self.before is not None and QApplication.platformName()=='windows':
             # Guard BEFORE hiding children or rendering a replacement layout.
@@ -138,21 +163,28 @@ class PanelTransition(QObject):
         # render may flush native updates even without an event-loop turn.
         b.content.hide()
         if b.report and b.report.requested and not b.report._animating:b.report.follow.begin()
-    def commit(self):
+    def commit(self,preserve_reveals=False):
+        try:self._commit(preserve_reveals)
+        except Exception:
+            # Do not try to "finish" a failed native resize: that would repeat
+            # the same failing operation while the window is transparent.
+            self.active=False
+            self.cancel()
+            raise
+    def _commit(self,preserve_reveals=False):
         # Redrawing a disabled status view may already have started its close.
         # Do not overwrite that target with a second navigation animation.
         if self.closing:return
         b=self.bubble;target=b.content_geometry()
-        if self.start_rect is None or target==self.start_rect:
+        # A target rebuild may hide the status card (owner hidden, fullscreen,
+        # or bubble disabled). hideEvent cancels preparation and its snapshot;
+        # a caller still completing its navigation must not morph from None.
+        if self.start_rect is None or self.old_surface is None or target==self.start_rect:
             if target==self.start_rect and self.before is not None and b.isVisible() and self._page_state()!=self.start_page_state:
                 # Equal-sized editor pages used to swap live widgets directly.
                 # On a long-idle backing store the first new paint could arrive
                 # one compositor frame later, exposing a blank or stale page.
-                widgets=[b.content]+b.content.findChildren(QWidget)
-                for widget in reversed(widgets):
-                    widget.ensurePolished()
-                    if widget.layout():widget.layout().activate()
-                for widget in widgets:QApplication.sendPostedEvents(widget,QEvent.Type.LayoutRequest)
+                widgets=settle_visible(b.content)
                 b.setUpdatesEnabled(bool(self._preparation_updates))
                 image=complete_frame(b)
                 if image is not None and not image.isNull():
@@ -164,11 +196,20 @@ class PanelTransition(QObject):
                     top=b.layout.itemAt(1).widget().geometry().bottom()+1+b.layout.spacing()
                     margins=b.layout.contentsMargins()
                     body=QRect(margins.left(),top,b.width()-margins.left()-margins.right(),max(1,b.height()-top-margins.bottom()))
+                    if b.panel_page==self.start_page_state[0]=='status' and b.expanded and self.start_page_state[1] and b.detail_tab!=self.start_page_state[-1]:
+                        # Equal-height detail tabs are local navigation. Keep
+                        # tasks, metric cards and tab labels live and stationary.
+                        tabs=b.details_tabs
+                        viewport=tabs.currentWidget().viewport()
+                        body=QRect(viewport.mapTo(b.content,QPoint()),viewport.size())
                     ratio=image.devicePixelRatioF()
                     source=QRect(pixel_size(body.x(),ratio),pixel_size(body.y(),ratio),pixel_size(body.width(),ratio),pixel_size(body.height(),ratio))
                     self.cover.image=self.before.copy(source);self.cover.next_image=image.copy(source);self.cover.blend=0.
-                    order=('status','chat','settings')
-                    self.page_direction=1 if order.index(b.panel_page)>order.index(self.start_page_state[0]) else -1
+                    order=('status','chat','settings','help')
+                    if b.panel_page==self.start_page_state[0]=='status':
+                        sections=('quota','tokens','reset','legend','more')
+                        self.page_direction=1 if sections.index(b.detail_tab)>sections.index(self.start_page_state[-1]) else -1
+                    else:self.page_direction=1 if order.index(b.panel_page)>order.index(self.start_page_state[0]) else -1
                     self.cover.setGeometry(body);self.cover.show();self.cover.raise_()
                     b.content.show()
                     if b.panel_page!='status':b._editor_positioned=True
@@ -184,7 +225,7 @@ class PanelTransition(QObject):
                     from settings_controls import motion_enabled
                     if not motion_enabled():
                         self.cover.blend=1.;self._end_preparation();self.finish();return
-                    self.animation.start();self._end_preparation();b.content.repaint();self.cover.repaint();return
+                    play_animation(self.animation);self._end_preparation();b.content.repaint();self.cover.repaint();return
             b.setFixedSize(target.size());b.move(target.topLeft());b.content.setVisible(b.isVisible());self.cover.hide()
             self.cover.image=None;self.cover.next_image=None;self.cover.blend=0.
             if b.report:b.report.follow.finish(target)
@@ -193,23 +234,22 @@ class PanelTransition(QObject):
         self.shrinking=target.width()*target.height()<self.start_rect.width()*self.start_rect.height()
         self.animation.setDuration(SHRINK_MS if self.shrinking else EXPAND_MS)
         self.animation.setEasingCurve(QEasingCurve.Type.Linear)
-        widgets=[b.content]+b.content.findChildren(QWidget)
-        for widget in reversed(widgets):
-            widget.ensurePolished()
-            if widget.layout():widget.layout().activate()
-        for widget in widgets:QApplication.sendPostedEvents(widget,QEvent.Type.LayoutRequest)
+        widgets=settle_visible(b.content)
         # QWidget.render skips update-disabled descendants. Restore them only
         # for synchronous offscreen captures, after all posted layout work.
         # No event-loop turn or native paint is dispatched in this interval.
         b.setUpdatesEnabled(bool(self._preparation_updates))
+        shared_status=(self.old_surface is not None and self.old_surface.page==b.panel_page=='status' and
+                       (self.old_surface.expanded or bool(b.expanded)) and self.old_surface.shared_bounds and not b.is_compact())
         for widget in widgets:
-            if not self.shrinking and widget.isVisibleTo(b.content) and hasattr(widget,'begin_reveal'):widget.begin_reveal()
+            if not preserve_reveals and not self.shrinking and not shared_status and widget.isVisibleTo(b.content) and hasattr(widget,'begin_reveal'):widget.begin_reveal()
         ratio=b.devicePixelRatioF();size=b.visual_size()
-        image=QPixmap(pixel_size(size.width(),ratio),pixel_size(size.height(),ratio));image.setDevicePixelRatio(ratio);image.fill(Qt.GlobalColor.transparent if b.is_compact() else QColor('#fcfafc'))
+        # Render directly over the final paper once. Rendering text against a
+        # transparent raster and then compositing it changes Qt font AA.
         image=complete_frame(b)
         self.cover.image=image
         self.cover.next_image=None;self.cover.blend=0.
-        self.morph=SurfaceMorph(self.old_surface,SurfaceState.capture(b,target.topLeft()))
+        self.morph=SurfaceMorph(self.old_surface,SurfaceState.capture(b,target.topLeft(),frame=image,content=image))
         b.layout.setEnabled(False)
         self.frozen=[(b.layout.itemAt(i).widget(),b.layout.itemAt(i).widget().updatesEnabled()) for i in range(b.layout.count()) if b.layout.itemAt(i).widget()]
         for widget,enabled in self.frozen:widget.setUpdatesEnabled(False)
@@ -232,7 +272,7 @@ class PanelTransition(QObject):
             self.preparing=False;b.setUpdatesEnabled(enabled);self._end_preparation()
         self.cover.repaint()
         if native_canvas:self.landing.prepare(target)
-        self.animation.start()
+        play_animation(self.animation)
     def dismiss(self):
         b=self.bubble
         if self.running or not b.isVisible():return
@@ -246,7 +286,7 @@ class PanelTransition(QObject):
         if b.windowHandle():b.windowHandle().setFlag(Qt.WindowType.WindowTransparentForInput,True)
         if b.report:b.report.dismiss()
         self._end_preparation()
-        self.animation.setDuration(DISMISS_MS);self.animation.setEasingCurve(QEasingCurve.Type.Linear);self.cover.repaint();self.animation.start()
+        self.animation.setDuration(DISMISS_MS);self.animation.setEasingCurve(QEasingCurve.Type.Linear);self.cover.repaint();play_animation(self.animation)
     def advance(self,value):
         if self.target_rect is None:return
         self.raw_progress=float(value)
@@ -274,7 +314,7 @@ class PanelTransition(QObject):
         radius=(22 if self.start_island else 14)+((22 if self.bubble.is_island() else 14)-(22 if self.start_island else 14))*blend
         path=QPainterPath();path.addRoundedRect(rect,radius,radius);p.setClipPath(path)
         normal=(blend if self.start_island else 1-blend) if self.start_island or self.bubble.is_island() else 1.
-        p.setOpacity(normal);p.fillRect(rect,QColor('#fcfafc'))
+        p.setOpacity(normal);p.fillRect(rect,QColor(theme_color('#fcfafc')))
         for image,island,opacity in ((self.before,self.start_island,1-blend),(self.cover.image,self.bubble.is_island(),blend)):
             p.setOpacity(opacity);size=image.deviceIndependentSize()
             if f>1. and image is self.cover.image:
@@ -283,7 +323,7 @@ class PanelTransition(QObject):
                 p.drawPixmap(rect,image,QRectF(image.rect()));continue
             x=rect.center().x()-size.width()/2;y=rect.center().y()-size.height()/2 if island else rect.bottom()-size.height()
             p.drawPixmap(round(x),round(y),image)
-        p.setClipping(False);p.setOpacity(normal);p.setPen(QPen(QColor('#e0d9e6'),1));p.setBrush(Qt.BrushStyle.NoBrush);p.drawRoundedRect(rect.adjusted(.5,.5,-.5,-.5),radius,radius)
+        p.setClipping(False);p.setOpacity(normal);p.setPen(QPen(QColor(theme_color('#e0d9e6')),1));p.setBrush(Qt.BrushStyle.NoBrush);p.drawRoundedRect(rect.adjusted(.5,.5,-.5,-.5),radius,radius)
     def finish(self):
         b=self.bubble;closing=self.closing;same_size_fade=self.same_size_fade;self.closing=False
         guarded=bool(not closing and (self.shrinking or QApplication.platformName()=='windows') and b.isVisible() and self.morph and self.morph.end.frame is not None)
@@ -298,8 +338,12 @@ class PanelTransition(QObject):
         enabled=b.updatesEnabled();b.setUpdatesEnabled(False)
         try:
             if closing:
-                deferred=self.deferred;self.active=False
-                b.hide();self.target_rect=QRect(self.start_rect);self.deferred=deferred
+                # hideEvent re-enters cancel(), which owns and clears the
+                # prepared transaction. Retain the final hidden geometry
+                # locally before triggering that native event boundary.
+                restore_rect=QRect(self.start_rect if self.start_rect is not None else b.geometry())
+                deferred=self.deferred;status_deferred=self.status_deferred;self.active=False
+                b.hide();self.target_rect=restore_rect;self.deferred=deferred;self.status_deferred=status_deferred
                 b._editing_flags(b.panel_page!='status')
             if self.target_rect is not None:
                 # Preserve the global snapshot origin during native events.
@@ -316,10 +360,10 @@ class PanelTransition(QObject):
             b.content.repaint()
             if QApplication.platformName()=='windows':present_barrier()
             self.cover.hide();self.cover.image=None
-        b.repaint()
         if native_opacity is not None:
-            b.content.repaint();b.repaint();present_barrier()
+            b.repaint();present_barrier()
             b.setWindowOpacity(native_opacity);b.repaint();present_barrier()
+        else:b.repaint()
         if b.report:b.report.follow.finish(self.target_rect)
         self.active=False;self.before=None;self.old_surface=None;self.morph=None;self.same_size_fade=False;self.start_page_state=None;self.cover.image=None;self.cover.next_image=None;self.cover.blend=0.;self.start_rect=self.target_rect=None;self.canvas_rect=None
         if guarded:self.landing_timer.start()
@@ -351,8 +395,18 @@ class PanelTransition(QObject):
         if callback and self.bubble.isVisible():QTimer.singleShot(0,self.bubble,callback)
     def complete(self):
         if self.running:self.animation.setCurrentTime(self.animation.duration())
+    def translate(self,delta):
+        """An attached drag moves the whole prepared canvas, never relayouts."""
+        if not self.running or delta.isNull():return
+        for name in ('start_rect','target_rect','canvas_rect'):
+            rect=getattr(self,name)
+            if rect is not None:rect.translate(delta)
+        if self.morph:self.morph.translate(delta)
+        self.bubble.move(self.bubble.pos()+delta)
+        if self.landing.isVisible():self.landing.move(self.landing.pos()+delta)
     def thaw(self):
-        for widget,enabled in self.frozen:widget.setUpdatesEnabled(enabled)
+        for widget,enabled in self.frozen:
+            if valid_widget(widget):widget.setUpdatesEnabled(enabled)
         self.frozen=[];self.bubble.layout.setEnabled(True)
     def _end_preparation(self):
         if self._preparation_updates is not None:
@@ -369,7 +423,11 @@ class PanelTransition(QObject):
         self.animation.stop();self.deferred=False;self.status_deferred=False;self.preparing=False
         if self.active:self.finish()
         else:
-            self.cover.hide();self.cover.image=None;self.before=None;self.old_surface=None
+            self.thaw()
+            self.cover.hide();self.cover.image=None;self.cover.next_image=None;self.cover.blend=0.
+            self.before=None;self.old_surface=None;self.morph=None
+            self.start_rect=None;self.target_rect=None;self.canvas_rect=None;self.start_page_state=None
+            self.canvas_morph=False;self.same_size_fade=False;self.closing=False
             if self.bubble.isVisible():self.bubble.content.show()
         self._end_preparation()
         if self.landing.image is None:self._hold_icon(False)

@@ -15,6 +15,9 @@ def main():
     parser=argparse.ArgumentParser();parser.add_argument('--state',type=Path,required=True);parser.add_argument('--home',type=Path,default=Path.home()/'.codex');parser.add_argument('--interval',type=int,default=30);parser.add_argument('--once',action='store_true')
     args=parser.parse_args();stop=threading.Event()
     for kind in (signal.SIGINT,signal.SIGTERM):signal.signal(kind,lambda *_:stop.set())
+    from shared_state import SharedWorker
+    worker=SharedWorker(args.state,args.home,stop)
+    if not args.once:worker.start()
     while not stop.is_set():
         snapshot=None
         try:
@@ -24,7 +27,9 @@ def main():
             atomic(args.state/'token-sync-status.json',dict(connected=False,checked=time.time(),error='同步暂不可用，稍后重试。'))
             print('Token synchronization temporarily unavailable; retrying.',flush=True)
             if args.once:return 1
-        if args.once:return 0
+        if args.once:
+            if snapshot:worker.once()
+            return 0
         stop.wait(2 if snapshot and snapshot.get('sync_more') else max(15,args.interval))
     return 0
 

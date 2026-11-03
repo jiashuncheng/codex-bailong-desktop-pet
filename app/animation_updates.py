@@ -39,9 +39,24 @@ def read_descriptor(release,program_version,opener,cancel):
     data=json.loads(raw)
     if data.get('schema')!=1 or data.get('kind')!='animation' or data.get('version')!=release.version:raise UpdateError('动画补丁版本不匹配')
     minimum=data.get('minimumProgramVersion')
-    if version_tuple(program_version)<version_tuple(minimum):raise UpdateError('请先更新程序，再安装此动画补丁')
+    if version_tuple(__import__('version').material_compatibility(program_version))<version_tuple(minimum):raise UpdateError('请先更新程序，再安装此动画补丁')
     catalog=validate_catalog(data.get('catalog'),release.version)
     return catalog,minimum,checked_release.sha256
+
+
+def validate_program_catalog(catalog,program_version):
+    """An optional-animation program must carry a complete download contract.
+
+    File identities alone allow local reuse but cannot provision a fresh or
+    incomplete installation. Never silently ship computed materials-* URLs.
+    Public availability is verified separately against the actual release.
+    """
+    version=catalog.get('releaseVersion') if isinstance(catalog,dict) else None
+    if not version:raise UpdateError('人物素材缺少发布下载目录，请先关联对应动画包')
+    validate_catalog(catalog,version)
+    if version_tuple(version)>version_tuple(__import__('version').material_compatibility(program_version)):
+        raise UpdateError('人物素材发布版本高于程序版本')
+    return catalog
 
 def prepare(release,program_version,state_dir,opener,cancel):
     catalog,minimum,sha=read_descriptor(release,program_version,opener,cancel)
@@ -63,7 +78,7 @@ def load_override(app_version,state_dir,base_catalog=None):
         if base_catalog is None:
             if version_tuple(data['version'])<=version_tuple(app_version):return None
         elif base_catalog.get('releaseVersion') and version_tuple(base_catalog['releaseVersion'])>=version_tuple(data['version']):return None
-        if version_tuple(data['minimumProgramVersion'])>version_tuple(app_version):return None
+        if version_tuple(data['minimumProgramVersion'])>version_tuple(__import__('version').material_compatibility(app_version)):return None
         validate_catalog(data['catalog'],data['version'])
         return data
     except (OSError,ValueError,TypeError,KeyError,AttributeError,UpdateError):return None

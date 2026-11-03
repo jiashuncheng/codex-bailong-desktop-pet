@@ -93,6 +93,7 @@ class Session:
     title: str = 'Codex 对话'
     state: str = 'idle'
     message: str = '等待新的 Codex 消息'
+    public_summary: str = ''
     turn: str = ''
     closed_turn: str = ''
     done: bool = True
@@ -105,6 +106,8 @@ class Session:
     compacting: bool = False
     waiting_reason: str = ''
     updated: float = 0
+    runtime_active: bool|None = None
+    runtime_turn: str = ''
 
 
 class ActivityReducer:
@@ -115,12 +118,26 @@ class ActivityReducer:
     def _status(self,sid,s,activity='commentary',user_message=False,turn_started=False):
         waiting=s.waiting_reason if not s.done else ''
         label={'input':'等待你的输入','approval':'等待你的批准'}.get(waiting)
-        return dict(kind='status',session=sid,state='waiting' if waiting else 'working' if s.compacting else s.state,
-                    text=label or ('正在压缩上下文' if s.compacting else s.message),title=s.title,turn=s.turn,
+        quiet=not s.done and s.runtime_turn==s.turn and s.runtime_active is False
+        return dict(kind='status',session=sid,state='waiting' if waiting else 'idle' if quiet else 'working' if s.compacting else s.state,
+                    text=label or ('等待新的 Codex 任务' if quiet else '正在压缩上下文' if s.compacting else s.message),title=s.title,turn=s.turn,
                     source_kind=s.source_kind,source_label=s.source_label,
-                    activity='waiting' if waiting else 'compact' if s.compacting else activity,display=label or ('正在压缩上下文' if s.compacting else s.display),
+                    activity='waiting' if waiting else 'idle' if quiet else 'compact' if s.compacting else activity,display=label or ('等待新任务' if quiet else '正在压缩上下文' if s.compacting else s.display),
                     compacting=s.compacting,waiting_reason=waiting,waiting=sum(bool(x.waiting_reason) and not x.done for x in self.sessions.values()),
-                    user_message=user_message,turn_started=turn_started,active=sum(not x.done or x.compacting for x in self.sessions.values()))
+                    user_message=user_message,turn_started=turn_started,active=sum((not x.done or x.compacting) and not x.source_subagent and not (x.runtime_turn==x.turn and x.runtime_active is False) for x in self.sessions.values()))
+
+    def set_runtime(self,sid,active,turn):
+        """Explicit runtime idleness is reversible, never a synthetic completion."""
+        s=self.sessions.get(sid)
+        if not s or s.source_subagent or s.done or not turn or s.turn!=turn or not isinstance(active,bool):return []
+        if s.runtime_turn==turn and s.runtime_active is active:return []
+        s.runtime_turn=turn;s.runtime_active=active
+        return [self._status(sid,s)]
+
+    def runtime_events(self,sid,active,turn):
+        s=self.sessions.get(sid)
+        if not s or s.source_subagent or s.done or not turn or s.turn!=turn or not isinstance(active,bool):return []
+        return self.set_runtime(sid,active,turn)+[dict(kind='animation_lifecycle',session=sid,turn=turn,active=active)]
 
     def terminate(self,sid,status,turn):
         s=self.sessions.get(sid)
@@ -194,12 +211,13 @@ class ActivityReducer:
             if s.compacting:s.compacting=False;changed=True
         elif kind == 'event_msg' and typ in ('task_started', 'turn_started'):
             s.compacting=False;s.waiting_reason=''
+            s.runtime_active=None;s.runtime_turn='';s.public_summary=''
             s.turn = str(p.get('turn_id') or stamp)
             s.done = False
             s.state, s.message = 'thinking', '收到任务，正在思考…'
             changed = True
         elif kind == 'event_msg' and typ == 'user_message':
-            user_message = True
+            user_message = True;s.public_summary=''
             s.title = clean_text(p.get('message', ''), 42) or s.title
             s.done = False
             s.state, s.message = 'thinking', '正在处理：' + s.title
@@ -227,13 +245,14 @@ class ActivityReducer:
             item = p.get('item') or {}
             it = item.get('type')
             if it == 'UserMessage':
-                user_message = True
+                user_message = True;s.public_summary=''
                 s.title = content_text(item.get('content'))[:42] or s.title
                 s.state, s.message, s.done = 'thinking', '正在处理：' + s.title, False
                 changed = True
             elif it == 'AgentMessage':
                 text = content_text(item.get('content'))
                 if text:
+                    s.public_summary=text
                     s.state, s.message = ('responding' if item.get('phase') == 'final_answer' else 'working'), text
                     changed = True
             elif it in ('CommandExecution', 'McpToolCall', 'FileChange', 'WebSearch', 'Extension'):
@@ -243,7 +262,7 @@ class ActivityReducer:
                 s.done = False
                 changed = True
         elif kind == 'response_item' and typ == 'message' and p.get('role') == 'user':
-            user_message = True
+            user_message = True;s.public_summary=''
             s.title = clean_text(content_text(p.get('content')), 42) or s.title
             s.state, s.message, s.done = 'thinking', '正在处理：' + s.title, False
             changed = True
@@ -254,6 +273,7 @@ class ActivityReducer:
         elif kind == 'response_item' and typ == 'message' and p.get('role') == 'assistant':
             text = content_text(p.get('content'))
             if text:
+                s.public_summary=text
                 s.state, s.message = 'responding' if p.get('phase') in ('final', 'final_answer') else 'working', text
                 changed = True
         elif kind == 'response_item' and typ == 'reasoning' and not s.done:
@@ -307,6 +327,7 @@ class RolloutTail:
         self.catalog=LogCatalog(self.home);self.files={};self.last_scan=0;self.seeded=False
         self.health=dict(state='unknown',code='starting');self.pins=set();self.generation=None
         self.discovered=set();self.file_ids={};self.queue=[];self.by_id={}
+        self.rate_observer=None
     def set_pins(self,ids):self.pins={session_id(s) for s in ids}
     def poll(self):
         from performance_metrics import METRICS
@@ -373,6 +394,8 @@ class RolloutTail:
                 if not isinstance(obj,dict):continue
                 if obj.get('type') in ('session_meta','event_msg','response_item','turn_context'):state['recognized']=True
                 historical=state['history'] or (state.get('discovery_cutoff') is not None and safe_time(obj.get('timestamp'))<state['discovery_cutoff'])
+                if self.rate_observer and obj.get('type')=='event_msg' and isinstance(obj.get('payload'),dict):
+                    self.rate_observer(sid,obj['payload'],safe_time(obj.get('timestamp')),historical=historical)
                 events.extend(self.reducer.apply(sid,obj,historical=historical))
             if state['offset']>=size:state['history']=False;state['discovery_cutoff']=None
         # Keep 32 recently used files plus every active/unread/displayed one.

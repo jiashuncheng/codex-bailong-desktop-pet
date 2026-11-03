@@ -62,17 +62,18 @@ class ClickIntegrationTests(unittest.TestCase):
                                gate=SimpleNamespace(state='idle'),_visibility_ready=True,
                                _desktop_hidden=False,settings=dict(character_visible=True))
 
-    def test_builtin_clicks_cover_23_and_do_not_change_drag_or_landing(self):
+    def test_builtin_clicks_cover_all_and_do_not_change_drag_or_landing(self):
         from desktop import DesktopPet
         from desktop_services import all_items
         manifest=json.loads((Path(__file__).resolve().parents[1]/'outputs/白龙桌宠素材/素材清单.json').read_text(encoding='utf-8'))
         pet=self.pet(manifest);before=json.dumps(manifest,sort_keys=True)
-        for _ in range(46):DesktopPet.single_click(pet)
+        count=len(all_items(manifest))-2
+        for _ in range(2*count):DesktopPet.single_click(pet)
         ids=[call.args[0]['id'] for call in pet.choose.call_args_list]
         expected={item['id'] for item in all_items(manifest)}-{'drag','landing'}
-        self.assertEqual(len(expected),23)
-        self.assertEqual(set(ids[:23]),expected);self.assertEqual(set(ids[23:]),expected)
-        self.assertNotEqual(ids[22],ids[23])
+        self.assertGreaterEqual(len(expected),23)
+        self.assertEqual(set(ids[:count]),expected);self.assertEqual(set(ids[count:]),expected)
+        self.assertNotEqual(ids[count-1],ids[count])
         self.assertEqual(json.dumps(manifest,sort_keys=True),before)
         self.assertTrue(all(call.kwargs==dict(interactive=True) for call in pet.choose.call_args_list))
 

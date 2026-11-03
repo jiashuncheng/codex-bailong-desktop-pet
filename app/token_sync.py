@@ -1,4 +1,4 @@
-"""Cross-platform sync transport and offline cache; never send logs or prose."""
+"""Authenticated shared transport and offline cache; never send raw logs."""
 import hashlib
 import json
 import os
@@ -94,7 +94,7 @@ def export_connection(state,destination):
     bundle={key:config[key] for key in ('url','ca') if key in config}
     bundle.update(schema=1,invite=result['invite'],expires=result['expires']);atomic(destination,bundle)
 
-def sync_once(state,home,stop=lambda:False,budget=4):
+def sync_once(state,home,stop=lambda:False,budget=4,cycle=None):
     state=Path(state);config=read_config(state)
     if not config.get('enabled'):return None
     token=token_for(state,config)
@@ -102,17 +102,24 @@ def sync_once(state,home,stop=lambda:False,budget=4):
     identity=hashlib.sha256(str(Path(home).resolve()).encode()).hexdigest()[:16]
     ledger=SyncLedger(state/('token-sync-ledger-'+identity+'.sqlite3'),home)
     scan=ledger.scan(stop,budget)
-    target=hashlib.sha256((config['url']+'\0'+config['device_id']).encode()).hexdigest()
+    capabilities=request(config,'/health')
+    unified=capabilities.get('schema',1)>=2
+    target=hashlib.sha256((config['url']+'\0'+config['device_id']+('v2' if unified else '')).encode()).hexdigest()
     uploaded=0;more=False
     for _ in range(5):
         if stop():raise SyncError('同步已停止。')
-        batch=ledger.batch(target)
+        batch=ledger.batch(target,v2=unified)
         if not batch:break
         records=[{k:v for k,v in row.items() if k!='seq'} for row in batch]
-        ack=request(config,'/v1/records',dict(records=records),token)
+        ack=request(config,'/v2/records' if unified else '/v1/records',dict(records=records),token)
         if ack.get('accepted')!=len(batch):raise SyncError('同步回执无效，未推进本地进度。')
         ledger.acknowledge(target,batch[-1]['seq']);uploaded+=len(batch)
     more=bool(ledger.batch(target,1)) or scan['more']
+    if unified:
+        request(config,'/v2/progress',dict(ready=False),token)
+        from shared_quota import upload
+        more=upload(state,home,config,token,request,stop,cycle) or more
+    if unified:request(config,'/v2/progress',dict(ready=not more and not scan['errors']),token)
     snapshot=request(config,'/v1/snapshot',token=token)
     if snapshot.get('scope')!='all' or not isinstance(snapshot.get('all_total'),int) or not isinstance(snapshot.get('history_days'),dict):raise SyncError('汇总响应无效，保留上一份统计。')
     snapshot.update(sync_checked=time.time(),sync_more=more,sync_scan_errors=scan['errors'])
@@ -122,20 +129,19 @@ def sync_once(state,home,stop=lambda:False,budget=4):
     return snapshot
 
 def with_local_quota(cloud,local):
-    # Account quota observations are collected locally, not by the Token
-    # aggregation service. Keep their local Token denominator and history
-    # together, including when the global Token view uses an offline cache.
     result=dict(cloud)
-    for key in ('quota_history','week_cycle'):
-        if key in local:result[key]=local[key]
-        else:result.pop(key,None)
+    # Global counters must never inherit a different device's denominator.
+    if result.get('quota_scope')!='all':
+        result.pop('week_cycle',None)
+        result['quota_history']=dict(cycles=[],anomaly=None,pending=True,partial=True,scope='all',reason='汇总服务待升级')
     return result
 
-def apply_sync(local,state,home,stop=lambda:False):
+
+def apply_sync(local,state,home,stop=lambda:False,cycle=None):
     config=read_config(state)
     if not config.get('enabled'):return local
     try:
-        cloud=sync_once(state,home,stop)
+        cloud=sync_once(state,home,stop,cycle=cycle)
         if config.get('view','all')=='local':return dict(local,sync_connected=True)
         return with_local_quota(cloud,local)
     except (OSError,ValueError,KeyError,sqlite3.Error) as error:

@@ -1,6 +1,6 @@
 # 项目协作
 
-这是 Windows/macOS 共用的白龙桌宠个性化源码工程。当前 v0.17.3 / UI98，合入上游 v1.2.0（ba0b0a3），保留个人 Windows 修改与 Mac 适配。先阅读 README.md、NOTICE.md、docs/DEVELOPMENT.md 与 docs/迭代历史.txt。
+这是 Windows/macOS 共用的白龙桌宠个性化源码工程。当前 v0.18.0 / UI99，合入上游 v1.4.2（fc0ce47），保留个人 Windows 修改与 Mac 适配。先阅读 README.md、NOTICE.md、docs/DEVELOPMENT.md 与 docs/迭代历史.txt。
 
 - 保持原角色比例、清晰度和动画播放边界；自动动作不发声。
 - 未读完成提醒优先于视频全屏让位；手动关闭置顶不得自动重开。
@@ -24,10 +24,12 @@
 - 用 tools/check_source.py 检查；CI 无动画时加 --without-assets，本机完整轻量素材可加 --require-assets。Mac 窗口变化另运行隔离的 mac_ui_probe.py / mac_focus_probe.py。
 - 测试必须隔离 LOCALAPPDATA / BAILONG_DATA_DIR 和 CODEX_HOME。不提交本机设置、认证、会话、环境与素材缓存，Mac 验收不等同于 Windows 实机验收。
 
-- Token 同步只能传计数与不可逆会话标识，不传原始日志或正文；按会话累计检查点去重，重复、乱序与部分日志不得重复计费。HTTPS 严格验链，访问凭据不得进入 Git。
+- 统一同步经用户授权传统计计数、额度观测、会话标题／状态／公开进展摘要及已读标记；不传原始日志、完整对话、命令输出、凭据或设备私有路径。按稳定会话与回合身份去重，HTTPS 严格验链。
 
 - 素材可选本地高清快照与新目录迁移；界面状态必须使用已缓存的校验结果，实际启用前重新校验。
 - WSL 和 Windows 安装维护仅在 Windows 启用；Mac 系统路径通过 platform_support，保留普通窗口不抢焦点。
 
 - Windows 可主动选择游戏和视频全屏隐藏，该模式中完成提醒不打断全屏；默认仅视频模式维持原完成优先级。Mac 保留视频模式和普通窗口不抢焦点。
 - 上游修复公开后才对相应 issue 宣布公开交付；源码合并与本机实装不等同于重新发布冻结安装包。保留有效首次安装入口。
+
+- 上游维护入口见维护与防错规范.md；动画交接另见动画制作规范.md。保留本 fork 的跨平台接口、用户数据和个人定制。汇总服务部署在 GPU228，阿里云仅代理中转。

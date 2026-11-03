@@ -51,6 +51,10 @@ def populate_directory(source,dest,version):
     verify_payload(dest,version)
     if (dest/'payload-manifest.json').read_bytes()!=(source/'payload-manifest.json').read_bytes():raise ValueError('构建清单在部署期间发生变化')
 
+def backup_budget(database_bytes,wal_bytes=0):
+    """Bounded large-ledger allowance; tiny databases retain the old limit."""
+    return min(180.,max(15.,10.+(database_bytes+wal_bytes)/(32*1024*1024)))
+
 def backup_data(data_root,install_root,previous):
     """Closed-app JSON snapshots and SQLite backup API; exclude asset/download caches."""
     data_root=plain_path(Path(data_root).absolute());install_root=Path(install_root).resolve()
@@ -65,7 +69,12 @@ def backup_data(data_root,install_root,previous):
             if path.suffix.lower() not in ('.json','.sqlite','.sqlite3','.db'):continue
             target=destination/path.name
             if path.suffix.lower() in ('.sqlite','.sqlite3','.db'):
-                deadline=time.monotonic()+15
+                if re.fullmatch(r'token-usage-source-[0-9a-f]{16}\.sqlite3',path.name):
+                    from index_maintenance import before_backup
+                    repair=before_backup(path)
+                    proof.setdefault('databaseMaintenance',{})[path.name]=repair
+                wal=path.with_name(path.name+'-wal')
+                deadline=time.monotonic()+backup_budget(path.stat().st_size,wal.stat().st_size if wal.exists() else 0)
                 def progress(*unused):
                     if time.monotonic()>deadline:raise OSError('用户数据库备份超时，未切换新版')
                 with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=3)) as src,closing(sqlite3.connect(target)) as dst:
@@ -80,8 +89,13 @@ def backup_data(data_root,install_root,previous):
 def restore_data(data_root,backup,install_root):
     """Restore a closed application's verified snapshot, including SQLite sidecars."""
     data_root=plain_path(Path(data_root).absolute());base=plain_path(Path(install_root).resolve()/'deployment-backups')
-    backup=plain_path(Path(backup).absolute())
-    if backup.parent!=base or backup.resolve()!=backup:raise ValueError('数据备份路径无效')
+    backup=Path(backup).absolute()
+    if '..' in backup.parts:raise ValueError('数据备份路径无效')
+    # Windows TEMP can use an 8.3 alias (RUNNER~1) while the install root is
+    # canonical. Reject links before resolving; a spelling alias is not a link.
+    for part in (backup,*backup.parents):plain_path(part)
+    backup=backup.resolve(strict=True)
+    if backup.parent!=base:raise ValueError('数据备份路径无效')
     proof=json.loads((backup/'backup.json').read_text(encoding='utf-8'))
     if proof.get('complete') is not True or not isinstance(proof.get('files'),dict):raise ValueError('用户数据备份未完成')
     def eligible(name):return Path(name).suffix.lower() in ('.json','.sqlite','.sqlite3','.db') and name not in ('runtime.json','codex-connection-check.json')

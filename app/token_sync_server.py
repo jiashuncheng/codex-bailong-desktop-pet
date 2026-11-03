@@ -30,6 +30,8 @@ class SyncStore:
             CREATE INDEX IF NOT EXISTS usage_session ON usage(session);
             CREATE TABLE IF NOT EXISTS messages(fingerprint TEXT PRIMARY KEY,stamp REAL,session TEXT,role TEXT);
             ''')
+        from shared_sync_store import SharedStore
+        self.shared=SharedStore(self)
     def connect(self):
         db=sqlite3.connect(self.path,timeout=15);db.execute('PRAGMA journal_mode=WAL');return db
     def add_device(self,name,db=None):
@@ -99,6 +101,7 @@ class SyncStore:
         with closing(self.connect()) as db:
             db.execute('BEGIN')
             value=TokenUsageIndex.snapshot(SimpleNamespace(),db)
+            value.update(self.shared.quota_snapshot(db))
             devices=[dict(device_id=i,name=n,last_seen=t) for i,n,t in db.execute('SELECT id,name,last_seen FROM devices ORDER BY name')]
         value.update(source='多端 Codex 日志（已去重）',scope='all',devices=devices,timezone='Asia/Shanghai',messages_available=False)
         value['report'].update(messages=None,messages_available=False,scope='all')
@@ -106,7 +109,7 @@ class SyncStore:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version='BailongTokenSync/1'
+    server_version='BailongTokenSync/2'
     def log_message(self,*args):pass
     def setup(self):super().setup();self.connection.settimeout(15)
     def respond(self,status,value):
@@ -121,8 +124,9 @@ class Handler(BaseHTTPRequestHandler):
         return self.server.store.authenticate(header[7:]) if header.startswith('Bearer ') and len(header)<512 else None
     def do_GET(self):
         try:
-            if self.path=='/health':return self.respond(200,dict(status='ok',schema=1))
+            if self.path=='/health':return self.respond(200,dict(status='ok',schema=2,capabilities=['records','quota','sessions','reads']))
             if not self.device():return self.respond(401,dict(error='设备认证失败，请重新导入连接文件。'))
+            if self.path=='/v2/state':return self.respond(200,self.server.store.shared.snapshot())
             if self.path=='/v1/snapshot':return self.respond(200,self.server.store.snapshot())
             self.respond(404,dict(error='not found'))
         except (OSError,sqlite3.Error):self.respond(503,dict(error='同步服务暂不可用'))
@@ -133,6 +137,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(200,self.server.store.enroll(str(body.get('invite','')),str(body.get('name','设备'))))
             device=self.device()
             if not device:return self.respond(401,dict(error='设备认证失败，请重新导入连接文件。'))
+            if self.path=='/v2/progress':return self.respond(200,self.server.store.shared.progress(device,self.body().get('ready')))
+            if self.path=='/v2/state':return self.respond(200,self.server.store.shared.ingest(device,self.body()))
+            if self.path=='/v2/quotas':return self.respond(200,self.server.store.shared.quotas(device,self.body().get('observations')))
+            if self.path=='/v2/records':return self.respond(200,self.server.store.shared.records(device,self.body().get('records')))
             if self.path=='/v1/records':return self.respond(200,self.server.store.ingest(device,self.body().get('records')))
             if self.path=='/v1/invites':return self.respond(200,self.server.store.invite())
             self.respond(404,dict(error='not found'))

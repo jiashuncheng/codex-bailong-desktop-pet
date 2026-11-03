@@ -10,6 +10,8 @@ def package(source,destination):
     source=Path(source);destination=Path(destination);manifest=json.loads((source/'payload-manifest.json').read_text(encoding='utf-8'))
     version=manifest['version'];inspect_source(source,version)
     catalog=json.loads((source/'app/material_catalog.json').read_text(encoding='utf-8'));tier=catalog['tiers']['light']
+    from animation_updates import validate_program_catalog
+    validate_program_catalog(catalog,version)
     animation_info=destination/f'bailong-desktop-pet-{version}-animation.json'
     if animation_info.exists() and json.loads(animation_info.read_text(encoding='utf-8'))['catalog']!=catalog:raise ValueError('同批程序包与动画补丁目录不一致')
     media={PREFIX+f['path']:dict(bytes=f['bytes'],sha256=f['sha256']) for f in tier['files']}
@@ -31,8 +33,12 @@ def package(source,destination):
             if len(fields)==2 and len(fields[0])==64:checks[fields[1].lstrip('*')]=fields[0]
     checks[archive.name]=sha;checks[meta.name]=hashlib.sha256(meta.read_bytes()).hexdigest()
     sums.write_text(''.join(digest+'  '+name+'\n' for name,digest in sorted(checks.items())),encoding='utf-8')
-    return dict(version=version,archive=str(archive),metadata=str(meta),bytes=archive.stat().st_size,sha256=sha,materialId=tier['id'],omittedMaterialBytes=tier['bytes'],coreFiles=len(manifest['files'])-len(media))
+    from program_channel import write_channel
+    channel=write_channel(destination,version,program=archive)
+    return dict(version=version,archive=str(archive),metadata=str(meta),bytes=archive.stat().st_size,sha256=sha,materialId=tier['id'],omittedMaterialBytes=tier['bytes'],coreFiles=len(manifest['files'])-len(media),programChannel=channel)
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--source',default=str(ROOT/'release/BailongEnhanced'));parser.add_argument('--destination',default=str(ROOT/'release'));args=parser.parse_args()
+    from build_local import require_release_regression
+    require_release_regression()
     print(json.dumps(package(args.source,args.destination),ensure_ascii=False,indent=2))

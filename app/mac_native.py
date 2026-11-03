@@ -31,6 +31,18 @@ def release_application_focus():
         previous.activateWithOptions_(0)
 
 
+def activate_editor(widget):
+    """Activate only for an explicit settings/chat request, never on refresh."""
+    if not getattr(widget, '_mac_keyboard_input', False):
+        return
+    from AppKit import NSRunningApplication, NSWorkspace
+    front = NSWorkspace.sharedWorkspace().frontmostApplication()
+    if front is not None and int(front.processIdentifier()) == os.getpid():
+        return
+    remember_external_application(front)
+    NSRunningApplication.currentApplication().activateWithOptions_(0)
+
+
 def native_window(widget):
     import objc
     from ctypes import c_void_p
@@ -112,6 +124,8 @@ def prepare_application(app):
     app.setApplicationName('白龙桌宠 Mac')
     app.setOrganizationName('BailongMac')
     if sys.platform == 'darwin' and app.platformName() != 'offscreen':
+        from mac_panels import install_nonactivating_panels
+        install_nonactivating_panels()
         remember_external_application()
         from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
         NSApplication.sharedApplication().setActivationPolicy_(NSApplicationActivationPolicyAccessory)

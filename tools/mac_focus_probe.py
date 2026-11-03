@@ -15,7 +15,7 @@ def main():
     args = parser.parse_args()
     if not os.environ.get('BAILONG_DATA_DIR') or not os.environ.get('CODEX_HOME'):
         raise RuntimeError('Set isolated BAILONG_DATA_DIR and CODEX_HOME')
-    from AppKit import NSWorkspace
+    from AppKit import NSWorkspace, NSWindowStyleMaskNonactivatingPanel
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
     from desktop import DesktopPet
@@ -34,9 +34,14 @@ def main():
     result = dict(passed=True, checks={}, native={}, passive_samples=0, passive_key_samples=0)
     def native(key, widget, reject):
         window = native_window(widget)
-        value = dict(can_key=bool(window.canBecomeKeyWindow()), key=bool(window.isKeyWindow()))
+        front = NSWorkspace.sharedWorkspace().frontmostApplication()
+        value = dict(can_key=bool(window.canBecomeKeyWindow()), key=bool(window.isKeyWindow()),
+                     nonactivating=bool(window.styleMask() & NSWindowStyleMaskNonactivatingPanel),
+                     app_active=bool(front and int(front.processIdentifier())==os.getpid()))
         result['native'][key] = value
         if not reject and not value['key']:raise AssertionError('Editor did not receive keyboard focus: '+key)
+        if not value['nonactivating']:raise AssertionError('Panel lost nonactivating style: '+key)
+        if not reject and not value['app_active']:raise AssertionError('Explicit editor did not activate the app: '+key)
         result['checks'][key] = value['can_key'] != reject and (not reject or not value['key'])
     def finish_transition():
         pet.bubble.size_transition.complete()

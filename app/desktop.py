@@ -969,7 +969,10 @@ class DesktopPet(EnhancedPet):
             # First activation can synchronously polish the native editor and
             # take a full frame. Do it before the snapshot animation starts so
             # the visible morph has an uninterrupted clock.
-            if sys.platform=='darwin':self.bubble._editing_flags(True)
+            if sys.platform=='darwin':
+                self.bubble._editing_flags(True)
+                from mac_native import activate_editor
+                activate_editor(self.bubble)
             self.bubble.raise_();self.bubble.activateWindow()
             if self.bubble.windowHandle():self.bubble.windowHandle().requestActivate()
             QApplication.setActiveWindow(self.bubble)

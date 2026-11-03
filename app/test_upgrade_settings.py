@@ -1,3 +1,4 @@
+import sys
 """Simulated other-machine upgrades; no real installation or user settings."""
 import copy,hashlib,json,os,tempfile,unittest,zipfile
 from pathlib import Path
@@ -131,6 +132,12 @@ class UpgradeSettingsTests(unittest.TestCase):
                     pet.tick.stop();pet.motion_timer.stop()
                     self.assert_preferences(raw,pet.settings)
                     self.assertEqual(pet.bubble.bubble_mode,mode);self.assertEqual(pet.bubble.capsule_action,action)
+                    pet.record_state()
+                    receipt=json.loads((data/'runtime.json').read_text(encoding='utf-8'))
+                    from version import DISPLAY_VERSION
+                    self.assertEqual(receipt['display_version'],DISPLAY_VERSION)
+                    self.assertEqual(receipt['platform'],{'win32':'Windows','darwin':'macOS'}.get(sys.platform,sys.platform))
+                    self.assertEqual(receipt['version'],VERSION)
                 finally:pet.close();app.processEvents()
                 saved=json.loads(config.read_text(encoding='utf-8'));self.assert_preferences(raw,saved)
     def test_unavailable_resources_do_not_overwrite_saved_visibility_or_shortcuts(self):

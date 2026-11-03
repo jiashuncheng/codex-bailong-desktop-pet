@@ -1,6 +1,6 @@
 # 多端统一同步
 
-v1.4.2.18.2 / UI99。Windows、macOS 桌宠及 Linux / WSL 采集器复用已配对的 HTTPS 通道，不调用模型，不额外消耗模型 Token。
+v1.4.2.18.3 / UI99。Windows、macOS 桌宠及 Linux / WSL 采集器复用已配对的 HTTPS 通道，不调用模型，不额外消耗模型 Token。
 
 当前个人部署：客户端 → 阿里云 HTTPS / Nginx → 反向隧道 → GPU228 上的汇总 API 与 SQLite。GPU228 是汇总位置；来源仍是 `win`、`wsl`、`mac`，只有真正运行在服务器上的会话显示 `gpu228`。设备认证 ID 保持不变，不按显示名称合并设备。
 

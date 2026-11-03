@@ -324,6 +324,7 @@ class EnhancedPet(Pet):
         from codex_connection import session_state_dir
         self.session_dir=session_state_dir(STATE_DIR)
         self.bubble.status_indicator.set_store(self.session_dir/'task-notifications.json')
+        self.bubble.status_indicator.set_notifications_enabled(self.settings.get('notifications',False))
         self.bubble.quotaRefreshRequested.connect(lambda:self.refresh_quota(manual=True))
         self.bubble.resetRefreshRequested.connect(self.refresh_reset_feed)
         self.bubble.tokenRefreshRequested.connect(self.refresh_tokens)
@@ -753,11 +754,12 @@ class EnhancedPet(Pet):
             self.pending_activity=event
         elif kind=='complete':
             self.bubble.status_indicator.notify_complete(event)
-            self.stop_walk()
-            item=next((v for v in self.variants if v['id']=='18'),self.idles[0])
-            self.play(item,'variant')
             title=clean_text(event.get('title','Codex 任务'),70)
-            self.say('Codex 任务完成啦！\n'+title,14000)
+            if self.settings.get('notifications',False):
+                self.stop_walk()
+                item=next((v for v in self.variants if v['id']=='18'),self.idles[0])
+                self.play(item,'variant')
+                self.say('Codex 任务完成啦！\n'+title,14000)
             self.notify('Codex 任务已完成',title)
             self.refresh_quota()
         elif kind=='monitor_error':
@@ -806,7 +808,7 @@ class EnhancedPet(Pet):
         if alerts:
             # One visual alert for a batch; all IDs have already been persisted.
             alert=alerts[0]
-            self.say(alert['title']+'\n'+alert['text'],18000)
+            if self.settings.get('notifications',False):self.say(alert['title']+'\n'+alert['text'],18000)
             self.notify(alert['title'],alert['text'])
             if any(a['kind']=='confirmed' for a in alerts):self.refresh_quota()
 
@@ -875,6 +877,7 @@ class EnhancedPet(Pet):
         if not self.refresh_flow.batches:self.refresh_timeout.stop()
 
     def notify(self,title,text):
+        if not self.settings.get('notifications',False):return
         self.notify_history.append({'title':title,'at':time.time()})
         if not getattr(self,'_tray_shell_enabled',False):return
         if sys.platform=='win32':

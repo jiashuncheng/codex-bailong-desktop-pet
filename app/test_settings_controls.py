@@ -45,6 +45,14 @@ class ControlsTests(unittest.TestCase):
     def tearDown(self):
         for w in APP.topLevelWidgets():w.close();w.deleteLater()
         APP.sendPostedEvents(None,QEvent.Type.DeferredDelete);APP.processEvents()
+    def test_scrollbar_range_callback_ignores_deleted_control(self):
+        from desktop_settings import sync_scrollbar_range
+        from PySide6.QtWidgets import QScrollBar
+        import shiboken6
+        bar=QScrollBar();sync_scrollbar_range(bar,0,20);self.assertTrue(bar.isEnabled())
+        sync_scrollbar_range(bar,0,0);self.assertFalse(bar.isEnabled())
+        shiboken6.delete(bar);sync_scrollbar_range(bar,0,20)
+
     def test_segment_pill_moves_and_refresh_does_not_cancel_it(self):
         w=SlidingSegments([('全部','all'),('月','30d'),('周','7d')],compact=True);w.resize(110,27);w.show();APP.processEvents()
         start=w.pill.x()

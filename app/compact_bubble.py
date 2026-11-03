@@ -202,9 +202,17 @@ class StatusScroller(QLabel):
         if not self.conversation_title:self.title_width=0;return
         from conversation_roster import title_keywords
         metrics=QFontMetrics(font(12,not self.expanded_row));budget=max(40,self.width()-76) if self.expanded_row else min(112,round(self.width()*.42))
-        from conversation_sources import source_title
+        from conversation_sources import source_title,display_source
         title=source_title(self.conversation_title,self.conversation_source) if self.expanded_row else source_title(title_keywords(self.conversation_title),self.conversation_source)
-        self.short_title=metrics.elidedText(title,Qt.TextElideMode.ElideMiddle,max(1,budget-metrics.horizontalAdvance(self.title_suffix)))+self.title_suffix
+        available=max(1,budget-metrics.horizontalAdvance(self.title_suffix))
+        prefix=('['+display_source(self.conversation_source)+'] ') if self.conversation_source and self.conversation_source!='未知' else ''
+        if self.expanded_row and prefix:
+            # A platform is provenance, not part of the elidable chat name.
+            # Reserve its complete label before shortening a long title.
+            name=title[len(prefix):]
+            name_width=max(0,available-metrics.horizontalAdvance(prefix))
+            self.short_title=prefix+metrics.elidedText(name,Qt.TextElideMode.ElideMiddle,name_width)+self.title_suffix
+        else:self.short_title=metrics.elidedText(title,Qt.TextElideMode.ElideMiddle,available)+self.title_suffix
         self.title_width=metrics.horizontalAdvance(self.short_title)
     def wheelEvent(self,event):
         if self.conversation_rows or self.conversation_id:

@@ -31,6 +31,29 @@ class PresentationPolicyTests(unittest.TestCase):
         with patch('settings_controls._system_motion_enabled',return_value=True):
             set_motion_mode('quality');settle_motion();self.assertTrue(glyph.timer.isActive());self.assertTrue(refresh.timer.isActive())
             set_motion_mode('performance');settle_motion();self.assertFalse(glyph.timer.isActive());self.assertFalse(refresh.timer.isActive())
+    def test_system_ui_effects_off_keeps_task_feedback_frames_moving(self):
+        from status_indicator import StatusIndicator
+        from settings_controls import status_motion_enabled
+        now=[100.]
+        with patch('settings_controls._system_motion_enabled',return_value=False),patch.dict(os.environ,{'BAILONG_REDUCED_MOTION':'0'}):
+            set_motion_mode('quality');self.assertFalse(motion_enabled());self.assertTrue(status_motion_enabled())
+            icon=StatusIndicator(clock=lambda:now[0]);icon.show();icon.observe(dict(state='working',active=1));APP.processEvents();icon.motion.settle()
+            for island in (False,True):
+                icon.set_island(island);now[0]+=.3;icon._tick()
+                image=icon.grab().toImage();before=bytes(image.constBits())
+                now[0]+=.4;icon._tick();image=icon.grab().toImage()
+                self.assertTrue(icon.timer.isActive());self.assertNotEqual(before,bytes(image.constBits()))
+                self.assertTrue(icon.timing_snapshot()['motionEnabled'])
+            icon.freeze_motion();self.assertFalse(icon.timer.isActive())
+            icon.resume_motion();self.assertTrue(icon.timer.isActive())
+            icon.hide();self.assertFalse(icon.timer.isActive())
+            icon.show();APP.processEvents();self.assertTrue(icon.timer.isActive())
+            set_motion_mode('performance');settle_motion();self.assertFalse(icon.timer.isActive())
+            set_motion_mode('quality');settle_motion();self.assertTrue(icon.timer.isActive())
+            with patch.dict(os.environ,{'BAILONG_REDUCED_MOTION':'1'}):
+                settle_motion();self.assertFalse(icon.timer.isActive())
+            icon.close()
+
     def test_fresh_project_visit_resets_scroll_back_within_visit_preserves_it(self):
         from project_cost_ui import ProjectCosts
         rows=[dict(id=str(i),name='项目'+str(i),path='D:/project/'+str(i),cost=1.,parts=[.5,.1,.4],tokens=1000,pending_tokens=0,models=[],sessions=1,archived=False) for i in range(24)]

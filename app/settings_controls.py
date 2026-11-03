@@ -26,6 +26,14 @@ def _system_motion_enabled():
 def motion_enabled():
     return _motion_mode=='quality' and _system_motion_enabled()
 
+def status_motion_enabled():
+    """Task feedback has its own clock; Windows UI effects don't disable it.
+
+    The pet's performance mode and explicit reduced-motion environment remain
+    authoritative. This does not change the machine's accessibility settings.
+    """
+    return _motion_mode=='quality' and os.environ.get('BAILONG_REDUCED_MOTION')!='1'
+
 def set_motion_mode(mode):
     """Process-local presentation policy; persistence belongs to saved settings."""
     global _motion_mode

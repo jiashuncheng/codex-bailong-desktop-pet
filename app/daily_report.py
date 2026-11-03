@@ -15,7 +15,7 @@ from book_reference import analogy as book_analogy,catalog as book_catalog
 from chart_reveal import ChartReveal,RasterChart,bar_shape
 from chart_curve import SmoothTrace
 from rate_chart import ComboChart,colors as rate_colors,rate_text
-from spring_motion import island_response,dismiss_progress,stage,EXPAND_MS,DISMISS_MS
+from spring_motion import container_progress,stage,EXPAND_MS,DISMISS_MS
 from card_motion import card_geometry,paint_card
 
 from ui_theme import MODEL_COLORS,PANEL,PRIMARY,SELECTED
@@ -223,6 +223,7 @@ class DailyReport(QWidget):
         self._host_open_page=None;self._host_prepared_page=None;self._host_return=False;self._host_closing=False
         self.setWindowTitle('白龙数据面板');self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating);self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        if __import__('sys').platform=='darwin':self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow,True)
         set_theme_style(self,'QLabel{'+FONT_CSS+'color:#393343;background:transparent;}QScrollArea{border:0;background:transparent;}QScrollBar:vertical{background:#f5f0f8;width:7px;margin:0;border-radius:3px;}QScrollBar::handle:vertical{background:#c7b7d7;min-height:18px;border-radius:3px;}QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:transparent;}')
         self.surface=QWidget(self);self.layout=QVBoxLayout(self.surface);self.layout.setContentsMargins(10,8,10,8);self.layout.setSpacing(5)
         from data_page_motion import PageFade
@@ -690,7 +691,12 @@ class DailyReport(QWidget):
                         transition.begin();transition.commit();return
                     owner.position_bubble()
                 self.sync_geometry();self._prepare_frame()
-            self.show();self.raise_();self._input_passthrough(True)
+            self.show()
+            if __import__('sys').platform=='darwin' and QApplication.platformName()=='cocoa':
+                from mac_native import show_hint
+                show_hint(self,self.bubble,bool(self.bubble.windowFlags()&Qt.WindowType.WindowStaysOnTopHint))
+            else:self.raise_()
+            self._input_passthrough(True)
             self.follow.prewarm()
             if native_open:self.repaint();present_barrier()
         finally:
@@ -744,9 +750,9 @@ class DailyReport(QWidget):
         # time. Configure atomically so a quick reversal never jumps to 1/0.
         blocked=self.animation.blockSignals(True)
         self._motion_start=start;self._motion_target=target
-        # island_response is already exactly settled at .82. Preserve its
-        # visible trajectory, omit the motionless tail before chart handoff.
-        self.animation.setDuration(max(1,round((DISMISS_MS if target==0. else EXPAND_MS*.82)*min(1.,abs(target-start)))))
+        # Use the same smooth bounded motion as the host, without its raster
+        # handoff hold: this panel submits its live contents at the endpoint.
+        self.animation.setDuration(max(1,round((DISMISS_MS if target==0. else EXPAND_MS*.9)*min(1.,abs(target-start)))))
         self.animation.setStartValue(0.);self.animation.setEndValue(1.);self.animation.setCurrentTime(0)
         self.animation.blockSignals(blocked);self.fraction=start;play_animation(self.animation)
     def content_geometry(self):
@@ -756,15 +762,15 @@ class DailyReport(QWidget):
         if self._frame is None:return bounds
         # A true zero-size endpoint joins the main surface instead of leaving
         # a floating 132x32 seed in the six-pixel gap.
-        f=max(0.,self.fraction);a=self._merge_anchor
-        width=bounds.width()*(math.sqrt(f) if f<=1. else 1.+(f-1.)*.35)
+        f=max(0.,min(1.,self.fraction));a=self._merge_anchor
+        width=bounds.width()*f*(2.-f)
         height=bounds.height()*f
         center=a.x()+(bounds.center().x()-a.x())*f
         bottom=a.y()+(bounds.bottom()-a.y())*f
         return QRectF(center-width/2,bottom-height,width,height)
     def visible_height(self):return 0 if self.fraction<=0. else round(self.visual_rect().height())
     def _advance(self,value):
-        progress=dismiss_progress(value) if self._motion_target==0. else island_response(value*.82)
+        progress=container_progress(value*.9)
         self.fraction=self._motion_start+(self._motion_target-self._motion_start)*progress
         # One fixed-size native window, one raster draw. No move/resize/layout
         # operations on animation frames, in either direction.

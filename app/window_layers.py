@@ -23,7 +23,7 @@ def windows_below(lower,upper,api=None):
 
 
 def mac_below(lower,upper):
-    from AppKit import NSWindowBelow,NSWindowAbove
+    from AppKit import NSWindowAbove
     import Quartz
     from mac_native import native_window
     a,b=native_window(lower),native_window(upper)
@@ -38,7 +38,9 @@ def mac_below(lower,upper):
         # onscreen order. Present it relative to its own visible host only.
         b.orderWindow_relativeTo_(NSWindowAbove,an)
     elif an in numbers and bn in numbers and numbers.index(an)<numbers.index(bn):
-        a.orderWindow_relativeTo_(NSWindowBelow,bn)
+        # Move the upper panel, not its host: lowering the host can move its
+        # transient panel group as well and leave the card behind the pet.
+        b.orderWindow_relativeTo_(NSWindowAbove,an)
 
 
 class WindowLayers(QObject):
@@ -72,6 +74,7 @@ class WindowLayers(QObject):
         self.request()
 
     def eventFilter(self,obj,event):
+        if event.type() in (QEvent.Type.ApplicationActivate,QEvent.Type.ApplicationStateChange):self.request()
         if event.type() in (QEvent.Type.Show,QEvent.Type.Hide,QEvent.Type.WinIdChange,
                 QEvent.Type.WindowActivate,QEvent.Type.ZOrderChange,QEvent.Type.MouseButtonPress):
             if isinstance(obj,QWidget):

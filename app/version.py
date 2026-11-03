@@ -1,5 +1,5 @@
 """Public identity combines upstream baseline and the independent fork counter."""
-VERSION = '0.19.7'  # Stable machine/update contract.
+VERSION = '0.19.9'  # Stable machine/update contract.
 UPSTREAM_VERSION = '1.4.2'
 CUSTOM_VERSION = VERSION.removeprefix('0.')
 DISPLAY_VERSION = UPSTREAM_VERSION + '.' + CUSTOM_VERSION

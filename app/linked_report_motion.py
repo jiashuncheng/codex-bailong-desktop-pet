@@ -106,8 +106,11 @@ class LinkedReportMotion(QObject):
         from PySide6.QtGui import QPainterPath
         path=QPainterPath();path.addRoundedRect(rect,18,18);p.setClipPath(path);p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         weight=round(stage(self.progress,.12,.86)*255)
+        # Both targets were cleared. Source avoids Qt's extra opacity
+        # attenuation when smooth-scaling two weighted SourceOver rasters.
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
         p.setOpacity((256-weight)/256);p.drawPixmap(rect,self.old,QRectF(self.old.rect()))
-        self.weighted.fill(Qt.GlobalColor.transparent);q=QPainter(self.weighted);q.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform);q.setClipPath(path)
+        self.weighted.fill(Qt.GlobalColor.transparent);q=QPainter(self.weighted);q.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform);q.setClipPath(path);q.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
         q.setOpacity((weight+1)/256);q.drawPixmap(rect,self.new,QRectF(self.new.rect()));q.end()
         p.setOpacity(1.);p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus);p.drawPixmap(0,0,self.weighted)
         p.restore()

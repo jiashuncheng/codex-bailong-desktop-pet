@@ -93,6 +93,20 @@ def configure_window(widget, top=True):
     set_level(widget, top)
 
 
+def show_hint(widget, owner, top):
+    """Order only the hint above its host; preserve the host's key window."""
+    from AppKit import NSWindowAbove
+    configure_window(widget, top)
+    window = native_window(widget)
+    parent = native_window(owner) if owner is not None else None
+    if window is None:
+        return
+    if parent is not None:
+        window.orderWindow_relativeTo_(NSWindowAbove, parent.windowNumber())
+    else:
+        window.orderFront_(None)
+
+
 def set_keyboard_input(widget, editing):
     """Only explicit settings/chat navigation may opt into keyboard focus.
 

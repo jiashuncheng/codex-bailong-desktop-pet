@@ -29,7 +29,8 @@ class ReportTransitionTests(unittest.TestCase):
             if r.fraction>.09:
                 point=r.visual_rect().center()
                 self.assertGreaterEqual(image.pixelColor(round(point.x()*ratio),round(point.y()*ratio)).alpha(),250)
-        self.assertGreater(max(heights),r.surface.height());self.assertLess(heights[-1],max(heights))
+        self.assertTrue(all(a<=b for a,b in zip(heights,heights[1:])), 'opening does not recoil')
+        self.assertLessEqual(max(heights),r.surface.height());self.assertGreaterEqual(heights[-1],r.surface.height()-1)
     def test_open_and_close_change_only_painted_clip_not_native_geometry(self):
         self.r.open();self.assert_frozen_frame();self.finish()
         self.assertFalse(self.r._animating);self.assertIsNone(self.r._frame);self.assertTrue(self.r.surface.isVisible())

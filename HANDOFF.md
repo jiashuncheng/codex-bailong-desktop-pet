@@ -1,3 +1,27 @@
+# v1.4.2.19.9 卡片起落与移位平滑（2026-11-03）
+
+用户明确主要问题为展开起落生硬、界面换位置不顺。共用 container_progress 改为有界 beta(3,5) 积分曲线，起止速度与加速度归零；保留主卡片 480ms 展开、440ms 收回及最后一成像素交接。数据面板开合复用平滑曲线、移除反冲，宽度使用有限初始斜率的展开函数，开启 432ms、关闭 360ms；图表仍在容器端点交接后进入。
+
+避让路径只在准备阶段尝试安全圆角并建立弧长表；不同半径逐级退让，空间不足时保留安全折线。拖动复用既有表，仅平移坐标，不加跟随延迟。复核发现共享文字与图标原先仍直线插值，外框绕行时发生错位；现把相同绕行偏移加到共享内容、锚定内容及其裁剪、状态图标，报告继续同一偏移。像素回归将绕行中内容与对应的直线路径本地坐标比较，保留部分透明度语义。
+
+Mac 保护层及报告通过既有原生 show_hint 按自有宿主排序，设置后台可见属性，不用 Qt raise。原生首轮复现带报告时抬高人物后卡片落在人物后方；将相对层级修正从降低宿主改为抬高上层面板，并合并处理应用状态事件，避免 transient 组被带走。缩放宿主仅在样式不同时设置样式。跟随面板混合的旧 SourceOver 缩放路径在新旧曲线均产生 alpha=253 的轻微衰减；两层清空后用 Source 写入权重、再 Plus 合成，保留原透明度/亮度断言并通过。
+
+首次源码检查保留 .checks/motion-19.9-routing.json、motion-19.9-final-source.json；曾误列不存在的测试模块、旧报告测试强制要求 overshoot，以及沙箱拒绝临时 Unix socket，均未计为通过。报告测试按本次单调开合意图改成不回缩且不越界，保留原生画布不变、透明边界、内容和中断断言。像素夹具最初把部分淡入内容误当满色，改为与相同进度的直线路径参考比较。已修复最终源码 196 项通过，见 .checks/motion-19.9-verified-source.json。最终原生 16 场景通过，243 次自然过渡几何采样无人物重叠；被动展开、数据面板及置顶操作无本应用激活通知，设置/聊天获得 key，见 .checks/motion-19.9-native-verified/results.json。两个主动 pet.raise 场景只用于制造层级错乱，允许其激活；不把它们当实际拖动验收。中间失序证据 .checks/motion-19.9-native/results.json 保留。
+
+准备/绘制探针用于定位开销，单次样本不能证明物理显示帧率改善；本次目标为曲线与路径连续性。Windows 使用相同通用动画源码，原生调用契约回归通过，尚无 Windows 实机或冻结包验收。源码版本 v1.4.2.19.9 同时包含上一节未推送的 Mac 悬停修复；已重启本机并核对 runtime 为该版本、720px 高清素材、Token scope=all、会话同步 connected=true。用户随后明确要求将本轮动画优化与上一节悬停修复一起推送到个人 fork 的 main；仅同步源码及通用维护说明，不发布安装包。
+
+# v1.4.2.19.8 Mac 图表悬停提示（2026-11-03）
+
+用户反馈 Mac 柱状图悬停无信息而 Windows 有。共享 TokenPlot/ComboChart 已接收悬停并生成 ChartBubble，但原生复现中 Qt visible=true、record 已设置，NSPanel.hidesOnDeactivate=true，WindowServer 无该提示窗口，应用未激活。HintBubble 没有普通 Mac 窗口的后台可见设置，且它只有原生 transientParent，不在 MacIntegration 的 QObject 所有权遍历内。
+
+HintBubble 在原生创建前启用 WA_MacAlwaysShowToolWindow；present 时经 mac_native.show_hint 配置原生浮窗，仅排序提示自身到宿主上方。托盘等无宿主提示使用原生 orderFront，不使用 Qt raise。核对 Qt 6.9.2 Cocoa 源码发现 raise 默认会调用 activateIgnoringOtherApps；因此只补后台可见设置仍会意外激活应用，最终路径避开该调用。保留非激活构造、鼠标透明/可滚动子类语义、置顶选择、原悬停延时和移出清理。Windows 继续原路径。
+
+相关回归中的后台索引测试在未修改的原 hover_hints 模块上同样失败：启动维护 prepare 可在 slow poll 之前返回，线程存活断言没有真正测试到预期慢路径。夹具只隔离 prepare 为已就绪，保留两个状态事件、线程存活和退出取消的全部原断言；29 项数据面板复核通过，基线失败见 .checks/chart-hover-baseline-background.json。初次完整焦点探针失败记录保留为 .checks/chart-hover-19.8-focus-initial.json，不把中间尝试当最终验收。
+
+最终源码相关 102 项检查通过，见 .checks/chart-hover-19.8-final.json。7 个原生提示场景通过：普通全部/7天、展开30天、数据面板小时图、报告上方顶栏提示、编辑宿主保持 key、取消置顶后重开。WindowServer 中提示均可见并位于宿主上方；被动场景全程无本应用激活通知、无提示 key，编辑场景宿主显示前后保持 key；置顶层级分别为 8/0，见 .checks/chart-hover-native-19.8-final/results.json。输入由 QTest/受控调用触发，窗口可见性与层级来自真实 Cocoa/WindowServer，不宣称物理鼠标全路线或 Windows 实机验收。
+
+完整 mac_focus_probe 在新旧悬停实现上均出现延后检查失败；跟踪曾观察到进入编辑后获得 key，随后前台已为外部应用，触发来源未确认，因此不将该完整探针列为通过。对照与追踪见 .checks/chart-hover-focus-baseline*.json、chart-hover-focus-current*.json。本次与悬停直接相关的宿主 key 保持单独验证通过，保留全部首次失败。仅本地源码/运行版本更新至 v1.4.2.19.8，尚未推送 GitHub 或发布安装包。
+
 # v1.4.2.19.7 无候选会话时的胶囊文字稳定性（2026-11-03）
 
 维护文档补齐：按用户明确授权检查公开正文，补入胶囊身份、标签规范化、无候选静止及裁剪规则；公开范围仅含通用技术说明、合成示例和仓库相对路径。原始诊断及配置不纳入此次文档提交，应用逻辑与 v1.4.2.19.7 保持一致。

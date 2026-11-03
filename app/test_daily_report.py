@@ -369,7 +369,8 @@ class BackgroundTests(unittest.TestCase):
                 deadline=time.monotonic()+5
                 while not stop() and time.monotonic()<deadline:time.sleep(.01)
                 return {}
-            with patch.object(worker.token_index,'poll',side_effect=slow_index),patch.object(worker.tail,'poll',return_value=[dict(kind='status',state='working')]):
+            # Exercise the slow index poll itself, independently of startup maintenance.
+            with patch.object(worker.token_index,'prepare',return_value=dict(pending=False)),patch.object(worker.token_index,'poll',side_effect=slow_index),patch.object(worker.tail,'poll',return_value=[dict(kind='status',state='working')]):
                 worker.start()
                 try:
                     deadline=time.monotonic()+2.6

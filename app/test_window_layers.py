@@ -13,7 +13,7 @@ class LayerTests(unittest.TestCase):
     def test_windows_does_not_reorder_already_correct_windows(self):
         api=SimpleNamespace(GetWindow=Mock(side_effect=[99,0]),SetWindowPos=Mock())
         windows_below(10,20,api);api.SetWindowPos.assert_not_called()
-    def test_mac_only_moves_the_lower_window_relative_to_our_upper(self):
+    def test_mac_only_moves_the_upper_panel_relative_to_our_host(self):
         a=SimpleNamespace(windowNumber=lambda:10,orderWindow_relativeTo_=Mock())
         b=SimpleNamespace(windowNumber=lambda:20,orderWindow_relativeTo_=Mock())
         framework=SimpleNamespace(NSWindowBelow=-1,NSWindowAbove=1)
@@ -21,10 +21,10 @@ class LayerTests(unittest.TestCase):
             CGWindowListCopyWindowInfo=Mock(return_value=[{'kCGWindowNumber':10},{'kCGWindowNumber':20}]))
         with patch.dict(sys.modules,{'AppKit':framework,'Quartz':quartz}),patch('mac_native.native_window',side_effect=[a,b]):
             mac_below(object(),object())
-        a.orderWindow_relativeTo_.assert_called_once_with(-1,20);b.orderWindow_relativeTo_.assert_not_called()
-        quartz.CGWindowListCopyWindowInfo.return_value=[{'kCGWindowNumber':20},{'kCGWindowNumber':10}];a.orderWindow_relativeTo_.reset_mock()
+        b.orderWindow_relativeTo_.assert_called_once_with(1,10);a.orderWindow_relativeTo_.assert_not_called()
+        quartz.CGWindowListCopyWindowInfo.return_value=[{'kCGWindowNumber':20},{'kCGWindowNumber':10}];b.orderWindow_relativeTo_.reset_mock()
         with patch.dict(sys.modules,{'AppKit':framework,'Quartz':quartz}),patch('mac_native.native_window',side_effect=[a,b]):mac_below(object(),object())
-        a.orderWindow_relativeTo_.assert_not_called()
+        a.orderWindow_relativeTo_.assert_not_called();b.orderWindow_relativeTo_.assert_not_called()
     def test_new_mac_panel_is_presented_relative_to_its_host_without_activation(self):
         a=SimpleNamespace(windowNumber=lambda:10,orderWindow_relativeTo_=Mock())
         b=SimpleNamespace(windowNumber=lambda:20,isVisible=lambda:True,orderWindow_relativeTo_=Mock())

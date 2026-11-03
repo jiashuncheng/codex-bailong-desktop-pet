@@ -413,7 +413,7 @@ class ExclusivePart:
 class SurfaceMorph:
     def translate(self,delta):
         """Move prepared geometry only; reuse every raster and blend buffer."""
-        if self.route:self.route=tuple(point+delta for point in self.route)
+        if self.route:self.route=self.route.translated(delta)
         for state in (self.start,self.end):
             state.rect.translate(delta);state.icon_rect.translate(delta)
             if state.frame_origin is not None:state.frame_origin+=delta
@@ -521,8 +521,11 @@ class SurfaceMorph:
         self._paint_body(p,time,canvas)
     def _paint_body(self,p,time,canvas):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        a,z=self.start,self.end;rect=self.geometry(time).translated(-canvas.x(),-canvas.y())
+        a,z=self.start,self.end;global_rect=self.geometry(time);rect=global_rect.translated(-canvas.x(),-canvas.y())
         f=container_progress(time);blend=stage(time,0.,.42)
+        # Semantic rasters interpolate their endpoint layout. Apply the body's
+        # detour to that entire layout, including its clips and anchored text.
+        straight=mix_rect(a.rect,z.rect,f);relocation=global_rect.topLeft()-straight.topLeft()
         ca=QColor(theme_color(ISLAND if a.island else SURFACE));cz=QColor(theme_color(ISLAND if z.island else SURFACE))
         color=QColor(*[round(x+(y-x)*blend) for x,y in zip(ca.getRgb(),cz.getRgb())])
         radius=a.radius+(z.radius-a.radius)*f
@@ -559,15 +562,21 @@ class SurfaceMorph:
                 size=state.content.deviceIndependentSize();w=size.width()*scale;h=size.height()*scale
                 target=QRectF(rect.center().x()-w/2,rect.center().y()-h/2,w,h)
                 p.setOpacity(opacity);p.drawPixmap(target,image,QRectF(image.rect()))
+        p.save();p.translate(relocation)
         for part in self.shared_parts.values():part.paint(p,f,canvas)
+        p.restore()
         for part in self.exclusive_parts:
-            if part.overlay:part.paint(p,time,self.geometry(time),f,canvas)
+            if part.overlay:
+                p.save()
+                if part.anchor:p.translate(relocation)
+                part.paint(p,time,straight if part.anchor else global_rect,f,canvas)
+                p.restore()
         # Same semantic icon, moving once between the corresponding positions.
         start_icon=a.icon_rect.translated(-a.rect.x(),-a.rect.y());end_icon=z.icon_rect.translated(-z.rect.x(),-z.rect.y())
         nx=start_icon.center().x()/a.rect.width()+(end_icon.center().x()/z.rect.width()-start_icon.center().x()/a.rect.width())*f
         ny=start_icon.center().y()/a.rect.height()+(end_icon.center().y()/z.rect.height()-start_icon.center().y()/a.rect.height())*f
         icon=mix_rect(start_icon,end_icon,f);icon.moveCenter(QPointF(rect.x()+rect.width()*nx,rect.y()+rect.height()*ny))
-        if self.shared_parts or self.page_switch:icon=mix_rect(a.icon_rect,z.icon_rect,f).translated(-canvas.x(),-canvas.y())
+        if self.shared_parts or self.page_switch:icon=mix_rect(a.icon_rect,z.icon_rect,f).translated(relocation-QPointF(canvas.x(),canvas.y()))
         for image,opacity in ((a.icon,1.-blend),(z.icon,blend)):
             if opacity>0:p.setOpacity(opacity);p.drawPixmap(icon,image,QRectF(image.rect()))
         p.restore();p.setOpacity(1.)

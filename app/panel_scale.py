@@ -46,7 +46,9 @@ class StatusScaleHost(QGraphicsView):
                 self.scene().removeItem(self.proxy);self.proxy.deleteLater();self.proxy=None
             self.hide();return
         if self.proxy is None:
-            root.setParent(None);root.setStyleSheet(self.bubble.styleSheet())
+            root.setParent(None)
+            style=self.bubble.styleSheet()
+            if root.styleSheet()!=style:root.setStyleSheet(style)
             self.proxy=self.scene().addWidget(root)
             # Qt enables a window background when embedding. Preserve the
             # transparent gaps around the capsule and the shell's rounded card.

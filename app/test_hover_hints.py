@@ -31,6 +31,27 @@ class HoverHintTests(unittest.TestCase):
         QTest.mouseMove(self.b._header_actions[index],QPoint(5,5));APP.processEvents()
     def outside(self):
         QTest.mouseMove(self.b,QPoint(3,self.b.height()-3));APP.processEvents()
+    def test_mac_hint_is_shown_relative_to_owner_without_qt_raise(self):
+        with patch('hover_hints.sys.platform','darwin'):
+            popup=HintBubble()
+        try:
+            self.assertTrue(popup.testAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow))
+            anchor=QRect(100,300,20,20)
+            with patch('hover_hints.sys.platform','darwin'),patch('hover_hints.QApplication.platformName',return_value='cocoa'),patch('mac_native.show_hint') as show_hint,patch.object(popup,'raise_') as raise_window:
+                popup.present('日期','用量',anchor,self.b.screen(),owner=self.b,topmost=False)
+                show_hint.assert_called_once_with(popup,self.b,False)
+                raise_window.assert_not_called()
+            self.assertTrue(popup.windowFlags()&Qt.WindowType.WindowDoesNotAcceptFocus)
+            self.assertTrue(popup.windowFlags()&Qt.WindowType.WindowTransparentForInput)
+        finally:popup.dismiss(True);popup.close();popup.deleteLater();APP.processEvents()
+    def test_mac_hint_without_owner_uses_nonactivating_native_order(self):
+        popup=HintBubble()
+        try:
+            with patch('hover_hints.sys.platform','darwin'),patch('hover_hints.QApplication.platformName',return_value='cocoa'),patch('mac_native.show_hint') as show_hint,patch.object(popup,'raise_') as raise_window:
+                popup.present('提示','',QRect(100,300,20,20),self.b.screen())
+                show_hint.assert_called_once_with(popup,None,True)
+                raise_window.assert_not_called()
+        finally:popup.dismiss(True);popup.close();popup.deleteLater();APP.processEvents()
     def test_style_events_do_not_traverse_hover_ancestry(self):
         with patch.object(self.b,'isAncestorOf',side_effect=AssertionError('irrelevant ancestry')):
             self.assertFalse(self.h.eventFilter(self.b._header_actions[0],QEvent(QEvent.Type.StyleChange)))

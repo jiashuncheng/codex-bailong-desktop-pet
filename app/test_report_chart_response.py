@@ -35,13 +35,13 @@ class ReportChartResponseTests(unittest.TestCase):
         p.close();p.deleteLater()
 
     def test_open_clock_ends_at_the_visual_response_endpoint(self):
-        from spring_motion import EXPAND_MS,island_response
+        from spring_motion import EXPAND_MS,container_progress
         self.r.dismiss();self.finish_open();self.r.open()
-        self.assertEqual(self.r.animation.duration(),round(EXPAND_MS*.82))
+        self.assertEqual(self.r.animation.duration(),round(EXPAND_MS*.9))
         for fraction in (.1,.3,.6,.81):
             self.r.animation.setCurrentTime(round(self.r.animation.duration()*fraction))
             actual=self.r.animation.currentTime()/self.r.animation.duration()
-            self.assertAlmostEqual(self.r.fraction,island_response(actual*.82),places=6)
+            self.assertAlmostEqual(self.r.fraction,container_progress(actual*.9),places=6)
         self.finish_open();self.assertFalse(self.r._animating);self.assertTrue(self.r.surface.isVisible())
         self.assertEqual(self.r.plot.reveal.animation.duration(),420)
 

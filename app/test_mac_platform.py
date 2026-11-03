@@ -200,6 +200,20 @@ class SourceUpdateTests(unittest.TestCase):
 
 
 class KeyboardFocusTests(unittest.TestCase):
+    def test_hint_orders_only_itself_without_reordering_or_activating_host(self):
+        from mac_native import show_hint
+        from unittest.mock import Mock,call
+        from AppKit import NSWindowAbove
+        widget,owner=Mock(),Mock();window,parent=Mock(),Mock();parent.windowNumber.return_value=42
+        with patch('mac_native.configure_window') as configure,patch('mac_native.native_window',side_effect=[window,parent]):
+            show_hint(widget,owner,True)
+            configure.assert_called_once_with(widget,True)
+            window.orderWindow_relativeTo_.assert_called_once_with(NSWindowAbove,42)
+            self.assertEqual(parent.mock_calls,[call.windowNumber()])
+            window.makeKeyWindow.assert_not_called();window.makeKeyAndOrderFront_.assert_not_called()
+        with patch('mac_native.configure_window'),patch('mac_native.native_window',return_value=window):
+            show_hint(widget,None,False);window.orderFront_.assert_called_once_with(None)
+
     def test_nonactivating_constructor_is_scoped_idempotent_and_preserves_arguments(self):
         import mac_panels
         from types import SimpleNamespace

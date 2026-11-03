@@ -30,15 +30,16 @@ def stage(value,start,end):
 
 
 def container_progress(value):
-    """Critically damped size changes without a reverse travel at the end.
+    """Bounded asymmetric ease with zero velocity and acceleration at both ends.
 
-    A large editor magnifies even a 1.6% spring overshoot into visible motion.
-    Inline cards retain their separate, restrained spring response.
+    The beta(3, 5) integral starts gently, then leaves more time for settling.
+    Preserve the final tenth for the existing exact-pixel raster handoff.
     """
     t=max(0.,min(1.,float(value)))
     if t>=.9:return 1.
-    response=1.-(1.+9.*t)*math.exp(-9.*t)
-    return response+(1.-response)*stage(t,.65,.9)
+    u=t/.9
+    if u>=.5:return 1.-(1.-u)**5*(1.+5.*u+15.*u*u)
+    return max(0.,min(1.,u*u*u*(35.+u*(-105.+u*(126.+u*(-70.+15.*u))))))
 
 
 def dismiss_progress(value):

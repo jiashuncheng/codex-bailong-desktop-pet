@@ -2,9 +2,10 @@
 from settings_controls import play_animation
 from theme_registry import color as theme_color
 import weakref
+import sys
 from PySide6.QtCore import Qt,QObject,QEvent,QPoint,QRect,QRectF,QTimer,QVariantAnimation,QEasingCurve
 from PySide6.QtGui import QColor,QCursor,QFontMetrics,QPainter,QPainterPath,QPen
-from PySide6.QtWidgets import QWidget,QToolTip
+from PySide6.QtWidgets import QApplication,QWidget,QToolTip
 from typography import ui_font
 from ui_theme import SURFACE,INK,MUTED,BORDER
 from settings_controls import motion_enabled
@@ -20,6 +21,7 @@ class HintBubble(QWidget):
         super().__init__(None,flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        if sys.platform=='darwin':self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow,True)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setFont(ui_font(12));self.title='';self.subtitle='';self.level=0.;self.below=False;self.tip_x=20.
@@ -47,7 +49,10 @@ class HintBubble(QWidget):
         self.setGeometry(left,top,width,height);self.setAccessibleName(self.title)
         self.setAccessibleDescription(self.subtitle)
         if not self.isVisible():self.level=0.;self.show()
-        self.raise_()
+        if sys.platform=='darwin' and QApplication.platformName()=='cocoa':
+            from mac_native import show_hint
+            show_hint(self,owner,topmost)
+        else:self.raise_()
         self._animate(1.)
         # An already opaque surface has no alpha delta to drive paintEvent.
         # Moving a layered window alone can retain its old pixels.

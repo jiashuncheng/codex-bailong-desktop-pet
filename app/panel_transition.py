@@ -1,5 +1,6 @@
 """Fixed native canvas, blended snapshots and queued explicit navigation."""
 from settings_controls import play_animation
+import sys
 from theme_registry import color as theme_color
 from PySide6.QtCore import QObject,QVariantAnimation,QEasingCurve,QRect,QRectF,QPoint,Qt,QEvent,QTimer
 from PySide6.QtGui import QPainter,QPainterPath,QColor,QPen,QPixmap,QRegion
@@ -66,6 +67,7 @@ class NativeLanding(QWidget):
         super().__init__(bubble,flags);self.image=None;self.paints=0;self.native_published=False;self.native_error=''
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        if sys.platform=='darwin':self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow,True)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus);self.hide()
     def prepare(self,rect):
@@ -74,7 +76,12 @@ class NativeLanding(QWidget):
         # Expose an empty, input-transparent surface during the animation.
         # A first show at the final resize may not be paintable synchronously.
         if self.geometry()!=rect:self.setGeometry(rect)
-        if not self.isVisible():self.show();self.raise_()
+        if not self.isVisible():
+            self.show()
+            if sys.platform=='darwin' and QApplication.platformName()=='cocoa':
+                from mac_native import show_hint
+                show_hint(self,self.parentWidget(),top)
+            else:self.raise_()
         self.repaint()
         # A just-shown translucent tool is not necessarily exposed to Qt yet.
         # Submit the raster now, before the owner becomes transparent.

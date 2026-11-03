@@ -57,7 +57,7 @@ class IslandStatusText(QLabel):
         self.row_columns=capsule_columns(self.width(),metrics,names,statuses,extra,QFontMetrics(self.count_font))
         for item,name,status in zip(entries,names,statuses):
             source=str(item.get('source_label') or '未知')
-            self.source_rows.append(dict(source=metrics.elidedText(display_source(source),Qt.TextElideMode.ElideMiddle,max(1,self.row_columns['source_width']-2)),full_source=source,title=item.get('title',''),name=metrics.elidedText(name,Qt.TextElideMode.ElideMiddle,self.row_columns['name_width']),full_name=name,status=status,running=item['state'] in ('thinking','working','responding','waiting')))
+            self.source_rows.append(dict(session=item.get('session'),source=metrics.elidedText(display_source(source),Qt.TextElideMode.ElideMiddle,max(1,self.row_columns['source_width']-2)),full_source=source,title=item.get('title',''),name=metrics.elidedText(name,Qt.TextElideMode.ElideMiddle,self.row_columns['name_width']),full_name=name,status=status,running=item['state'] in ('thinking','working','responding','waiting')))
         # If long, distinct titles have the same middle-elided abbreviation,
         # expose their different endings instead of identical short labels.
         if len(self.source_rows)==2 and self.source_rows[0]['name']==self.source_rows[1]['name'] and names[0]!=names[1]:
@@ -81,14 +81,15 @@ class IslandStatusText(QLabel):
             p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setFont(self.row_font)
             line_height=17;top=(self.height()-len(self.source_rows)*line_height)/2;c=self.row_columns
             def draw(text,x,y,width,color,align=Qt.AlignmentFlag.AlignLeft):
-                rect=QRectF(x,y,width,line_height);p.save();p.setClipRect(rect)
+                rect=QRectF(x,y,width,line_height);p.save();p.setClipRect(rect,Qt.ClipOperation.IntersectClip)
                 p.setPen(QColor(color));p.drawText(rect,Qt.AlignmentFlag.AlignVCenter|align,text);p.restore()
             progress=self.property('captionProgress');progress=1. if progress is None else float(progress)
             p.setClipRect(self.rect())
             for index,row in enumerate(self.source_rows):
                 p.save();p.setClipRect(QRectF(0,top+index*line_height,self.width(),line_height),Qt.ClipOperation.IntersectClip)
                 previous=getattr(self,'previous_rows',[])
-                moved=index>=len(previous) or (row['source'],row['full_name'])!=(previous[index]['source'],previous[index]['full_name'])
+                moved=(index<len(previous) and row.get('session') and previous[index].get('session')
+                       and row['session']!=previous[index]['session'])
                 y=top+index*line_height+(6*(1-progress) if moved else 0)
                 p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor('#443b50'))
                 p.drawRoundedRect(QRectF(0,y+1,c['source_width'],15),4,4)
@@ -130,6 +131,11 @@ class StatusIsland(QWidget):
         self.animation.stop();self._caption_frame(1.);super().hideEvent(event)
     def refresh(self):
         full=short_status(self.icon);budget=self.width()-12-10-16-5-2
+        states=getattr(self.icon,'session_states',[]) if getattr(self.icon,'session_summary','') else [self.icon.state if self.icon.visual() in ('busy','waiting') else 'complete']
+        entries=getattr(self.icon,'session_entries',[])
+        tail=re.search(r'\+(\d+)$',full);extra=int(tail.group(1)) if tail else 0
+        signature=(full,tuple(states),tuple((v.get('session'),display_source(v.get('source_label')),v.get('title'),v.get('state')) for v in entries),extra,budget)
+        if signature==self._last_status:return
         self.text.setFixedWidth(budget);self.text.setFont(ui_font(12,True));text=full
         if QFontMetrics(self.text.font()).horizontalAdvance(text)>budget:
             self.text.setFont(ui_font(11,True))
@@ -138,15 +144,13 @@ class StatusIsland(QWidget):
         if tail and metrics.horizontalAdvance(text)>budget:
             suffix=tail.group();text=metrics.elidedText(text[:tail.start()],Qt.TextElideMode.ElideRight,max(1,budget-metrics.horizontalAdvance(suffix)))+suffix
         else:text=metrics.elidedText(text,Qt.TextElideMode.ElideRight,budget)
-        states=getattr(self.icon,'session_states',[]) if getattr(self.icon,'session_summary','') else [self.icon.state if self.icon.visual() in ('busy','waiting') else 'complete']
-        entries=getattr(self.icon,'session_entries',[])
-        tail=re.search(r'\+(\d+)$',full);extra=int(tail.group(1)) if tail else 0
-        signature=(text,repr(entries),extra)
-        if signature==self._last_status:return
-        changed=self._last_status is not None and signature!=self._last_status
-        identities=tuple((v.get('session'),v.get('source_label'),v.get('title')) for v in entries)
-        rotating=changed and identities!=getattr(self,'_last_identities',identities)
+        identities=tuple(v.get('session') for v in entries)
+        previous=getattr(self,'_last_identities',())
+        rotating=(self._last_status is not None and len(identities)==len(previous)
+                  and any(a and b and a!=b for a,b in zip(identities,previous)))
         if rotating:self.text.previous_rows=list(getattr(self.text,'source_rows',[]))
+        elif identities!=previous:
+            self.animation.stop();self.text.previous_rows=[];self._caption_frame(1.)
         self.text.set_status(text,states,entries,extra)
         from settings_controls import motion_enabled
         if rotating and self.isVisible() and not self._holds and motion_enabled():play_animation(self.animation)

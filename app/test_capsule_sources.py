@@ -23,6 +23,11 @@ class SourceTests(unittest.TestCase):
     def test_short_alias_is_display_only_and_existing_title_prefix_is_not_duplicated(self):
         self.assertEqual(display_source('gpu228'),'228')
         self.assertEqual(display_source('win'),'win')
+        for label in ('mac','Mac','MAC',' Mac '):
+            self.assertEqual(display_source(label),'mac')
+            self.assertEqual(source_title('[Mac] jsc-1',label),'[mac] jsc-1')
+        self.assertEqual(display_source('MyMac'),'MyMac')
+        self.assertEqual(display_source('MacBook-Pro'),'MacBook-Pro')
         self.assertEqual(source_title('[gpu228] jsc-15','gpu228'),'[228] jsc-15')
         self.assertEqual(source_title('[228] jsc-15','gpu228'),'[228] jsc-15')
         self.assertEqual(source_title('普通名称',''),'普通名称')

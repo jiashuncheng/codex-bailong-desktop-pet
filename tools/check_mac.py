@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'app'))
 
 MODULES = [
-    'test_window_layout', 'test_window_layers',
+    'test_capsule_stability', 'test_window_layout', 'test_window_layers',
     'test_notifications', 'test_settings_controls',
     'test_refresh_stability', 'test_active_turn_recovery', 'test_usage_push', 'test_state_push', 'test_shared_sync', 'test_capsule_names', 'test_capsule_sources', 'test_panel_scale', 'test_tray_quota', 'test_native_landing.NativeLandingTests.test_non_native_environment_does_not_call_win32',
     'test_island', 'test_panel_transition', 'test_surface_handoff', 'test_quota_history', 'test_token_sync', 'test_merge_compat', 'test_mac_platform', 'test_source_platform', 'test_quota_summary_data', 'test_spring_motion',

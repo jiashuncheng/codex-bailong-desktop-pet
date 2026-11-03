@@ -832,7 +832,7 @@ class CompactBubble(Bubble):
             if self.island is None:self.redraw();return
             from conversation_roster import LABELS
             selected,extra=self.roster.selection(self.status_indicator.unread)
-            self.status_indicator.session_summary='/'.join('压缩' if v.get('compacting') and v['state']!='waiting' else LABELS.get(v['state'],'待命').removesuffix('中') for v in selected)+(' +'+str(extra) if extra else '');self.status_indicator.session_states=[v['state'] for v in selected];self.status_indicator.session_entries=[dict(source_label=v.get('source_label','未知'),state=v['state'],title=v.get('title','')) for v in selected]
+            self.status_indicator.session_summary='/'.join('压缩' if v.get('compacting') and v['state']!='waiting' else LABELS.get(v['state'],'待命').removesuffix('中') for v in selected)+(' +'+str(extra) if extra else '');self.status_indicator.session_states=[v['state'] for v in selected];self.status_indicator.session_entries=[dict(session=v['session'],source_label=v.get('source_label','未知'),state=v['state'],title=v.get('title','')) for v in selected]
             self.island.refresh();return
         title=getattr(self,'_status_title',None)
         if title is None or not self.status_view.isVisible():
@@ -1162,6 +1162,7 @@ class CompactBubble(Bubble):
         if surface.rect().contains(surface.mapFromGlobal(QCursor.pos())):return
         if self.roster.rotate_one(self.status_indicator.unread):self.refresh_status()
     def cycle_conversations(self,direction=1):
+        if not self.roster.selection(self.status_indicator.unread)[1]:return
         self.roster.cycle(direction);self.refresh_status()
         self.conversation_timer.start()
     def _quota_reset_due(self,stamp):
@@ -1190,7 +1191,7 @@ class CompactBubble(Bubble):
         self.status_indicator.set_island(True);self.island=StatusIsland(self.status_indicator)
         from conversation_roster import LABELS
         selected,extra=self.roster.selection(self.status_indicator.unread)
-        self.status_indicator.session_summary='/'.join('压缩' if v.get('compacting') and v['state']!='waiting' else LABELS.get(v['state'],'待命').removesuffix('中') for v in selected)+(' +'+str(extra) if extra else '');self.status_indicator.session_states=[v['state'] for v in selected];self.status_indicator.session_entries=[dict(source_label=v.get('source_label','未知'),state=v['state'],title=v.get('title','')) for v in selected]
+        self.status_indicator.session_summary='/'.join('压缩' if v.get('compacting') and v['state']!='waiting' else LABELS.get(v['state'],'待命').removesuffix('中') for v in selected)+(' +'+str(extra) if extra else '');self.status_indicator.session_states=[v['state'] for v in selected];self.status_indicator.session_entries=[dict(session=v['session'],source_label=v.get('source_label','未知'),state=v['state'],title=v.get('title','')) for v in selected]
         self.island.refresh()
         self.island.expand.connect(lambda:self.set_mode('auto'));row.addWidget(self.island)
         if self.show_quota:

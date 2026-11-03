@@ -22,7 +22,7 @@ def session_source(session,wsl=False):
 def display_source(label):
     """Short UI alias; synchronization and provenance retain the original value."""
     label=str(label or '').strip()
-    return '228' if label.casefold()=='gpu228' else label
+    return {'gpu228':'228','mac':'mac'}.get(label.casefold(),label)
 
 
 def source_title(title,source):

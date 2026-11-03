@@ -95,6 +95,21 @@ class CapsuleSourceUiTests(unittest.TestCase):
         self.assertEqual(b.roster.items['remote']['source_label'],'gpu228')
         self.assertEqual(b.roster.items['remote']['title'],'jsc-15')
 
+    def test_expanded_platform_is_never_elided_with_a_long_chat_name(self):
+        from compact_bubble import StatusScroller
+        from PySide6.QtGui import QFontMetrics
+        for source,label in [('mac','mac'),('win','win'),('wsl','wsl'),('gpu228','228')]:
+            for width in (136,188,330):
+                view=StatusScroller(width);view.show();APP.processEvents()
+                title='一个很长的会话名称用于验证平台完整显示'*10
+                view.set_conversations([('session','正在处理任务')],full=True,metadata={'session':dict(title=title,state='working',source_label=source)})
+                row=view.rows['session'];prefix='['+label+'] '
+                self.assertTrue(row.short_title.startswith(prefix),(source,width,row.short_title))
+                self.assertLessEqual(row.title_width,max(40,row.width()-76))
+                self.assertLessEqual(QFontMetrics(row.font()).horizontalAdvance(row.short_title),row.transition_regions()['title'].width())
+                self.assertEqual(row.conversation_title,title)
+                view.close();view.deleteLater();APP.processEvents()
+
     def test_single_row_and_idle_fallback_keep_fixed_height(self):
         self.b.roster.observe(dict(session='a',state='working',source_label='本机',source_kind='local'))
         self.b.set_mode('mini');self.b.size_transition.complete();APP.processEvents()

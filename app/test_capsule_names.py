@@ -30,7 +30,7 @@ class NameUiTests(unittest.TestCase):
     def test_two_same_host_tasks_show_distinct_short_names_without_resizing(self):
         b=self.b;size=b.size();icon_rect=b.status_indicator.geometry();text=self.update(['[gpu228] jsc-1','[gpu228] jsc-2'])
         self.assertEqual([r['name'] for r in text.source_rows],['jsc-1','jsc-2'])
-        self.assertEqual([r['source'] for r in text.source_rows],['gpu228','gpu228'])
+        self.assertEqual([r['source'] for r in text.source_rows],['228','228'])
         self.assertEqual(b.size(),size);self.assertEqual(b.status_indicator.geometry(),icon_rect)
         self.assertEqual(b.island.width(),156);self.assertEqual(b.content.width(),246)
     def test_long_names_and_counts_are_bounded_and_full_titles_remain_accessible(self):

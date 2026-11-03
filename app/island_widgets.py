@@ -46,7 +46,7 @@ class IslandStatusText(QLabel):
     def set_status(self,text,states,entries=None,extra=0):
         self.setText(text);self.source_rows=[];self.extra=extra
         self.row_font=ui_font(11,True);metrics=QFontMetrics(self.row_font)
-        labels={'thinking':'思考','working':'执行','responding':'回复','waiting':'待操作','complete':'完成','interrupted':'中断'}
+        labels={'thinking':'思考','working':'执行','responding':'回复','waiting':'待操作','complete':'完成','interrupted':'中断','offline':'重连中'}
         entries=(entries or [])[:2]
         names=[short_session_name(v.get('title'),v.get('source_label')) for v in entries]
         statuses=[labels.get(v['state'],'待命') for v in entries]
@@ -121,7 +121,7 @@ class StatusIsland(QWidget):
         tail=re.search(r'\+(\d+)$',full);extra=int(tail.group(1)) if tail else 0
         self.text.set_status(text,states,entries,extra)
         if entries:
-            description='；'.join((str(v.get('source_label') or '未知')+' · '+str(v.get('title') or '')+' · '+{'thinking':'思考中','working':'执行中','responding':'回复中','waiting':'待操作','complete':'已完成'}.get(v['state'],'待命')).replace(' ·  · ',' · ') for v in entries)
+            description='；'.join((str(v.get('source_label') or '未知')+' · '+str(v.get('title') or '')+' · '+{'thinking':'思考中','working':'执行中','responding':'回复中','waiting':'待操作','complete':'已完成','offline':'重连中'}.get(v['state'],'待命')).replace(' ·  · ',' · ') for v in entries)
             full=description+(f'；另有 {extra} 个会话' if extra else '')
         self.text.setAccessibleName(full);self.setAccessibleName('Codex · '+full+'；点击打开正常面板')
     def mousePressEvent(self,event):

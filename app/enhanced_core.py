@@ -117,6 +117,7 @@ class ActivityReducer:
         label={'input':'等待你的输入','approval':'等待你的批准'}.get(waiting)
         return dict(kind='status',session=sid,state='waiting' if waiting else 'working' if s.compacting else s.state,
                     text=label or ('正在压缩上下文' if s.compacting else s.message),title=s.title,turn=s.turn,
+                    source_kind=s.source_kind,source_label=s.source_label,
                     activity='waiting' if waiting else 'compact' if s.compacting else activity,display=label or ('正在压缩上下文' if s.compacting else s.display),
                     compacting=s.compacting,waiting_reason=waiting,waiting=sum(bool(x.waiting_reason) and not x.done for x in self.sessions.values()),
                     user_message=user_message,turn_started=turn_started,active=sum(not x.done or x.compacting for x in self.sessions.values()))
@@ -206,12 +207,17 @@ class ActivityReducer:
         elif kind == 'event_msg' and typ in ('task_complete', 'task_completed'):
             changed=s.compacting
             s.compacting=False;s.waiting_reason=''
-            if not s.done:
+            if not s.done or s.state=='offline':
                 s.done = True
                 s.state, s.message = 'complete', '任务已完成，可以查看 Codex 回复啦。'
                 if not historical:
                     events.append({'kind': 'complete', 'session': sid, 'turn': s.turn, 'title': s.title, 'text': s.message})
                 changed = True
+        elif kind=='event_msg' and typ=='bridge_disconnected' and s.source_kind=='ssh':
+            s.compacting=False;s.waiting_reason='';s.done=True;s.calls.clear()
+            previous=s.display or '状态待确认'
+            s.state='offline';s.message=s.display='连接中断，重连中 · 上次：'+previous
+            changed=True
         elif kind == 'event_msg' and typ in ('turn_aborted', 'task_aborted', 'turn_cancelled'):
             s.compacting=False;s.waiting_reason=''
             s.done = True

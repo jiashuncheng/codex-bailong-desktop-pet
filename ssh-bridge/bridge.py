@@ -15,6 +15,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ACTIVE = {'thinking', 'working', 'responding', 'waiting'}
+# Deadlines cover SSH negotiation AND uploading the stdin collector.
+STARTUP_TIMEOUT = 12.0
+HEARTBEAT_TIMEOUT = 10.0
+RETRY_DELAYS = (.5, 1., 2., 5.)
+POLL_SECONDS = .2
+
 BASE = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).parent
 
 def atomic(path, value):
@@ -32,6 +38,8 @@ class Writer:
         self.state_dir, self.host = Path(state_dir), host
         self.sessions = {}
         self.disconnected = False
+        self.last_success = None
+        self.server = ''
         self.recover_existing()
 
     def recover_existing(self):
@@ -110,29 +118,40 @@ class Writer:
                         # reasoning text, credentials or token counters copied.
                         self.emit(path, 'response_item', dict(type='message', role='assistant', phase='final_answer' if s['state']=='responding' else 'commentary', content=[dict(type='output_text', text=text)]))
                     old.update(signature=signature, emitted=now)
-            elif old['state'] in ACTIVE:
-                self.event(path, 'task_complete' if s['state']=='complete' else 'turn_aborted', turn_id=turn)
+            elif old['state'] in ACTIVE | {'offline'}:
+                self.event(path, 'task_complete' if s['state']=='complete' and turn==old['turn'] else 'turn_aborted', turn_id=old['turn'])
             old.update(state=s['state'], turn=turn, title=title)
             self.sessions[sid] = old
         for sid, old in self.sessions.items():
             if sid not in seen and old['state'] in ACTIVE:
                 self.event(old['path'], 'turn_aborted', turn_id=old['turn'])
                 old['state'] = 'interrupted'
+        # An offline turn may finish while SSH is down. Reconcile it once.
+        for old in self.sessions.values():
+            if old['state']=='offline':
+                self.event(old['path'], 'turn_aborted', turn_id=old['turn'])
+                old['state']='interrupted'
         self.disconnected = False
-        self.status(True, active_count, snapshot.get('host',''))
+        self.last_success = stamp()
+        self.server = snapshot.get('host','')
+        self.status(True, active_count, self.server)
 
-    def status(self, connected, active, server=''):
-        atomic(self.state_dir/'status.json', dict(connected=connected, ssh_host=self.host, server=server, active=active, updated=stamp(), bridge_pid=os.getpid(), remote_log_directory=str(self.root)))
+    def status(self, connected, active, server='', reason='', attempt=0, retry_in=0):
+        atomic(self.state_dir/'status.json', dict(connected=connected, ssh_host=self.host,
+            server=server or self.server, active=active, updated=stamp(), bridge_pid=os.getpid(),
+            remote_log_directory=str(self.root), last_success=self.last_success,
+            reason=reason, reconnect_attempt=attempt, retry_in=retry_in))
 
-    def disconnect(self):
+    def disconnect(self, reason='disconnected', attempt=0, retry_in=0):
         if not self.disconnected:
             for old in self.sessions.values():
                 if old['state'] in ACTIVE:
-                    self.emit(old['path'], 'response_item', dict(type='message', role='user', content=[dict(type='input_text',text='['+self.host+'] SSH已断开 · 状态待确认')]))
-                    self.event(old['path'], 'turn_aborted', turn_id=old['turn'])
-                    old['state'] = 'interrupted'
+                    # Keep the real title and last known operation. Offline is
+                    # neither active, awaiting user input, nor a completed task.
+                    self.event(old['path'], 'bridge_disconnected', turn_id=old['turn'])
+                    old['state'] = 'offline'
             self.disconnected = True
-        self.status(False, 0)
+        self.status(False, 0, reason=reason, attempt=attempt, retry_in=retry_in)
 
 class Bridge:
     def __init__(self, host, ssh_config, writer, stop_handle=None, stop_path=None):
@@ -143,52 +162,93 @@ class Bridge:
     def stopped(self):
         return bool((self.stop_handle and self.stop_handle.is_set()) or (self.stop_path and self.stop_path.exists()))
 
-    def run(self, once=False):
-        resource = Path(getattr(sys,'_MEIPASS',Path(__file__).parent))/'remote_codex_agent.py'
-        source = resource.read_bytes()
+    def command(self):
         ssh = ('/usr/bin/ssh' if os.name!='nt' else shutil.which('ssh'))
         if not ssh:raise OSError('未找到 OpenSSH 客户端，请先安装系统 SSH 客户端。')
         config_args=['-F',str(self.ssh_config)] if self.ssh_config.is_file() else []
-        args = [ssh,*config_args,'-T','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=12','-o','ServerAliveInterval=10','-o','ServerAliveCountMax=2',self.host,'python3 -u -']
+        return [ssh,*config_args,'-T','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',
+                '-o','ConnectionAttempts=1','-o','ConnectTimeout=8',
+                '-o','ServerAliveInterval=5','-o','ServerAliveCountMax=2',self.host,'python3 -u -']
+
+    def close_process(self):
+        process=self.process
+        if process is None:return
+        # OpenSSH ProxyCommand is a child process on Windows; terminate only
+        # descendants of this connection so failed retries cannot leak tunnels.
+        children=[]
+        if os.name=='nt':
+            import psutil
+            try:children=psutil.Process(process.pid).children(recursive=True)
+            except (psutil.NoSuchProcess,psutil.AccessDenied):pass
+        if process.poll() is None:
+            process.terminate()
+            try:process.wait(1)
+            except subprocess.TimeoutExpired:process.kill();process.wait(1)
+        for child in reversed(children):
+            try:child.terminate()
+            except (psutil.NoSuchProcess,psutil.AccessDenied):pass
+
+    def run(self, once=False):
+        resource = Path(getattr(sys,'_MEIPASS',Path(__file__).parent))/'remote_codex_agent.py'
+        source = resource.read_bytes()
+        args=self.command();attempt=0
         while not self.stopped():
-            messages = queue.Queue(maxsize=8)
+            messages = queue.Queue(maxsize=8);cancelled=threading.Event()
+            reason='transport_error';received=False
             try:
-                self.process = subprocess.Popen(args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,creationflags=0x08000000 if os.name=='nt' else 0)
-                self.process.stdin.write(source);self.process.stdin.close()
-                def receive(process):
+                self.process = subprocess.Popen(args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,creationflags=0x08000000 if os.name=='nt' else 0)
+                # Negotiation can block stdin.write on Windows. Never upload
+                # on the watchdog thread: start the deadline at process launch.
+                def receive(process, output, cancel):
+                    def publish(obj):
+                        while not cancel.is_set():
+                            try:output.put(obj,timeout=POLL_SECONDS);return
+                            except queue.Full:pass
                     try:
+                        process.stdin.write(source);process.stdin.close()
                         for line in iter(process.stdout.readline,b''):
+                            if cancel.is_set():break
                             try:
                                 obj=json.loads(line)
-                                if obj.get('schema')==1: messages.put(obj,timeout=2)
-                            except (ValueError,queue.Full): pass
+                                if isinstance(obj,dict) and obj.get('schema')==1:publish(obj)
+                            except (ValueError,UnicodeError):pass
+                    except (OSError,ValueError):pass
                     finally:
-                        try: messages.put(None,timeout=1)
-                        except queue.Full: pass
-                thread=threading.Thread(target=receive,args=(self.process,),daemon=True);thread.start()
-                last=time.monotonic()
+                        publish(None)
+                        for stream in (process.stdin,process.stdout):
+                            try:stream.close()
+                            except (OSError,ValueError):pass
+                thread=threading.Thread(target=receive,args=(self.process,messages,cancelled),daemon=True)
+                thread.start();last=time.monotonic()
                 while not self.stopped():
-                    try: obj=messages.get(timeout=1)
+                    try:obj=messages.get(timeout=POLL_SECONDS)
                     except queue.Empty:
-                        if time.monotonic()-last>20 or self.process.poll() is not None: break
+                        if time.monotonic()-last >= (HEARTBEAT_TIMEOUT if received else STARTUP_TIMEOUT):
+                            reason='heartbeat_timeout' if received else 'startup_timeout';break
+                        if self.process.poll() is not None:reason='ssh_exit';break
                         continue
-                    if obj is None: break
-                    last=time.monotonic();self.writer.apply(obj)
-                    if once:
-                        return 0 if obj.get('available') else 2
+                    if obj is None:reason='ssh_exit';break
+                    if not obj.get('available'):
+                        reason='collector_unavailable';break
+                    last=time.monotonic();received=True;attempt=0
+                    self.writer.apply(obj)
+                    if once:return 0
             except (OSError,ValueError):
-                pass
+                reason='transport_error'
             finally:
-                if self.process and self.process.poll() is None:
-                    self.process.terminate()
-                    try: self.process.wait(3)
-                    except subprocess.TimeoutExpired: self.process.kill();self.process.wait()
-                self.writer.disconnect()
-            if once: return 2
-            for _ in range(50):
-                if self.stopped(): return 0
-                time.sleep(.1)
+                cancelled.set();self.close_process()
+            if self.stopped():
+                self.writer.disconnect(reason='stopped');break
+            if once:
+                self.writer.disconnect(reason=reason);return 2
+            delay=RETRY_DELAYS[min(attempt,len(RETRY_DELAYS)-1)];attempt+=1
+            self.writer.disconnect(reason=reason,attempt=attempt,retry_in=delay)
+            end=time.monotonic()+delay
+            while not self.stopped() and time.monotonic()<end:
+                time.sleep(min(POLL_SECONDS,max(0,end-time.monotonic())))
         return 0
+
 
 def main():
     sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'app'))

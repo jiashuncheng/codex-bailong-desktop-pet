@@ -1,7 +1,7 @@
 """Two stable conversation slots; unread completion plus active work first."""
 from session_read_state import session_id
 import re
-LABELS={'thinking':'思考中','working':'执行中','responding':'回复中','waiting':'待操作','complete':'已完成','interrupted':'已中断'}
+LABELS={'thinking':'思考中','working':'执行中','responding':'回复中','waiting':'待操作','complete':'已完成','interrupted':'已中断','offline':'重连中'}
 ACTIVE={'thinking','working','responding','waiting'}
 
 def title_keywords(title):
@@ -59,7 +59,8 @@ class ConversationRoster:
         done=[dict(self.items.get(sid,dict(session=sid,title=self.names.get(sid) or '会话 '+sid[-4:],text='',**self.sources.get(sid,{}))),state='complete') for sid in pending]
         active=sorted([v for v in self.items.values() if v['state'] in ACTIVE and v['session'] not in pending],key=lambda v:(v['state']!='waiting',v['start'],v['session']))
         waiting=[v for v in active if v['state']=='waiting']
-        pool=done+active
+        offline=sorted((v for v in self.items.values() if v['state']=='offline' and v.get('source_kind')=='ssh' and v['session'] not in pending),key=lambda v:v['updated'],reverse=True)
+        pool=done+active+offline
         self.candidates=[v['session'] for v in pool]
         if self.rotating is not None:
             lookup={v['session']:v for v in pool}
@@ -78,7 +79,8 @@ class ConversationRoster:
         elif active:
             kept=[v for sid in self.pinned for v in active if v['session']==sid and v not in waiting]
             chosen=(waiting+kept+[v for v in active if v not in kept and v not in waiting])[:2]
-        else:chosen=done[:2]
+        else:chosen=(done+offline)[:2]
+        if len(chosen)<2:chosen += [v for v in offline if v not in chosen][:2-len(chosen)]
         if not self.page or self.rotating is not None:self.pinned=[v['session'] for v in chosen]
         return chosen,max(0,len(pool)-len(chosen))
     def rotate_one(self,unread):

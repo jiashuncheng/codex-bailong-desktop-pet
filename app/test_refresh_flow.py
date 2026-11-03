@@ -72,6 +72,8 @@ class PipelineTests(unittest.TestCase):
             refresh_timeout=SimpleNamespace(start=Mock(),stop=Mock()),
             activity=None,position_bubble=Mock())
         pet._refresh_finished=lambda *args:EnhancedPet._refresh_finished(pet,*args)
+        def apply_snapshot(snapshot):pet.bubble.token_snapshot=snapshot;return True
+        pet.bubble.set_token_snapshot=apply_snapshot
         pet.refresh_flow=RefreshCoordinator(pet._refresh_finished)
         return pet
     def test_refresh_launches_all_sources_once_report_joins_token(self):

@@ -633,10 +633,8 @@ class EnhancedPet(Pet):
         expired=any(w.get('resetsAt') and w['resetsAt']<time.time() for w in self.quota_windows)
         source='接口' if self.quota_source=='live' else '会话记录'
         when=time.strftime('%H:%M',time.localtime(self.quota_observed))
-        self.bubble.quota_caption=caption or f'额度 · {source} {when}'+(' · 待刷新' if age>180 or expired else '')
-        self.bubble.windows=self.quota_windows
-        self.bubble.redraw()
-        self.position_bubble()
+        text=caption or f'额度 · {source} {when}'+(' · 待刷新' if age>180 or expired else '')
+        if self.bubble.set_quota_data(self.quota_windows,text):self.position_bubble()
         self._refresh_tray_icon()
 
     def _tray_window(self):
@@ -736,8 +734,8 @@ class EnhancedPet(Pet):
             if snapshot.get('stream_id')==previous.get('stream_id') and snapshot.get('usage_revision',-1)<previous.get('usage_revision',-1):return
             if snapshot.get('unavailable') and self.bubble.token_snapshot:
                 snapshot=dict(self.bubble.token_snapshot,partial=True,refresh_failed=True)
-            self.bubble.token_snapshot=snapshot;self.bubble.redraw();self.position_bubble()
-            if self.bubble.report:self.bubble.report.set_snapshot(self.bubble.token_snapshot)
+            changed=self.bubble.set_token_snapshot(snapshot)
+            if changed and self.bubble.report:self.bubble.report.set_snapshot(self.bubble.token_snapshot)
             self.refresh_flow.result('token',event.get('run_id'),not any(event['snapshot'].get(key) for key in ('unavailable','partial')))
         elif kind=='token_rate':
             if self.bubble.token_snapshot:
@@ -752,9 +750,8 @@ class EnhancedPet(Pet):
                 self.bubble.token_snapshot=dict(self.bubble.token_snapshot,projects=event['projects'])
                 if self.bubble.report:self.bubble.report.set_snapshot(self.bubble.token_snapshot)
         elif kind=='token_usage_error':
-            if self.bubble.token_snapshot:self.bubble.token_snapshot=dict(self.bubble.token_snapshot,partial=True,refresh_failed=True)
-            else:self.bubble.token_snapshot=dict(month=time.strftime('%Y-%m'),days={},total=0,partial=True,unavailable=True)
-            self.bubble.redraw()
+            snapshot=dict(self.bubble.token_snapshot,partial=True,refresh_failed=True) if self.bubble.token_snapshot else dict(month=time.strftime('%Y-%m'),days={},total=0,partial=True,unavailable=True)
+            self.bubble.set_token_snapshot(snapshot)
             if self.bubble.report:self.bubble.report.set_snapshot(self.bubble.token_snapshot)
             self.refresh_flow.result('token',event.get('run_id'),False)
         elif kind=='quota':self.update_quota(event['windows'],event['observed'],'session')
@@ -810,12 +807,13 @@ class EnhancedPet(Pet):
     def on_reset_feed(self,snapshot,alerts,fresh):
         snapshot=self.local_reset_evidence.decorate(snapshot)
         if locally_reset(snapshot):alerts=[a for a in alerts if a.get('kind')!='scheduled']
+        def content(value):return {k:v for k,v in (value or {}).items() if k!='checked'}
+        changed=content(snapshot)!=content(self.bubble.reset_snapshot) or bool(fresh and self.bubble.reset_feed_error)
         self.bubble.reset_snapshot=snapshot
         if fresh:self.bubble.reset_feed_error=False
         self.reset_checked=snapshot.get('checked',0)
         self.last_reset_display=schedule_text(snapshot)
-        self.bubble.redraw()
-        self.position_bubble()
+        if changed:self.bubble.redraw();self.position_bubble()
         if alerts:
             # One visual alert for a batch; all IDs have already been persisted.
             alert=alerts[0]
@@ -824,6 +822,7 @@ class EnhancedPet(Pet):
             if any(a['kind']=='confirmed' for a in alerts):self.refresh_quota()
 
     def on_reset_feed_error(self):
+        if self.bubble.reset_feed_error:return
         self.bubble.reset_feed_error=True
         self.bubble.redraw()
         self.position_bubble()

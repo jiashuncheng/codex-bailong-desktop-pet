@@ -130,18 +130,8 @@ class DetailsTabs(QTabWidget):
             quota.addWidget(DetailRow(title,sub,item['display'],plan))
         caption=bubble.quota_caption or ('账户额度尚未提供，未知不代表 0%。' if not bubble.windows else '')
         if caption:quota.addWidget(detail_label(caption,10,True))
-        snapshot=bubble.token_snapshot
-        if not snapshot:tokens.addWidget(detail_label('Token 用量正在统计中…',11,True))
-        elif snapshot.get('unavailable'):tokens.addWidget(detail_label('统计暂不可用，请点击顶部刷新重试。',11,True))
-        else:
-            total=snapshot.get('all_total',snapshot.get('total'));known=isinstance(total,(int,float)) and not isinstance(total,bool) and math.isfinite(total) and total>=0
-            stat=QWidget();stat.setFixedHeight(29);row=QHBoxLayout(stat);row.setContentsMargins(0,0,0,0)
-            row.addWidget(detail_label('全端累计' if (bubble.token_snapshot or {}).get('scope')=='all' else '本机累计',11,True),1);value=detail_label((compact_tokens(total)+' Token') if known else '—',15,False,True)
-            if known:value.setAccessibleDescription(f"{'全端' if (bubble.token_snapshot or {}).get('scope')=='all' else '本机'}累计 {total:,} Token")
-            row.addWidget(value);tokens.addWidget(stat)
-            if snapshot.get('partial'):tokens.addWidget(detail_label('部分日志暂不可读，统计可能不完整。',10,True))
-        tokens.addWidget(detail_label('柱显示用量，线显示回合均速。\n均速包含思考、工具和等待，不代表纯生成速度。',10,True))
-        tokens.addWidget(detail_label('输入包含缓存，输出包含推理，不重复相加。',10,True))
+        self.token_layout=tokens;self._token_shape=None;self._token_total=None
+        self.update_tokens(bubble.token_snapshot)
         pending=pending_reset(bubble.reset_snapshot)
         from reset_presentation import reset_view
         view=reset_view(bubble.reset_snapshot,getattr(bubble,'reset_error_details',None) or bubble.reset_feed_error)
@@ -153,7 +143,7 @@ class DetailsTabs(QTabWidget):
         if view['phase']=='empty':reset.addWidget(detail_label('无额外重置安排时显示洛杉矶当地时间，不是额度重置时间。',10,True))
         reset.addWidget(detail_label('来源：Codex Resets（第三方）\n预计安排不等于账户额度已经到账。',10,True))
         if bubble.reset_feed_error:reset.addWidget(detail_label((getattr(bubble,'reset_error_details',None) or {}).get('message') or '公告连接暂不可用，等待重试。',10,True))
-        for layout in (quota,tokens,reset):layout.addStretch()
+        for layout in (quota,reset):layout.addStretch()
         self.setCurrentIndex(self.keys.index(bubble.detail_tab) if bubble.detail_tab in self.keys else 0)
         self._page_stack=self.findChild(QStackedWidget)
         self._page_fade=None
@@ -163,6 +153,29 @@ class DetailsTabs(QTabWidget):
         self._last_index=self.currentIndex()
         self.currentChanged.connect(self._page_changed);self.bubble=bubble
         bubble.size_transition.animation.finished.connect(self._drain_navigation)
+    def update_tokens(self,snapshot):
+        total=(snapshot or {}).get('all_total',(snapshot or {}).get('total'))
+        known=isinstance(total,(int,float)) and not isinstance(total,bool) and math.isfinite(total) and total>=0
+        shape=(bool(snapshot),bool((snapshot or {}).get('unavailable')),bool((snapshot or {}).get('partial')),(snapshot or {}).get('scope'))
+        text=(compact_tokens(total)+' Token') if known else '—'
+        description=(('全端' if (snapshot or {}).get('scope')=='all' else '本机')+f'累计 {total:,} Token') if known else '累计用量未知'
+        if shape==self._token_shape and self._token_total is not None:
+            self._token_total.setText(text);self._token_total.setAccessibleDescription(description);return
+        self._token_shape=shape;self._token_total=None;tokens=self.token_layout
+        while tokens.count():
+            item=tokens.takeAt(0);widget=item.widget()
+            if widget is not None:widget.hide();widget.deleteLater()
+        if not snapshot:tokens.addWidget(detail_label('Token 用量正在统计中…',11,True))
+        elif snapshot.get('unavailable'):tokens.addWidget(detail_label('统计暂不可用，请点击顶部刷新重试。',11,True))
+        else:
+            stat=QWidget();stat.setFixedHeight(29);row=QHBoxLayout(stat);row.setContentsMargins(0,0,0,0)
+            row.addWidget(detail_label('全端累计' if snapshot.get('scope')=='all' else '本机累计',11,True),1)
+            value=detail_label(text,15,False,True);value.setAccessibleDescription(description);self._token_total=value
+            row.addWidget(value);tokens.addWidget(stat)
+            if snapshot.get('partial'):tokens.addWidget(detail_label('部分日志暂不可读，统计可能不完整。',10,True))
+        tokens.addWidget(detail_label('柱显示用量，线显示回合均速。\n均速包含思考、工具和等待，不代表纯生成速度。',10,True))
+        tokens.addWidget(detail_label('输入包含缓存，输出包含推理，不重复相加。',10,True));tokens.addStretch()
+
     def content_height(self,index,width):
         area=self.widget(index);body=area.widget();layout=body.layout()
         body.ensurePolished();layout.activate()

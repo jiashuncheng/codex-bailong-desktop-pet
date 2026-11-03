@@ -63,6 +63,16 @@ class QuotaSummary(QWidget):
             self.targets[key]=target;self.starts[key]=self.cache.get(key,target) if item['progress'] is not None else 0.
             self.values[key]=self.starts[key]
         self._accessible();self.animate(0.)
+    def set_anomaly(self,anomaly):
+        if anomaly==self.anomaly:return
+        self.anomaly=anomaly;badge=self.alert_badge
+        text=f"{anomaly.get('change',0):+.0f}%" if anomaly else ''
+        badge.setText(text);badge.setFixedWidth(max(32 if self.expanded else 38,QFontMetrics(badge.font()).horizontalAdvance(text)+(8 if self.expanded else 10)))
+        badge.setAccessibleName('周额度推测总量'+('上涨' if anomaly and anomaly.get('change',0)>0 else '下降')+'提醒，查看额度对比')
+        badge.setAccessibleDescription(anomaly['description'] if anomaly else '')
+        badge.setVisible(bool(anomaly and self.week_index is not None));badge.move(self.alert_rect().topLeft().toPoint())
+        self._static_key=None;self.refresh_theme_colors();self._accessible();self.update()
+
     def refresh_theme_colors(self):
         from theme_registry import palette,mix
         p=palette();up=bool(self.anomaly and self.anomaly.get('change',0)>0)
@@ -247,6 +257,12 @@ class TodayTokens(QWidget):
         if value==self.selected:return
         self.selected=value
         self.setAccessibleName('今日 Token '+self.data['display']+'；'+('当前显示今日24小时曲线' if value else '点击查看今日24小时曲线'))
+        self.update()
+    def set_snapshot(self,snapshot):
+        data=today_tokens(snapshot)
+        if data==self.data:return
+        self.data=data;self.setAccessibleDescription(data['description'])
+        self.setAccessibleName('今日 Token '+data['display']+'；'+('当前显示今日24小时曲线' if self.selected else '点击查看今日24小时曲线'))
         self.update()
     def enterEvent(self,event):self.hovered=True;self.update();super().enterEvent(event)
     def leaveEvent(self,event):self.hovered=False;self.update();super().leaveEvent(event)

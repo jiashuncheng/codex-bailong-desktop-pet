@@ -3,7 +3,7 @@ from theme_registry import color as theme_color,chart_color
 from theme_runtime import set_theme_style,theme_style_source
 import time
 from datetime import datetime
-from PySide6.QtCore import Qt,QRectF,QPointF,QEvent,Signal
+from PySide6.QtCore import Qt,QRectF,QPointF,QEvent,Signal,QAbstractAnimation
 from PySide6.QtGui import QPainter,QPen,QColor,QPainterPath,QFontMetrics
 from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QToolButton,QToolTip,QSizePolicy
 from compact_bubble import font,INK,MUTED,FONT_CSS
@@ -105,6 +105,18 @@ class TokenChartCard(QWidget):
             button.clicked.connect(lambda checked=False,k=key:self.rangeChanged.emit(k));row.addWidget(button,1);self.range_buttons[key]=button
         layout.addWidget(tabs);self.plot=TokenPlot(snapshot,self.period,self,now);layout.addWidget(self.plot,1)
         if expanded:tabs.hide();self.plot.expanded=True;self.plot.invalidate_layers()
+        self.setAccessibleName(self.plot.accessibleName());self.setAccessibleDescription(self.plot.accessibleDescription())
+        self._pending_snapshot=None;self.plot.reveal.animation.finished.connect(self._apply_snapshot)
+
+    def set_snapshot(self,snapshot):
+        self._pending_snapshot=snapshot
+        if self.plot.reveal.pending or self.plot.reveal.animation.state()!=QAbstractAnimation.State.Stopped:return
+        self._apply_snapshot()
+
+    def _apply_snapshot(self):
+        if self._pending_snapshot is None:return
+        snapshot=self._pending_snapshot;self._pending_snapshot=None
+        self.plot.set_data(snapshot,self.period)
         self.setAccessibleName(self.plot.accessibleName());self.setAccessibleDescription(self.plot.accessibleDescription())
 
     def set_period(self,period):

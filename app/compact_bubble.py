@@ -889,10 +889,52 @@ class CompactBubble(Bubble):
         for target,hint in zip(self._header_actions,('刷新','数据','收回') if self.expanded else ('刷新','数据','收起','详情')):
             target.setProperty('headerActionHint',hint)
         self.add(header);self._update_header()
+    def set_quota_data(self,windows,caption):
+        changed=self.windows!=windows or self.quota_caption!=caption
+        self.windows=windows;self.quota_caption=caption
+        if not changed:return False
+        if self.panel_page=='status' and not self.size_transition.running and not self.size_transition.preparing:
+            from island_widgets import QuotaSatellite
+            if self.is_minimal() or self.is_island():
+                widgets=[w for w in self.content.findChildren(QuotaSatellite) if w.isVisibleTo(self.content)]
+                if widgets:
+                    for widget in widgets:widget.set_data(windows,caption)
+                    return True
+        self.redraw();return True
+
+    def set_token_snapshot(self,snapshot):
+        """Apply accounting data without rebuilding task rows or compact surfaces."""
+        import json
+        def content(value):
+            volatile={'checked','sync_checked','devices','usage_revision','stream_id'}
+            return json.dumps({k:v for k,v in (value or {}).items() if k not in volatile},sort_keys=True,default=str)
+        changed=content(snapshot)!=content(self.token_snapshot)
+        stats=getattr(self,'refresh_stats',None)
+        if stats is None:self.refresh_stats=stats=dict(token_updates=0,token_unchanged=0,full_rebuilds=0)
+        stats['token_updates' if changed else 'token_unchanged']+=1
+        self.token_snapshot=snapshot
+        if not changed:return False
+        if self.panel_page!='status' or self.is_minimal() or self.is_island():return True
+        if self.size_transition.running or self.size_transition.preparing:
+            self.size_transition.deferred=True;return True
+        if self.show_quota and (self.deck is None or self.today_tokens_card is None):self.redraw();return True
+        for deck in set(self._deck_cache.values())|({self.deck} if self.deck else set()):deck.set_snapshot(snapshot)
+        if self.today_tokens_card:self.today_tokens_card.set_snapshot(snapshot)
+        if self.quota_summary_card:
+            from quota_history import visible_anomaly
+            settings=getattr(self.owner_pet(),'settings',{})
+            self.quota_summary_card.set_anomaly(visible_anomaly(snapshot,self.windows,decline_threshold=settings.get('quota_decline_threshold',10),increase_threshold=settings.get('quota_increase_threshold',15)))
+        if self.details_tabs:
+            self.details_tabs.update_tokens(snapshot);self._details_key=self._details_revision()
+        return True
+
     def redraw(self):
         if self.size_transition.running:self.size_transition.deferred=True;return
         if not self.size_transition.preparing and self._task_layout_changed():
             self.size_transition.begin();self.redraw();self.size_transition.commit();return
+        stats=getattr(self,'refresh_stats',None)
+        if stats is None:self.refresh_stats=stats=dict(token_updates=0,token_unchanged=0,full_rebuilds=0)
+        stats['full_rebuilds']+=1
         # Two size-specific chart decks are reused only across pure expansion
         # toggles. Any source/option redraw invalidates both before reuse.
         if not self._details_navigation:

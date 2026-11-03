@@ -106,3 +106,9 @@ class CardDeck(QWidget):
     def paintEvent(self,event):
         p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
         paint_deck_surface(p,QRectF(self.rect()))
+
+    def set_snapshot(self,snapshot):
+        self.snapshot=snapshot
+        self.tabs.buttons['tokens'].setText('全端' if (snapshot or {}).get('scope')=='all' else 'Token')
+        card=self.pages.get('tokens')
+        if card is not None:card.set_snapshot(snapshot)

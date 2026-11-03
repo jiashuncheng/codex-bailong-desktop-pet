@@ -84,14 +84,18 @@ class IslandStatusText(QLabel):
                 rect=QRectF(x,y,width,line_height);p.save();p.setClipRect(rect)
                 p.setPen(QColor(color));p.drawText(rect,Qt.AlignmentFlag.AlignVCenter|align,text);p.restore()
             progress=self.property('captionProgress');progress=1. if progress is None else float(progress)
-            p.setClipRect(self.rect());p.setOpacity(.55+.45*progress)
+            p.setClipRect(self.rect())
             for index,row in enumerate(self.source_rows):
-                y=top+index*line_height+6*(1-progress)
+                p.save();p.setClipRect(QRectF(0,top+index*line_height,self.width(),line_height),Qt.ClipOperation.IntersectClip)
+                previous=getattr(self,'previous_rows',[])
+                moved=index>=len(previous) or (row['source'],row['full_name'])!=(previous[index]['source'],previous[index]['full_name'])
+                y=top+index*line_height+(6*(1-progress) if moved else 0)
                 p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor('#443b50'))
                 p.drawRoundedRect(QRectF(0,y+1,c['source_width'],15),4,4)
                 draw(row['source'],1,y,c['source_width']-2,'#d6cadd',Qt.AlignmentFlag.AlignHCenter)
                 draw(row['name'],c['name_x'],y,c['name_width'],ON_ISLAND)
                 draw(row['status'],c['status_x'],y,c['status_width'],ISLAND_RUNNING if row['running'] else ON_ISLAND)
+                p.restore()
             if self.extra:
                 p.setFont(self.count_font)
                 draw('+'+str(self.extra),c['count_x'],top+(len(self.source_rows)-1)*line_height,c['count_width'],'#c1b5cd',Qt.AlignmentFlag.AlignRight)
@@ -138,13 +142,16 @@ class StatusIsland(QWidget):
         entries=getattr(self.icon,'session_entries',[])
         tail=re.search(r'\+(\d+)$',full);extra=int(tail.group(1)) if tail else 0
         signature=(text,repr(entries),extra)
+        if signature==self._last_status:return
         changed=self._last_status is not None and signature!=self._last_status
-        self.text.previous_rows=list(getattr(self.text,'source_rows',[]))
+        identities=tuple((v.get('session'),v.get('source_label'),v.get('title')) for v in entries)
+        rotating=changed and identities!=getattr(self,'_last_identities',identities)
+        if rotating:self.text.previous_rows=list(getattr(self.text,'source_rows',[]))
         self.text.set_status(text,states,entries,extra)
         from settings_controls import motion_enabled
-        if changed and self.isVisible() and not self._holds and motion_enabled():play_animation(self.animation)
-        else:self.animation.stop();self._caption_frame(1.)
-        self._last_status=signature
+        if rotating and self.isVisible() and not self._holds and motion_enabled():play_animation(self.animation)
+        elif self.animation.state()==QAbstractAnimation.State.Stopped:self._caption_frame(1.)
+        self._last_status=signature;self._last_identities=identities
         if entries:
             description='；'.join((display_source(v.get('source_label') or '未知')+' · '+str(v.get('title') or '')+' · '+{'thinking':'思考中','working':'执行中','responding':'回复中','waiting':'待操作','complete':'已完成','offline':'重连中'}.get(v['state'],'待命')).replace(' ·  · ',' · ') for v in entries)
             full=description+(f'；另有 {extra} 个会话' if extra else '')
@@ -184,6 +191,19 @@ class QuotaSatellite(QToolButton):
         self.timer=QTimer(self);self.timer.setSingleShot(True);self.timer.timeout.connect(self._due)
         five=next((w for w in windows if w.get('name')=='5小时'),None)
         self.reset=epoch((five or self.window).get('resetsAt'))
+    def set_data(self,windows,caption):
+        chosen=selected_quota(windows)
+        self.windows=windows;self.caption=caption
+        if chosen!=self.window:
+            self.window=chosen;self._prepare_dial();self.update()
+        value=chosen.get('remaining');exact=f'{value:g}%' if valid_percent(value) else '等待更新' if chosen.get('pending') else '未知'
+        action='打开正常卡片；可拖动；右键切换模式' if self.objectName()=='minimal_quota' else '展开详情'
+        self.setAccessibleName(chosen.get('name','额度')+'剩余 '+exact+'；点击'+action);self.setAccessibleDescription(caption)
+        five=next((w for w in windows if w.get('name')=='5小时'),None);reset=epoch((five or chosen).get('resetsAt'))
+        if reset!=self.reset:
+            self.timer.stop();self.reset=reset
+            if reset and self.isVisible():self.timer.start(max(1,min(2147483647,math.ceil((reset-time.time())*1000))))
+
     def showEvent(self,event):
         super().showEvent(event)
         # Showing a hidden compact surface is a new entry. The bubble owns

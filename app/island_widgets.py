@@ -10,6 +10,7 @@ from reset_watch import epoch
 from ui_theme import SURFACE,INK,MUTED,ACCENT,TRACK,ISLAND,ON_ISLAND,ISLAND_RUNNING,QUOTA_WEEK,QUOTA_LOW
 from chart_reveal import ChartReveal
 from capsule_names import short_session_name,capsule_columns
+from conversation_sources import display_source
 
 WIDTH=246
 STATUS_WIDTH=156
@@ -56,7 +57,7 @@ class IslandStatusText(QLabel):
         self.row_columns=capsule_columns(self.width(),metrics,names,statuses,extra,QFontMetrics(self.count_font))
         for item,name,status in zip(entries,names,statuses):
             source=str(item.get('source_label') or '未知')
-            self.source_rows.append(dict(source=metrics.elidedText(source,Qt.TextElideMode.ElideMiddle,max(1,self.row_columns['source_width']-2)),full_source=source,title=item.get('title',''),name=metrics.elidedText(name,Qt.TextElideMode.ElideMiddle,self.row_columns['name_width']),full_name=name,status=status,running=item['state'] in ('thinking','working','responding','waiting')))
+            self.source_rows.append(dict(source=metrics.elidedText(display_source(source),Qt.TextElideMode.ElideMiddle,max(1,self.row_columns['source_width']-2)),full_source=source,title=item.get('title',''),name=metrics.elidedText(name,Qt.TextElideMode.ElideMiddle,self.row_columns['name_width']),full_name=name,status=status,running=item['state'] in ('thinking','working','responding','waiting')))
         # If long, distinct titles have the same middle-elided abbreviation,
         # expose their different endings instead of identical short labels.
         if len(self.source_rows)==2 and self.source_rows[0]['name']==self.source_rows[1]['name'] and names[0]!=names[1]:
@@ -145,7 +146,7 @@ class StatusIsland(QWidget):
         else:self.animation.stop();self._caption_frame(1.)
         self._last_status=signature
         if entries:
-            description='；'.join((str(v.get('source_label') or '未知')+' · '+str(v.get('title') or '')+' · '+{'thinking':'思考中','working':'执行中','responding':'回复中','waiting':'待操作','complete':'已完成','offline':'重连中'}.get(v['state'],'待命')).replace(' ·  · ',' · ') for v in entries)
+            description='；'.join((display_source(v.get('source_label') or '未知')+' · '+str(v.get('title') or '')+' · '+{'thinking':'思考中','working':'执行中','responding':'回复中','waiting':'待操作','complete':'已完成','offline':'重连中'}.get(v['state'],'待命')).replace(' ·  · ',' · ') for v in entries)
             full=description+(f'；另有 {extra} 个会话' if extra else '')
         self.text.setAccessibleName(full);self.setAccessibleName('Codex · '+full+'；点击打开正常面板')
     def mousePressEvent(self,event):

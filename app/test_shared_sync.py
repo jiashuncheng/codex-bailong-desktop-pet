@@ -71,7 +71,7 @@ class SharedTests(unittest.TestCase):
         from version import VERSION,DISPLAY_VERSION,UPSTREAM_VERSION,CUSTOM_VERSION,material_compatibility
         from app_updates import version_tuple
         self.assertEqual(DISPLAY_VERSION,UPSTREAM_VERSION+'.'+CUSTOM_VERSION)
-        self.assertEqual(version_tuple(VERSION),(0,18,1))
+        self.assertEqual(version_tuple(VERSION),(0,18,2))
         self.assertEqual(material_compatibility(VERSION),UPSTREAM_VERSION)
     def test_turn_identity_keeps_its_namespace_and_unknown_linux_never_becomes_gpu228(self):
         from shared_state import wire_turn,origin_name

@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 from PySide6.QtCore import QPoint,QEvent
 from PySide6.QtWidgets import QApplication
-from conversation_sources import metadata_source,session_source
+from conversation_sources import metadata_source,session_source,display_source,source_title
 from enhanced_core import ActivityReducer
 from conversation_roster import ConversationRoster
 from compact_bubble import CompactBubble
@@ -20,6 +20,13 @@ class SourceTests(unittest.TestCase):
             (dict(originator='BailongSSHBridge',source='bailong_ssh_bridge',remote_host='http://user:secret@host'),('ssh','SSH')),
         ]
         for metadata,expected in cases:self.assertEqual(metadata_source(metadata),expected)
+    def test_short_alias_is_display_only_and_existing_title_prefix_is_not_duplicated(self):
+        self.assertEqual(display_source('gpu228'),'228')
+        self.assertEqual(display_source('win'),'win')
+        self.assertEqual(source_title('[gpu228] jsc-15','gpu228'),'[228] jsc-15')
+        self.assertEqual(source_title('[228] jsc-15','gpu228'),'[228] jsc-15')
+        self.assertEqual(source_title('普通名称',''),'普通名称')
+
     def test_reducer_provenance_and_wsl_mapping(self):
         reducer=ActivityReducer()
         reducer.apply('a',dict(type='session_meta',payload=dict(id='a',originator='BailongSSHBridge',source='bailong_ssh_bridge',remote_host='gpu228')),historical=True)
@@ -66,6 +73,27 @@ class CapsuleSourceUiTests(unittest.TestCase):
         self.assertIn('jsc-15',self.b.island.accessibleName());self.assertIn('重连中',self.b.island.accessibleName())
         self.b.roster.observe(dict(session='remote',state='working',display='正在运行命令'))
         self.b.refresh_status();self.assertTrue(self.b.island.text.source_rows[0]['running'])
+
+    def test_source_stays_visible_from_capsule_to_normal_and_expanded_card(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        b=self.b
+        b.roster.observe(dict(session='remote',state='working',title='jsc-15',display='正在运行命令',source_kind='ssh',source_label='gpu228'))
+        b.roster.observe(dict(session='local',state='working',title='本机任务',display='正在编辑文件',source_kind='local',source_label='win'))
+        b.set_mode('mini');b.size_transition.complete();APP.processEvents()
+        self.assertEqual(b.island.text.source_rows[0]['source'],'228')
+        b.set_mode('auto');b.size_transition.complete();b.size_transition.release_landing();APP.processEvents()
+        self.assertTrue(b.status_view.rows['remote'].short_title.startswith('[228] '))
+        b.toggle_details();b.size_transition.complete();b.size_transition.release_landing();APP.processEvents()
+        row=b.status_view.rows['remote'];self.assertTrue(row.expanded_row)
+        self.assertEqual(row.short_title,'[228] jsc-15')
+        self.assertIn('[win]',b.status_view.rows['local'].short_title)
+        self.assertIn('[228] jsc-15',row.accessibleName())
+        opened=[];b.conversationRequested.connect(opened.append)
+        QTest.mouseClick(row,Qt.MouseButton.LeftButton,pos=QPoint(20,12));APP.processEvents()
+        self.assertEqual(opened,['remote'])
+        self.assertEqual(b.roster.items['remote']['source_label'],'gpu228')
+        self.assertEqual(b.roster.items['remote']['title'],'jsc-15')
 
     def test_single_row_and_idle_fallback_keep_fixed_height(self):
         self.b.roster.observe(dict(session='a',state='working',source_label='本机',source_kind='local'))

@@ -162,7 +162,7 @@ class StatusScroller(QLabel):
         self.full=False;self.current='';self.incoming='';self.pending=None;self.progress=1.;self.initialized=False
         self.conversation_rows=False;self.extra=0;self.single_line=False;self.rows={};self.row_positions={}
         self.expanded_row=False;self.conversation_state=''
-        self.conversation_title='';self.conversation_id='';self.completed=False;self.short_title='';self.title_width=0;self.title_suffix=''
+        self.conversation_title='';self.conversation_source='';self.conversation_id='';self.completed=False;self.short_title='';self.title_width=0;self.title_suffix=''
         self.name_hovered=False;self.name_pressed=False;self.setMouseTracking(True)
         self.overflow=QToolButton(self);self.overflow.setObjectName('conversation_overflow');self.overflow.setFixedSize(26,20);self.overflow.setFocusPolicy(Qt.FocusPolicy.NoFocus);self.overflow.hide()
         set_theme_style(self.overflow,'QToolButton{'+FONT_CSS+'color:#514360;background:#eee8f3;border:0;border-radius:5px;font-size:11px;}QToolButton:hover{background:#e4dbea;}')
@@ -202,7 +202,9 @@ class StatusScroller(QLabel):
         if not self.conversation_title:self.title_width=0;return
         from conversation_roster import title_keywords
         metrics=QFontMetrics(font(12,not self.expanded_row));budget=max(40,self.width()-76) if self.expanded_row else min(112,round(self.width()*.42))
-        self.short_title=metrics.elidedText(self.conversation_title if self.expanded_row else title_keywords(self.conversation_title),Qt.TextElideMode.ElideMiddle,max(1,budget-metrics.horizontalAdvance(self.title_suffix)))+self.title_suffix
+        from conversation_sources import source_title
+        title=source_title(self.conversation_title,self.conversation_source) if self.expanded_row else source_title(title_keywords(self.conversation_title),self.conversation_source)
+        self.short_title=metrics.elidedText(title,Qt.TextElideMode.ElideMiddle,max(1,budget-metrics.horizontalAdvance(self.title_suffix)))+self.title_suffix
         self.title_width=metrics.horizontalAdvance(self.short_title)
     def wheelEvent(self,event):
         if self.conversation_rows or self.conversation_id:
@@ -216,7 +218,8 @@ class StatusScroller(QLabel):
         old_keys=list(self.rows);changed_mode=self.full!=full or not self.conversation_rows
         self.conversation_rows=True;self.full=full;self.extra=extra
         metadata=metadata or {}
-        joined='\n'.join((metadata.get(sid,{}).get('title','')+' · '+text).strip(' ·') for sid,text in items);super().setText(joined)
+        from conversation_sources import source_title
+        joined='\n'.join((source_title(metadata.get(sid,{}).get('title',''),metadata.get(sid,{}).get('source_label',''))+' · '+text).strip(' ·') for sid,text in items);super().setText(joined)
         self.setToolTip(joined);self.setAccessibleName('Codex 状态：'+joined)
         for sid in old_keys:
             if sid not in keys:
@@ -231,9 +234,9 @@ class StatusScroller(QLabel):
             row.setFixedWidth(max(1,self.width()-(30 if extra else 0)))
             info=metadata.get(sid,{})
             row.expanded_row=full;row.row_last=index==len(items)-1;row.conversation_state=info.get('state','')
-            row.conversation_id=sid;row.conversation_title=info.get('title','');row.completed=info.get('state')=='complete';row.title_suffix='';row.layout_title()
+            row.conversation_id=sid;row.conversation_title=info.get('title','');row.conversation_source=info.get('source_label','');row.completed=info.get('state')=='complete';row.title_suffix='';row.layout_title()
             row.set_status(text,full)
-            row.setAccessibleName((row.conversation_title+' · '+text).strip(' ·'));row.show();row.update()
+            row.setAccessibleName((source_title(row.conversation_title,row.conversation_source)+' · '+text).strip(' ·'));row.show();row.update()
         self.rows={sid:self.rows[sid] for sid in keys}
         names=[row.short_title for row in self.rows.values()]
         for sid,row in self.rows.items():
@@ -805,7 +808,7 @@ class CompactBubble(Bubble):
         from conversation_roster import LABELS
         if selected:
             rows=[(v['session'],'已完成' if v['state']=='complete' else clean_text(v['text'],80)) for v in selected]
-            metadata={v['session']:dict(title=clean_text(v['title'],160),state=v['state']) for v in selected}
+            metadata={v['session']:dict(title=clean_text(v['title'],160),state=v['state'],source_label=v.get('source_label','')) for v in selected}
             self.status_view.set_conversations(rows,extra,self.expanded,metadata)
         else:
             self.status_view.clear_conversations()

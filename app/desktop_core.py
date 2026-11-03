@@ -11,7 +11,7 @@ from version import VERSION
 DEFAULTS=dict(schema=2,ui_animation_mode='quality',theme='bailong',theme_accent='#8b78a6',theme_surface='#fcfafc',theme_ink='#393343',scale=1.0,playback_speed=1.0,action_gap=2.0,
     random_interval=25.0,move_speed=55.0,move_range=1.0,wander_range_revision=1,wander_horizontal_only=True,wander_home=None,wander_mode='edge',wander_side='auto',wander_zone=[.50,.18,.99,.99],drag_physics=True,edge_docking=True,
     on_top=True,video_fullscreen_yield=True,fullscreen_yield_mode='video',no_move=False,mouse_through=False,wandering=True,random_actions=True,
-    commentary=True,sound=True,bubble=True,quota_visible=True,quota_decline_threshold=10.,quota_increase_threshold=15.,self_talk=False,character_visible=True,card_anchor=None,panel_detached=False,codex_exit=False,
+    notifications=False,commentary=True,sound=True,bubble=True,quota_visible=True,quota_decline_threshold=10.,quota_increase_threshold=15.,self_talk=False,character_visible=True,card_anchor=None,panel_detached=False,codex_exit=False,
     conversation_auto_scroll=True,conversation_scroll_seconds=3.,conversation_scroll_revision=2,status_actions=True,status_action_interval=12.,status_response_revision=2,update_checks=True,token_chart_range='all',bubble_mode='auto',
     capsule_action='chatgpt',capsule_website='',talk_min=30.0,talk_max=90.0,talk_quiet=True,
     talk_lines=['忙完记得休息一下。','我在这里陪着你。','今天也一起把小事做好吧。'],

@@ -635,11 +635,12 @@ class DesktopPet(EnhancedPet):
             self.bubble.codex_open=event.get('open');self.bubble.evaluate_mode();return
         if event.get('kind')=='complete':
             title=clean_text(event.get('title','Codex 任务'),70)
-            self._priority=10
-            try:self.say('Codex 任务完成啦！\n'+title,14000)
-            finally:self._priority=0
+            if self.settings.get('notifications',False):
+                self._priority=10
+                try:self.say('Codex 任务完成啦！\n'+title,14000)
+                finally:self._priority=0
             self.notify('Codex 任务已完成',title);self.refresh_quota()
-            self.complete_animation(event)
+            if self.settings.get('notifications',False):self.complete_animation(event)
         else:
             if event.get('kind')=='status':
                 self.reactions.observe(event,time.monotonic())
@@ -730,6 +731,10 @@ class DesktopPet(EnhancedPet):
         self.reactions.configure(self.settings['status_action_interval'],time.monotonic())
         if hasattr(self,'updates'):self.updates.configure(self.settings['update_checks'])
         for attr in ('wandering','random_actions','commentary','sound'):setattr(self,attr,self.settings[attr])
+        self.bubble.status_indicator.set_notifications_enabled(self.settings['notifications'])
+        if previous.get('notifications') and not self.settings['notifications']:
+            self.pending_completion=None;self.reactions.completion=None
+            self.status_hold=0;self.restore_status()
         self.bubble.enabled=self.settings['bubble'];self.bubble.show_quota=self.settings['quota_visible']
         self.bubble.set_role_scale(self.settings['scale'],redraw=False)
         self.bubble.conversation_auto_scroll=self.settings['conversation_auto_scroll']
@@ -1375,6 +1380,7 @@ class DesktopPet(EnhancedPet):
         value['preview_header_icons']=True
         value['island_centered_status']=True
         value['island_status_transition_ms']=250
+        value['notifications_enabled']=self.settings['notifications']
         value['single_native_tray_identity']=True
         if hasattr(self.tray,'diagnostics'):value['tray_identity']=self.tray.diagnostics()
         value['isolated_shell_registration_disabled']=not getattr(self,'_tray_shell_enabled',False)

@@ -3,6 +3,7 @@ from theme_runtime import set_theme_style,theme_style_source
 import copy
 import sys
 import threading
+from shiboken6 import isValid
 from PySide6.QtCore import Qt,QThread,Signal
 from PySide6.QtGui import QShortcut,QKeySequence
 from PySide6.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QFormLayout,QTabWidget,QWidget,
@@ -20,6 +21,10 @@ from number_controls import DecimalField as QDoubleSpinBox
 from card_motion import AnimatedDisclosure
 from theme_controls import ThemeChoices
 from settings_presentation import SettingsSwitchRow,SettingsThemeChoices,SettingsStatusLabel,SettingsResetButton,SettingsDisclosureButton,SettingsFooterButton
+
+def sync_scrollbar_range(bar,low,high):
+    if isValid(bar):bar.setEnabled(high>low)
+
 
 class ConnectionJob(QThread):
     report=Signal(object)
@@ -254,6 +259,8 @@ class SettingsDialog(QDialog):
         connection=self.tab('Codex 联动')
         self.section(connection,'运行联动',None)
         self.check(connection,'status_actions','人物响应任务状态')
+        self.section(connection,'通知','默认关闭；开启后接收任务完成、额度和重置提醒。')
+        self.check(connection,'notifications','启用通知')
         self.section(connection,'额度变化提醒',None)
         self.number(connection,'quota_decline_threshold','下降达到',1,100,1,suffix='%')
         self.number(connection,'quota_increase_threshold','上涨达到',1,100,1,suffix='%')
@@ -469,7 +476,7 @@ class SettingsDialog(QDialog):
         set_theme_style(area,'QScrollArea{border:0;background:transparent;}');area.viewport().setAutoFillBackground(False)
         area.setWidget(widget)
         bar=area.verticalScrollBar();bar.setSingleStep(32)
-        bar.rangeChanged.connect(lambda low,high,b=bar:b.setEnabled(high>low))
+        bar.rangeChanged.connect(lambda low,high,b=bar:sync_scrollbar_range(b,low,high))
         index=self.tabs.addTab(area,{'面板与显示':'面板','人物与动作':'人物','Codex 联动':'Codex','角色与素材':'素材','闲聊与台词':'闲聊','更新与维护':'维护'}.get(title,title))
         self.tabs.setTabToolTip(index,title)
         self._page_forms[title]=form

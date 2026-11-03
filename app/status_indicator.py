@@ -27,6 +27,7 @@ class StatusIndicator(QWidget):
         self.completion_timer.timeout.connect(self.expire_completed)
         self.state='idle';self.active=0;self.waiting=0;self.completed=False
         self.busy_since=self.clock();self.completed_at=None;self.seen=deque(maxlen=64)
+        self.notifications_enabled=True
         self.unread=[];self.store=None;self.ledger=None;self.acknowledged_at=None
         self.island=False;self._last_signature=None
         self.completion_times={};self.session_summary='';self.session_states=[];self.session_entries=[]
@@ -151,11 +152,22 @@ class StatusIndicator(QWidget):
             self.completed=False
         self._sync();self.update()
 
+    def set_notifications_enabled(self,enabled):
+        self.notifications_enabled=bool(enabled)
+        if not enabled:
+            self.unread=[];self.completion_expiries={};self.completion_times={}
+            self.completed=False;self.completed_at=None;self.acknowledged_at=None
+            self.completion_auto_dismissed=True
+            self._save();self._sync();self.update()
+
     def notify_complete(self,event):
         key=(session_id(event.get('session','')),str(event.get('turn','')))
         if not key[0] or not key[1]:return False
         if key in self.seen or key in self.unread or self.ledger and self.ledger.contains(key):return False
         self.seen.append(key)
+        if not self.notifications_enabled:
+            self._save()
+            return True
         if key not in self.unread:self.unread.append(key)
         self.completion_times[key]=self.clock()
         self.completion_expiries[key]=self.wall_clock()+self.COMPLETION_SECONDS

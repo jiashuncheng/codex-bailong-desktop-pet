@@ -59,6 +59,7 @@ class MaterialStore:
             if not isinstance(prefs,dict):raise ValueError('画质偏好应为对象')
             self.preferred=prefs['tier']
         except (OSError,ValueError,KeyError):prefs={};self.preferred='light'
+        self.legacy_assets=False
         self.card_only=bool(prefs.get('cardOnly',False))
         if self.preferred not in ('light','hd','local_hd'):self.preferred='light'
         self.current='light' if self.catalog else 'hd';self.root=self.base
@@ -72,6 +73,18 @@ class MaterialStore:
             selected=self.preferred if self.known_available(self.preferred) else 'light' if light_ready else 'hd' if hd_ready else 'local_hd' if local_ready else None
             self.current=selected if not self.card_only else None
             if self.current:self.root=self.tier_root(self.current)
+            if self.current is None and not self.card_only and catalog_override is None and not overlay:
+                # Source upgrades retain the user's verified installed materials.
+                # New installs still use the current published download catalog.
+                legacy_path=self.app_root/'app/legacy_material_catalog.json'
+                try:
+                    legacy_catalog=json.loads(legacy_path.read_text(encoding='utf-8'))
+                    old=MaterialStore(self.app_root,self.state,catalog_override=legacy_catalog)
+                    if old.current:
+                        self.catalog=old.catalog;self.current=old.current;self.root=old.root
+                        self._known_availability=old._known_availability;self.legacy_assets=True
+                except (OSError,ValueError,KeyError,TypeError):pass
+
 
     def local_hd_info(self):
         try:
@@ -91,7 +104,13 @@ class MaterialStore:
         if tier=='light':
             embedded=self.app_root/'build/materials/light' if self.development else self.base
             spec=self.catalog['tiers']['light'] if self.catalog else None
-            if spec and spec['id']==self.embedded_light_id and all(checked(embedded,f['path']).is_file() for f in spec['files']):return embedded
+            if spec and spec['id']==self.embedded_light_id:
+                try:
+                    for f in spec['files']:
+                        status=checked(embedded,f['path']).stat()
+                        if not stat.S_ISREG(status.st_mode) or status.st_size!=f['bytes']:break
+                    else:return embedded
+                except OSError:pass
         return checked(self.cache,tier+'/'+self.catalog['tiers'][tier]['id'])
 
     def available(self,tier):
@@ -206,17 +225,49 @@ class MaterialStore:
             if stage.exists():shutil.rmtree(stage)
 
     def _commit(self,stage,target,tier='hd'):
+        target=Path(target);expected=checked(self.cache,tier+'/'+self.catalog['tiers'][tier]['id'])
+        if target!=expected:raise MaterialError('素材缓存位置无效')
         target.parent.mkdir(parents=True,exist_ok=True)
+        retained=None
         if target.exists():
             # Never change an existing cache directory while a player may read it.
             if self.available(tier):return
-            if not self.card_only:raise MaterialError('已有素材缓存损坏，请移除动画资源后重试')
+            if self.current and Path(self.root)==target and not self.card_only:
+                raise MaterialError('当前动画正在使用，请先切换画质后修复')
             if not target.resolve().is_relative_to(self.cache.resolve()):raise MaterialError('素材缓存位置无效')
             # Explicit removal may retain metadata or a file locked by another
             # process. Keep that remainder; publish a fresh verified directory.
-            target.replace(self.cache/('retained-'+uuid.uuid4().hex))
-        stage.replace(target)
+            retained=self.cache/('retained-'+uuid.uuid4().hex)
+            target.replace(retained)
+        try:stage.replace(target)
+        except OSError:
+            if retained and not target.exists():retained.replace(target)
+            raise
         self._known_availability[tier]=True
+
+    def recover_local(self,tier,cancel=lambda:False,progress=lambda n,t,p:None):
+        """Recover a complete current set locally, without network or preferences."""
+        if self.card_only or self.location_error or not self.catalog:return None
+        if self.available(tier):return self.tier_root(tier)
+        from material_incremental import candidate_roots,reuse_files
+        candidates=candidate_roots(self,tier);files=self.catalog['tiers'][tier]['files']
+        needed={f['bytes'] for f in files};present=set()
+        # Cheap necessary condition avoids hashing gigabytes on every startup
+        # when an older pack simply lacks the new manifest/actions.
+        for root,names in candidates:
+            for name in names:
+                cancelled(cancel)
+                try:present.add(checked(root,name).stat().st_size)
+                except (OSError,ValueError,TypeError):pass
+        if not needed.issubset(present):return None
+        self.cache.mkdir(parents=True,exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='recover-',dir=self.cache) as folder:
+            stage=Path(folder)/'extracted';stage.mkdir()
+            reused=reuse_files(self,tier,stage,cancel,progress,candidates)
+            if len(reused)!=len(files):return None
+            self.verify(stage,tier,cancel,progress);self._receipt(stage,tier)
+            cancelled(cancel);target=self.tier_root(tier)
+            self._commit(stage,target,tier);return target
 
     def ensure(self,tier,cancel=lambda:False,progress=lambda n,t,p:None,opener=None):
         if self.location_error:raise MaterialError(self.location_error)
@@ -235,6 +286,21 @@ class MaterialStore:
             work=Path(work);archive=work/'materials.zip';stage=work/'extracted';stage.mkdir()
             maximum=spec['bytes']+len(spec['files'])*4096+1024*1024
             try:
+                # Catalog SHA-256 checks authorize both local reuse and individual
+                # remote entries. Old catalogs without archive metadata use full ZIPs.
+                if spec.get('archiveSha256') and type(spec.get('archiveBytes')) is int and 0<spec['archiveBytes']<=maximum:
+                    from material_incremental import reuse_files,extract_missing,RangeUnavailable
+                    reused=reuse_files(self,tier,stage,cancel,progress)
+                    if reused:
+                        try:
+                            if len(reused)!=len(spec['files']):extract_missing(url,spec,stage,reused,opener or open_url,cancel,progress)
+                            self.verify(stage,tier,cancel,progress);self._receipt(stage,tier)
+                            cancelled(cancel);self._commit(stage,root,tier)
+                            return root
+                        except RangeUnavailable:
+                            # Range may be stripped by a proxy. Same URL, ordinary
+                            # full archive validation below; active resources survive.
+                            progress(0,spec['archiveBytes'],'downloading')
                 response=(opener or open_url)(url,{'Accept':'application/octet-stream'})
                 with response,archive.open('wb') as output:
                     total=int(response.headers.get('Content-Length','0'));done=0
@@ -245,9 +311,10 @@ class MaterialStore:
                         output.write(data);progress(done,total,'downloading')
                     if total and done!=total:raise MaterialError('素材下载不完整，请重试')
             except HTTPError as exc:
-                if exc.code==404:raise MaterialError('这套素材尚未公开发布；本机已有素材和卡片功能仍可使用') from exc
+                if exc.code==404:raise MaterialError('素材下载地址暂不可用，请检查程序更新后重试；已有素材保持不变') from exc
                 raise MaterialError('素材服务暂时不可用，请稍后重试') from exc
             except (URLError,TimeoutError,OSError) as exc:raise MaterialError('素材下载连接失败，请稍后重试') from exc
+            except (zipfile.BadZipFile,RuntimeError) as exc:raise MaterialError('素材压缩包无效') from exc
             cancelled(cancel)
             if spec.get('archiveSha256') and (archive.stat().st_size!=spec.get('archiveBytes') or hash_file(archive,cancel)!=spec['archiveSha256']):raise MaterialError('动画补丁压缩包校验失败')
             try:
@@ -268,7 +335,9 @@ class MaterialStore:
             except (zipfile.BadZipFile,RuntimeError) as exc:raise MaterialError('素材压缩包无效') from exc
         return root
 
-    def activate(self,tier,root):
+    def activate(self,tier,root,*,save_preference=True):
         if Path(root)!=self.tier_root(tier) or not self.available(tier):raise MaterialError('素材尚未准备完成')
-        atomic_json(self.preference,dict(schema=1,tier=tier,cardOnly=False))
-        self.preferred=tier;self.current=tier;self.root=Path(root);self.card_only=False
+        if save_preference:
+            atomic_json(self.preference,dict(schema=1,tier=tier,cardOnly=False))
+            self.preferred=tier;self.card_only=False
+        self.current=tier;self.root=Path(root)

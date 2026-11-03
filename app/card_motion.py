@@ -1,4 +1,6 @@
 """Shared spring/shape language for reports and inline disclosure cards."""
+from settings_controls import play_animation
+from theme_registry import color as theme_color
 import math
 from PySide6.QtCore import Qt,QRectF,QSize,QVariantAnimation,QEasingCurve,Signal
 from PySide6.QtGui import QPainter,QPainterPath,QColor,QPen
@@ -21,7 +23,7 @@ def paint_card(p,rect,frame,progress,background=SURFACE,inset=0.,content_progres
     if progress<=0. or rect.height()<=0:return
     radius=min(rect.width()/2,rect.height()/2,20.+(PANEL_RADIUS-20.)*min(1.,progress))
     path=QPainterPath();path.addRoundedRect(rect,radius,radius)
-    p.save();p.setOpacity(stage(progress,0.,.09));p.fillPath(path,QColor(background));p.setClipPath(path)
+    p.save();p.setOpacity(stage(progress,0.,.09));p.fillPath(path,QColor(theme_color(background)));p.setClipPath(path)
     if frame is not None and not frame.isNull():
         entry=stage(progress,.7,1.) if content_progress is None else content_progress
         size=frame.deviceIndependentSize();scale=.975+.025*entry
@@ -29,7 +31,7 @@ def paint_card(p,rect,frame,progress,background=SURFACE,inset=0.,content_progres
         target=QRectF(rect.center().x()-w/2,rect.center().y()-h/2,max(0.,w),h)
         p.setOpacity(stage(progress,0.,.09)*entry);p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         p.drawPixmap(target,frame,QRectF(frame.rect()))
-    p.setClipping(False);p.setOpacity(stage(progress,0.,.09));p.setPen(QPen(QColor(BORDER),1));p.setBrush(Qt.BrushStyle.NoBrush)
+    p.setClipping(False);p.setOpacity(stage(progress,0.,.09));p.setPen(QPen(QColor(theme_color(BORDER)),1));p.setBrush(Qt.BrushStyle.NoBrush)
     p.drawRoundedRect(rect.adjusted(.5,.5,-.5,-.5),radius,radius);p.restore()
 
 
@@ -42,7 +44,7 @@ class AnimatedDisclosure(QWidget):
     settled=Signal(bool)
     def __init__(self,body,parent=None,background=SURFACE):
         super().__init__(parent);self.body=body;body.setParent(self);self.background=background
-        self.expanded=False;self.progress=0.;self.full_height=1;self._frame=None;self._animating=False;self._measuring=False
+        self.expanded=False;self.progress=0.;self._start=0.;self._target=0.;self.full_height=1;self._frame=None;self._animating=False;self._measuring=False
         # setFixedHeight changes maximumHeight. Remember the body's own limit
         # before measuring it, especially for capped text editors.
         self._body_height_limit=body.maximumHeight()
@@ -65,7 +67,7 @@ class AnimatedDisclosure(QWidget):
     def set_expanded(self,value):
         value=bool(value)
         if value==self.expanded and (self._animating or self.isVisible() or not value):return
-        self.animation.stop();self.expanded=value;previous_height=self.full_height;self._measure()
+        self.animation.stop();self.expanded=value;self._start=self.progress;self._target=1. if value else 0.;previous_height=self.full_height;self._measure()
         if not self.isVisible() and not value:self._finish();return
         visible=self.isVisible() or bool(self.parentWidget() and self.parentWidget().isVisible())
         if not visible:self.show();self._finish();return
@@ -77,7 +79,7 @@ class AnimatedDisclosure(QWidget):
         self._start=self.progress;self._target=1. if value else 0.
         blocked=self.animation.blockSignals(True)
         self.animation.setDuration(max(150,round((EXPAND_MS if value else DISMISS_MS)*min(1.,abs(self._target-self._start)))))
-        self.animation.setCurrentTime(0);self.animation.blockSignals(blocked);self._advance(0.);self.animation.start()
+        self.animation.setCurrentTime(0);self.animation.blockSignals(blocked);self._advance(0.);play_animation(self.animation)
     def _advance(self,value):
         f=island_response(value) if self.expanded else dismiss_progress(value)
         self.progress=max(0.,self._start+(self._target-self._start)*f)

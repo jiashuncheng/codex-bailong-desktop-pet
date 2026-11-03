@@ -52,7 +52,7 @@ class PanelScaleTests(unittest.TestCase):
         capture=SurfaceState.capture(b)
         self.assertEqual(capture.rect.width(),234);self.assertEqual(capture.icon_rect.width(),24)
         self.assertEqual(len(capture.satellites),2)
-        self.assertEqual(capture.satellites[0][0].width(),60)
+        self.assertEqual(capture.satellites[0][0].width(),57)
         b.set_mode('auto');self.finish()
         self.assertEqual(SurfaceState.capture(b).rect.width(),402)
     def test_hover_mapping_still_pauses_rotation(self):

@@ -58,6 +58,15 @@ class CapsuleSourceUiTests(unittest.TestCase):
         self.b.refresh_status()
         self.assertIn(host,self.b.island.accessibleName());self.assertEqual(self.b.size(),size)
         self.assertNotEqual(self.b.island.text.source_rows[0]['source'],host)
+    def test_offline_row_keeps_name_without_running_color_then_resumes(self):
+        self.b.roster.observe(dict(session='remote',state='offline',title='[gpu228] jsc-15',display='连接中断，重连中 · 上次：正在运行命令',source_kind='ssh',source_label='gpu228'))
+        self.b.set_mode('mini');self.b.size_transition.complete();APP.processEvents();self.b.refresh_status()
+        rows=self.b.island.text.source_rows
+        self.assertEqual(len(rows),1);self.assertEqual(rows[0]['status'],'重连中');self.assertFalse(rows[0]['running'])
+        self.assertIn('jsc-15',self.b.island.accessibleName());self.assertIn('重连中',self.b.island.accessibleName())
+        self.b.roster.observe(dict(session='remote',state='working',display='正在运行命令'))
+        self.b.refresh_status();self.assertTrue(self.b.island.text.source_rows[0]['running'])
+
     def test_single_row_and_idle_fallback_keep_fixed_height(self):
         self.b.roster.observe(dict(session='a',state='working',source_label='本机',source_kind='local'))
         self.b.set_mode('mini');self.b.size_transition.complete();APP.processEvents()

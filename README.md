@@ -4,9 +4,9 @@
 
 在 Windows 和 Mac 上使用同一份 Python 源码，查看 Codex 任务状态、接收完成提醒、统计额度与 Token，并与白龙互动。保留源码和一键执行脚本，方便后续修改、更新及两端同步。
 
-**当前源码版本：v0.17.2 / UI98**。已合入 [Wunsch2048 增强版](https://github.com/Wunsch2048/codex-bailong-desktop-pet) 的 **v1.2.0**（`ba0b0a3`），保留本仓库的 Windows/macOS 适配、Token 同步、SSH、会话轮换和随机动作。角色与原始桌宠来自 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet)。
+**当前源码版本：v1.4.2.18.0 / UI99**。版本号前 3 段是上游基线（1.4.2），后 2 段是本 fork 定制号（18.0，对应内部更新版本 0.18.0）；同步功能更新前的组合号示例为 v1.4.2.17.3。已合入 [Wunsch2048 增强版](https://github.com/Wunsch2048/codex-bailong-desktop-pet) 的 **v1.4.2**（`fc0ce47`），保留本仓库的 Windows/macOS 适配、Token 同步、SSH、会话轮换和随机动作。角色与原始桌宠来自 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet)。
 
-[源码使用与更新](docs/跨平台源码使用.md) · [上游 v1.2.0 更新](docs/releases/v1.2.0.md) · [来源与授权](NOTICE.md) · [反馈问题](https://github.com/jiashuncheng/codex-bailong-desktop-pet/issues)
+[源码使用与更新](docs/跨平台源码使用.md) · [上游 v1.4.2 更新](docs/releases/v1.4.2.md) · [来源与授权](NOTICE.md) · [反馈问题](https://github.com/jiashuncheng/codex-bailong-desktop-pet/issues)
 
 ## 本仓库新增与保留的自定义功能
 
@@ -22,11 +22,12 @@
 | 本地高清素材接入 | 导入已下载的 720px 高清包，逐文件校验并建立独立快照；有完整轻量素材时支持部分高清回退，补齐后再次更新即可 |
 | Mac 系统集成 | 适配应用发现、登录启动、系统钥匙串、菜单栏及基于辅助功能的视频全屏让位 |
 | 美西时钟 | 重置公告暂无安排时，显示洛杉矶当地时间与日期，自动处理夏令时；有安排时仍按原方式显示重置消息与倒计时 |
-| 多端 Token 去重同步 | Windows / Mac 与远程 Linux 向私人 ECS 上报统计计数，按会话累计值去重；支持断线补传、全端/本机切换及独立设备配对。详见[多端 Token 同步](docs/多端Token同步.md) |
+| 多端统一同步 | `win`、`wsl`、`mac` 和实际服务器来源经同一 HTTPS 通道共享去重 Token、额度观测、会话名称／状态／公开摘要及回合已读标记；GPU228 汇总计算，阿里云仅中转。详见[同步说明](docs/多端Token同步.md) |
 | 安全同步源码 | 从本人的 fork 快进更新；工作区有未提交修改或历史分叉时停止，避免覆盖本地修改；更新后自动重启 |
 
 ## 已合入的上游新功能
 
+- **v1.4.2 / v1.4 / v1.3**：主题、大卡片与聊天布局、实时输出速率、项目统计、走动／贴边、素材恢复及额度比较条件检查；保留定制缩放、双行来源胶囊和 Mac 平台分发。
 - **v1.2.0 / v1.1.1**：额度双向变化提醒、托盘额度环、周期恢复与迁移回执修复、台词保护和卡片首帧交接。Windows 可选游戏和视频全屏隐藏；Mac 保留视频让位与辅助功能权限提示。默认沿用原视频策略与完成提醒优先级。
 
 - **v1.1.0 累计程序改进**：程序与动画目录迁移、独立动画补丁、日志恢复及画质配置容错、额度周期对比修复和卡片过渡改进。WSL 连接只在 Windows 提供；Mac 保留本机与 SSH 接入。
@@ -73,7 +74,7 @@ Git 不保存大型动画。首次没有素材时，启动脚本会提示选择�
 
 多端 Token 在设置 → Codex → 多端 Token 同步中配置。已有设备导出一次性连接文件，另一台导入后即可加入，访问凭据不通过 Git 传递。远程 Linux 单独运行轻量采集器，详情见[同步部署说明](docs/多端Token同步.md)。
 
-远程会话在同一页的 SSH 区域配置：使用本机能够免交互连接的 SSH 别名，远端 Linux 需要 `python3`。SSH 只回传远端会话状态，不把远端状态冒充本机 Token 用量；SSH 密钥与认证由各台电脑自行配置。
+已配对设备的会话直接使用同一 HTTPS 通道；每端都需要更新采集器。SSH 区域保留给尚未接入汇总服务的旧环境；统一通道首次连接成功后，本次运行不再显示旧 SSH 合成行，避免重复。原始来源不会因为服务部署在 GPU228 而改名。
 
 ## 两端更新与自定义开发
 
@@ -95,7 +96,7 @@ python tools/check_source.py --without-assets
 python tools/check_source.py --require-assets
 ```
 
-第一条运行不依赖外部动画的检查；第二条额外校验完整轻量素材及相关界面测试。GitHub Actions 对 Windows / macOS 分别检查源码运行环境，Windows 冻结构建相关逻辑另设检查任务。Mac 原生窗口与焦点使用隔离的 `tools/mac_ui_probe.py`、`tools/mac_focus_probe.py` 验证。
+第一条运行不依赖外部动画的检查；第二条额外校验完整轻量素材及相关界面测试。仓库提供 Windows / macOS 源码检查工作流；当前仓库 Actions 已禁用，不能据此声称 Mac 检查通过。Windows 冻结构建另行验证。Mac 原生窗口与焦点使用隔离的 `tools/mac_ui_probe.py`、`tools/mac_focus_probe.py` 验证。
 
 自动测试不等同于所有系统、缩放、浏览器和播放器的实机验收。Mac 视频全屏识别需要辅助功能权限；Mac 的 Codex 启停监听尚未实现。额度与会话状态取决于本机 Codex 数据及接口兼容情况。
 

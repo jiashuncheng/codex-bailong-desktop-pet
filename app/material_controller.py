@@ -1,4 +1,5 @@
 """Explicit background material operations and embedded settings controls."""
+from theme_runtime import set_theme_style,theme_style_source
 import threading,time
 from PySide6.QtCore import QObject,QThread,QTimer,Signal
 from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QLabel,QComboBox,QPushButton,QProgressBar,QFileDialog,QMessageBox,QSizePolicy
@@ -22,15 +23,42 @@ class MaterialJob(QThread):
         except (MaterialError,UpdateCancelled,OSError,ValueError) as exc:self.failed.emit(str(exc)[:220])
         except Exception:self.failed.emit('素材准备失败，继续使用原画质')
 
+class LocalRecoveryJob(QThread):
+    result=Signal(str,object);failed=Signal(str)
+    def __init__(self,store,parent=None):
+        super().__init__(parent);self.store=store;self.cancel=threading.Event()
+    def run(self):
+        try:
+            order=[self.store.preferred]+[tier for tier in ('light','hd') if tier!=self.store.preferred]
+            for tier in order:
+                if self.cancel.is_set():return
+                root=self.store.recover_local(tier,self.cancel.is_set)
+                if root is not None:self.result.emit(tier,root);return
+            self.result.emit('',None)
+        except UpdateCancelled:pass
+        except (MaterialError,OSError,ValueError):self.failed.emit('已有动画未恢复，请在素材页补齐或下载')
+        except Exception:self.failed.emit('已有动画未恢复，请在素材页补齐或下载')
+
 class MaterialController(QObject):
-    changed=Signal(object);ready=Signal(str,object);idle=Signal();removeRequested=Signal();rollbackRequested=Signal()
+    changed=Signal(object);ready=Signal(str,object);recovered=Signal(str,object);idle=Signal();removeRequested=Signal();rollbackRequested=Signal()
     def __init__(self,store,parent=None):
         super().__init__(parent);self.store=store;self.job=None;self.closing=False
         self.state=dict(phase='idle',message='',downloaded=0,total=0)
     def snapshot(self):
-        info=self.store.local_hd_info()
-        return dict(self.state,localHd=self.store.known_available('local_hd'),fallback=len(info.get('fallback_files',[])),current=self.store.current,lightCached=self.store.known_available('light'),hdCached=self.store.known_available('hd'),supported=bool(self.store.catalog),busy=self.job is not None,canRollback=bool(self.store.patch_previous),storagePath=str(self.store.cache),locationError=getattr(self.store,'location_error',''))
+        info=getattr(self.store,'local_hd_info',lambda:{})()
+        return dict(self.state,legacyAssets=getattr(self.store,'legacy_assets',False),localHd=getattr(self.store,'known_available',lambda _:False)('local_hd'),fallback=len(info.get('fallback_files',[])),current=self.store.current,lightCached=self.store.known_available('light'),hdCached=self.store.known_available('hd'),supported=bool(self.store.catalog),busy=self.job is not None,canRollback=bool(self.store.patch_previous),storagePath=str(self.store.cache),locationError=getattr(self.store,'location_error',''),cardOnly=bool(getattr(self.store,'card_only',False)),needsRepair=self.store.current is None and not getattr(self.store,'card_only',False))
     def publish(self,**changes):self.state.update(changes);self.changed.emit(self.snapshot())
+    def recover_local(self):
+        if self.closing or self.job or self.store.current is not None or getattr(self.store,'card_only',False) or self.store.location_error:return False
+        self.publish(phase='recovering',message='正在检查已有动画…')
+        job=self.job=LocalRecoveryJob(self.store,self);job.result.connect(self._recovered);job.failed.connect(self.failed);job.finished.connect(self._finished);job.start();self.changed.emit(self.snapshot());return True
+    def _recovered(self,tier,root):
+        if self.closing or not self.job or self.job.cancel.is_set():return
+        if root is None:self.publish(phase='idle',message='人物动画未就绪，请在此补齐或下载');return
+        owner=self.parent();settings=getattr(owner,'settings',{})
+        if settings.get('character','builtin')!='builtin' or not settings.get('character_visible',True):
+            self.publish(phase='idle',message='已有动画已恢复');return
+        self.publish(phase='pending',message='已有动画已校验，正在恢复人物…');self.recovered.emit(tier,root)
     def request(self,tier):
         if getattr(self.store,'location_error',''):self.failed(self.store.location_error);return False
         updates=getattr(self.parent(),'updates',None)
@@ -40,7 +68,7 @@ class MaterialController(QObject):
         self.publish(phase='verifying' if self.store.known_available(tier) else 'downloading',message='正在准备素材…',downloaded=0,total=0)
         job=self.job=MaterialJob(self.store,tier,self);job.result.connect(self._result);job.failed.connect(lambda text:self.publish(phase='error',message=text));job.progress.connect(self._progress);job.finished.connect(self._finished);self.changed.emit(self.snapshot());job.start();return True
     def _progress(self,n,total,phase):
-        if not self.closing:self.publish(phase=phase,downloaded=n,total=total,message='正在下载动画资源…' if phase=='downloading' else '正在迁移并校验动画…' if phase=='moving' else '正在校验素材…')
+        if not self.closing:self.publish(phase=phase,downloaded=n,total=total,message='正在下载动画资源…' if phase=='downloading' else '正在复用已有动画…' if phase=='reusing' else '正在迁移并校验动画…' if phase=='moving' else '正在校验素材…')
     def _result(self,tier,root):
         if self.closing or self.job.cancel.is_set():return
         self.publish(phase='pending',message='素材已就绪，等待当前动作自然结束后切换…');self.ready.emit(tier,root)
@@ -147,17 +175,18 @@ class MaterialPanel(QWidget):
         self.rollback=QPushButton('回退动画补丁');self.rollback.clicked.connect(controller.rollbackRequested.emit);layout.addWidget(self.rollback)
         from settings_controls import SlidingSegments
         row=QHBoxLayout();choices=[('轻量 512px','light'),('高清 720px','hd')]
-        if controller.store.known_available('local_hd'):choices.append(('本地高清回退','local_hd'))
+        if getattr(controller.store,'known_available',lambda _:False)('local_hd'):choices.append(('本地高清回退','local_hd'))
         self.choice=SlidingSegments(choices);row.addWidget(self.choice,1)
         self.action=QPushButton();row.addWidget(self.action);self.cancel_button=QPushButton('取消');row.addWidget(self.cancel_button);layout.addLayout(row)
         self.progress=QProgressBar();self.progress.setRange(0,1000);layout.addWidget(self.progress)
         self.message=QLabel();self.message.setWordWrap(True);layout.addWidget(self.message)
         self.remove_button=QPushButton('移除动画资源，仅保留卡片');self.remove_button.setProperty('role','danger');layout.addWidget(self.remove_button)
         self.remove_button.clicked.connect(controller.removeRequested.emit)
-        note=QLabel('动画按需下载，升级可复用；移除后可重新下载。');note.setWordWrap(True);note.setStyleSheet('font-size:11px;font-weight:500;color:#706879;');layout.addWidget(note)
+        note=QLabel('动画按需下载，升级可复用；移除后可重新下载。');note.setWordWrap(True);set_theme_style(note,'font-size:11px;font-weight:500;color:#706879;');layout.addWidget(note)
         location=QHBoxLayout();self.storage_path=QLabel();self.storage_path.setWordWrap(True);self.storage_path.setMinimumWidth(0);self.storage_path.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred);self.storage_path.setAccessibleName('动画资源存储位置');location.addWidget(self.storage_path,1)
         self.storage_button=QPushButton('更改位置');self.storage_button.clicked.connect(self.choose_location);location.addWidget(self.storage_button);layout.addLayout(location)
-        self.choice.setCurrentIndex(max(0,self.choice.findData(controller.store.current)))
+        selected=controller.store.current or getattr(controller.store,'preferred','light')
+        self.choice.setCurrentIndex(max(0,self.choice.findData(selected)))
         self.choice.currentIndexChanged.connect(lambda:self.refresh(controller.snapshot()));self.action.clicked.connect(lambda:controller.request(self.choice.currentData()));self.cancel_button.clicked.connect(controller.cancel)
         controller.changed.connect(self.refresh);self.refresh(controller.snapshot())
     def choose_location(self):
@@ -169,14 +198,14 @@ class MaterialPanel(QWidget):
         if QMessageBox.question(self,'迁移动画资源',text)==QMessageBox.StandardButton.Yes:self.controller.move_location(target)
     def refresh(self,s):
         self.rollback.setVisible(bool(s.get('canRollback')));self.rollback.setEnabled(not s['busy'])
-        self.summary.setText('当前：'+({'hd':'高清 720px','light':'轻量 512px','local_hd':'本地高清（部分轻量回退）'}.get(s['current'],'仅卡片')))
+        self.summary.setText('当前：'+({'hd':'高清 720px','light':'轻量 512px','local_hd':'本地高清（部分轻量回退）'}.get(s['current'],'动画待补齐' if s.get('needsRepair') else '仅卡片')))
         tier=self.choice.currentData();busy=s['busy'] or s['phase']=='pending'
         self.storage_path.setText(s['storagePath']);self.storage_button.setEnabled(not busy)
         self.choice.setEnabled(not busy);self.action.setEnabled(s['supported'] and not busy and tier!=s['current'])
         cached=s.get('localHd' if tier=='local_hd' else 'hdCached' if tier=='hd' else 'lightCached',False)
         self.action.setText('下载并启用' if not cached else '启用动画' if s['current'] is None else '切换画质')
         self.remove_button.setEnabled(s['supported'] and not busy)
-        self.cancel_button.setVisible(s['busy'] and s['phase'] not in ('pending','removing'));self.cancel_button.setEnabled(s['busy']);self.message.setText(s['message'] or s.get('locationError',''))
+        self.cancel_button.setVisible(s['busy'] and s['phase'] not in ('pending','removing'));self.cancel_button.setEnabled(s['busy']);self.message.setText(s['message'] or s.get('locationError','') or ('沿用已安装素材；新版素材可在更新后手动启用。' if s.get('legacyAssets') else '') or ('显示人物需要动画资源；可复用已有文件并补齐。' if s.get('needsRepair') else ''))
         self.progress.setVisible(s['busy'])
         total=s['total'];self.progress.setRange(0,1000 if total else 0)
         if total:self.progress.setValue(min(1000,round(s['downloaded']*1000/total)));self.progress.setFormat(f"{s['downloaded']/1048576:.1f} / {total/1048576:.1f} MB")

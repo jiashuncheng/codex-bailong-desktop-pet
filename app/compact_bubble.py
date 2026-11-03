@@ -1,51 +1,55 @@
 """Compact, accessible quota dials; full information remains in the details view."""
+from settings_controls import play_animation
+from theme_registry import color as theme_color
+from theme_runtime import set_theme_style,theme_style_source
 import math
 import time
-from PySide6.QtCore import Qt,QRectF,QSize,Signal,QTimer,QVariantAnimation,QEasingCurve,QAbstractAnimation
+from PySide6.QtCore import QObject, QEvent, Qt,QRectF,QSize,Signal,QTimer,QVariantAnimation,QEasingCurve,QAbstractAnimation
 from PySide6.QtGui import QColor,QFont,QFontMetrics,QPainter,QPen,QTextLayout,QTextOption,QIcon,QPixmap,QPolygonF,QPalette
-from PySide6.QtCore import QPointF,QObject,QEvent
-from PySide6.QtWidgets import QWidget,QLabel,QHBoxLayout,QVBoxLayout,QToolButton,QApplication,QStackedWidget,QLayout,QToolTip
+from PySide6.QtCore import QPointF,QEvent
+from PySide6.QtWidgets import QWidget,QLabel,QHBoxLayout,QVBoxLayout,QToolButton,QApplication,QStackedWidget,QLayout
 from panel_transition import PanelTransition
 from panel_scale import StatusContent,StatusScaleHost,scaled_size,panel_scale_for_role
 from surface_morph import PANEL_RADIUS
 from status_indicator import StatusIndicator
 from refresh_indicator import RefreshButton
+from hover_hints import HeaderHints
 from pet import Bubble
 from enhanced_core import clean_text
 from typography import FONT_FAMILIES,FONT_CSS,ui_font
 from ui_theme import editor_stylesheet,PRIMARY,ACCENT,SELECTED,DISABLED
 from reset_watch import epoch,local_time,schedule_text,account_reset_text,SOURCE_URL,pending_reset,schedule_key,locally_reset,reset_has_priority
 
-INK=QColor('#393343');MUTED=QColor('#706879');PURPLE=QColor('#8b78a6')
-GREEN=QColor('#b3a5cb');AMBER=QColor('#915e74');TRACK=QColor('#e4dfea')
+INK=QColor(theme_color('#393343'));MUTED=QColor(theme_color('#706879'));PURPLE=QColor(theme_color('#8b78a6'))
+GREEN=QColor(theme_color('#b3a5cb'));AMBER=QColor(theme_color('#915e74'));TRACK=QColor(theme_color('#e4dfea'))
 CARD_HEIGHT=90
 EXPANDED_WIDTH=360
 EXPANDED_HEIGHT=480
 
-def action_icon(kind):
+def action_icon(kind,island=False):
     pixmap=QPixmap(32,32);pixmap.fill(Qt.GlobalColor.transparent)
     p=QPainter(pixmap);p.setRenderHint(QPainter.RenderHint.Antialiasing);p.scale(2,2)
-    p.setPen(QPen(QColor('#75618d'),1.9,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin))
+    p.setPen(QPen(QColor(theme_color('#75618d')),1.5 if kind in ('details','compact','report') else 1.9,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin))
     if kind=='refresh':
         p.drawArc(QRectF(3,3,10,10),20*16,290*16)
-        p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor('#75618d'));p.drawPolygon(QPolygonF([QPointF(14,2.5),QPointF(14,7),QPointF(9.5,5)]))
+        p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor(theme_color('#75618d')));p.drawPolygon(QPolygonF([QPointF(14,2.5),QPointF(14,7),QPointF(9.5,5)]))
     elif kind=='external':
         p.drawLine(9,3,13,3);p.drawLine(13,3,13,7);p.drawLine(7,9,13,3)
         p.drawPolyline(QPolygonF([QPointF(6,3),QPointF(3,3),QPointF(3,13),QPointF(13,13),QPointF(13,10)]))
     elif kind=='details':
-        p.drawLine(3,4,10,4);p.drawLine(3,8,8,8);p.drawLine(3,12,8,12)
-        p.drawLine(11,8,14,11);p.drawLine(14,11,11,14)
-    elif kind=='collapse':p.drawLine(3,8,13,8)
+        p.drawLine(3,4,10,4);p.drawLine(3,8,13,8);p.drawLine(3,12,10,12)
+        p.drawPolyline(QPolygonF([QPointF(10,4),QPointF(14,8),QPointF(10,12)]))
+    elif kind=='collapse':p.drawPolyline(QPolygonF([QPointF(3,10),QPointF(8,5),QPointF(13,10)]))
     elif kind=='compact':
-        p.drawRoundedRect(QRectF(2,5,12,6),3,3);p.drawLine(6,3,10,3);p.drawLine(6,13,10,13)
+        p.drawRoundedRect(QRectF(2,5,12,6),3,3)
     elif kind=='expand':
         p.drawLine(4,6,8,2);p.drawLine(8,2,12,6);p.drawLine(4,10,8,14);p.drawLine(8,14,12,10)
     elif kind=='close':p.drawLine(4,4,12,12);p.drawLine(12,4,4,12)
     elif kind=='report':
-        p.drawRoundedRect(QRectF(3,2,10,12),1.5,1.5)
-        p.drawLine(6,10,6,8);p.drawLine(8,10,8,5);p.drawLine(10,10,10,7)
+        p.drawRoundedRect(QRectF(3,2,10,12),2,2)
+        p.drawLine(6,11,6,8);p.drawLine(9,11,9,5)
     elif kind=='book':
-        p.setPen(QPen(QColor('#75618d'),1.4,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin))
+        p.setPen(QPen(QColor(theme_color('#75618d')),1.4,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin))
         p.drawPolyline(QPolygonF([QPointF(2,4),QPointF(5,3),QPointF(8,4),QPointF(11,3),QPointF(14,4),QPointF(14,11),QPointF(11,10),QPointF(8,11),QPointF(5,10),QPointF(2,11),QPointF(2,4)]))
         p.drawLine(8,4,8,11);p.drawLine(QPointF(6,13.5),QPointF(11,13.5));p.drawLine(QPointF(9,12),QPointF(11,13.5));p.drawLine(QPointF(11,13.5),QPointF(9,15))
     elif kind=='settings':
@@ -60,21 +64,29 @@ def action_icon(kind):
         p.drawPolyline(QPolygonF([QPointF(5,4),QPointF(1,8),QPointF(5,12)]))
         p.drawPolyline(QPolygonF([QPointF(11,4),QPointF(15,8),QPointF(11,12)]));p.drawLine(9,3,7,13)
     elif kind=='pin':
-        p.drawLine(5,3,11,3);p.drawLine(6,3,6,7);p.drawLine(10,3,10,7)
-        p.drawLine(6,7,4,10);p.drawLine(4,10,12,10);p.drawLine(12,10,10,7);p.drawLine(8,10,8,14)
+        p.save();p.translate(8,8);p.rotate(40)
+        p.drawLine(-3,-5,3,-5);p.drawLine(-2,-5,-2,-1);p.drawLine(2,-5,2,-1)
+        p.drawPolyline(QPolygonF([QPointF(-2,-1),QPointF(-4,2),QPointF(4,2),QPointF(2,-1)]))
+        p.drawLine(0,2,0,7);p.restore()
     elif kind=='move':
         p.drawLine(2,8,14,8);p.drawLine(8,2,8,14)
         for a,b,c in [(QPointF(4,6),QPointF(2,8),QPointF(4,10)),(QPointF(12,6),QPointF(14,8),QPointF(12,10)),(QPointF(6,4),QPointF(8,2),QPointF(10,4)),(QPointF(6,12),QPointF(8,14),QPointF(10,12))]:p.drawPolyline(QPolygonF([a,b,c]))
-    p.end();return QIcon(pixmap)
+    p.end()
+    if island:
+        from theme_registry import palette
+        tint=QPainter(pixmap);tint.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        tint.fillRect(pixmap.rect(),QColor(palette()['pillAccent']));tint.end()
+    return QIcon(pixmap)
 
 def action_button(kind,tip,text='',parent=None,hit_size=20,keyboard=False,under=False):
     button=RefreshButton(parent) if kind=='refresh' else QToolButton(parent)
     button.setObjectName('bubble_'+kind)
+    if kind!='refresh':button.setProperty('themeIconKind',kind)
     if kind!='refresh':button.setIcon(action_icon(kind))
-    button.setIconSize(QSize(18,18) if kind=='refresh' else QSize(16,16))
+    button.setIconSize(QSize(16,16))
     button.setFocusPolicy(Qt.FocusPolicy.StrongFocus if keyboard else Qt.FocusPolicy.NoFocus);button.setCursor(Qt.CursorShape.PointingHandCursor)
     button.setToolTip(tip);button.setAccessibleName(tip)
-    button.setStyleSheet('QToolButton{'+FONT_CSS+f'border:0;border-radius:6px;color:{PRIMARY};background:transparent;font-size:11px;padding:0;}}QToolButton:hover{{background:#f0eaf5;}}QToolButton:pressed{{background:#e0d3eb;}}QToolButton:checked{{background:{SELECTED};}}QToolButton:disabled{{color:{DISABLED};}}QToolButton:focus{{border:0;background:{SELECTED};}}')
+    set_theme_style(button,'QToolButton{'+FONT_CSS+f'border:0;border-radius:6px;color:{PRIMARY};background:transparent;font-size:11px;padding:0;}}QToolButton:hover{{background:#f0eaf5;}}QToolButton:pressed{{background:#e0d3eb;}}QToolButton:checked{{background:{SELECTED};}}QToolButton:disabled{{color:{DISABLED};}}QToolButton:focus{{border:0;background:{SELECTED};}}')
     if text:
         button.setText(text);button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon if under else Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         if under:button.setFixedSize(hit_size,36)
@@ -129,7 +141,7 @@ class Summary(QWidget):
             else:result.append(text[start:start+length].rstrip())
         layout.endLayout();return result or ['等待 Codex 新消息']
     def paintEvent(self,event):
-        p=QPainter(self);p.setFont(self.font());p.setPen(INK)
+        p=QPainter(self);p.setFont(self.font());p.setPen(theme_color(INK))
         for i,line in enumerate(self.lines):p.drawText(QRectF(0,i*self.line_height,self.width(),self.line_height),Qt.AlignmentFlag.AlignVCenter,line)
     def mouseReleaseEvent(self,event):
         if event.button()==Qt.MouseButton.LeftButton:self.expand.emit()
@@ -149,10 +161,11 @@ class StatusScroller(QLabel):
         self.setCursor(Qt.CursorShape.PointingHandCursor);self.line_height=max(18,QFontMetrics(self.font()).height()+2)
         self.full=False;self.current='';self.incoming='';self.pending=None;self.progress=1.;self.initialized=False
         self.conversation_rows=False;self.extra=0;self.single_line=False;self.rows={};self.row_positions={}
+        self.expanded_row=False;self.conversation_state=''
         self.conversation_title='';self.conversation_id='';self.completed=False;self.short_title='';self.title_width=0;self.title_suffix=''
         self.name_hovered=False;self.name_pressed=False;self.setMouseTracking(True)
         self.overflow=QToolButton(self);self.overflow.setObjectName('conversation_overflow');self.overflow.setFixedSize(26,20);self.overflow.setFocusPolicy(Qt.FocusPolicy.NoFocus);self.overflow.hide()
-        self.overflow.setStyleSheet('QToolButton{'+FONT_CSS+'color:#514360;background:#eee8f3;border:0;border-radius:5px;font-size:11px;}QToolButton:hover{background:#e4dbea;}')
+        set_theme_style(self.overflow,'QToolButton{'+FONT_CSS+'color:#514360;background:#eee8f3;border:0;border-radius:5px;font-size:11px;}QToolButton:hover{background:#e4dbea;}')
         self.animation=QVariantAnimation(self);self.animation.setDuration(300);self.animation.setStartValue(0.);self.animation.setEndValue(1.)
         self.animation.setEasingCurve(QEasingCurve.Type.InOutCubic);self.animation.valueChanged.connect(self._advance);self.animation.finished.connect(self._finish)
         self._from_height=self._to_height=self.line_height;self._scroll_distance=self.line_height+4
@@ -188,8 +201,8 @@ class StatusScroller(QLabel):
     def layout_title(self):
         if not self.conversation_title:self.title_width=0;return
         from conversation_roster import title_keywords
-        metrics=QFontMetrics(font(12,True));budget=min(112,round(self.width()*.42))
-        self.short_title=metrics.elidedText(title_keywords(self.conversation_title),Qt.TextElideMode.ElideMiddle,max(1,budget-metrics.horizontalAdvance(self.title_suffix)))+self.title_suffix
+        metrics=QFontMetrics(font(12,not self.expanded_row));budget=max(40,self.width()-76) if self.expanded_row else min(112,round(self.width()*.42))
+        self.short_title=metrics.elidedText(self.conversation_title if self.expanded_row else title_keywords(self.conversation_title),Qt.TextElideMode.ElideMiddle,max(1,budget-metrics.horizontalAdvance(self.title_suffix)))+self.title_suffix
         self.title_width=metrics.horizontalAdvance(self.short_title)
     def wheelEvent(self,event):
         if self.conversation_rows or self.conversation_id:
@@ -217,8 +230,9 @@ class StatusScroller(QLabel):
                 start[sid]=index*self.line_height
             row.setFixedWidth(max(1,self.width()-(30 if extra else 0)))
             info=metadata.get(sid,{})
+            row.expanded_row=full;row.row_last=index==len(items)-1;row.conversation_state=info.get('state','')
             row.conversation_id=sid;row.conversation_title=info.get('title','');row.completed=info.get('state')=='complete';row.title_suffix='';row.layout_title()
-            row.set_status(text)
+            row.set_status(text,full)
             row.setAccessibleName((row.conversation_title+' · '+text).strip(' ·'));row.show();row.update()
         self.rows={sid:self.rows[sid] for sid in keys}
         names=[row.short_title for row in self.rows.values()]
@@ -226,13 +240,13 @@ class StatusScroller(QLabel):
             if row.conversation_title and names.count(row.short_title)>1:
                 row.title_suffix=' '+sid[-3:];row.layout_title()
         self.current=self.incoming=joined;self.pending=None;self.initialized=True
-        target=max(1,len(items))*self.line_height
+        target=max(1,len(items))*(43 if full else self.line_height)+(9 if full else 0)
         if old_keys!=keys or changed_mode or not self.isVisible():
-            self.animation.stop();self.row_positions={sid:(start[sid],index*self.line_height) for index,sid in enumerate(keys)}
+            self.animation.stop();self.row_positions={sid:(start[sid],index*(43 if full else self.line_height)) for index,sid in enumerate(keys)}
             self._from_height=self.height();self._to_height=target
             moving=self.height()!=target or any(start[sid]!=index*self.line_height for index,sid in enumerate(keys))
             if self.isVisible() and not changed_mode and moving:
-                self.progress=0.;self.animation.start()
+                self.progress=0.;play_animation(self.animation)
             else:self._advance(1.)
         self.overflow.raise_();self.update()
     def clear_conversations(self):
@@ -241,7 +255,7 @@ class StatusScroller(QLabel):
         for row in self.rows.values():row.animation.stop();row.hide();row.deleteLater()
         self.rows={};self.row_positions={};self.conversation_rows=False;self.initialized=False
     def _height(self,*texts):
-        height=max(len(self.lines_for(t)) for t in texts)*self.line_height
+        height=43 if self.expanded_row else max(len(self.lines_for(t)) for t in texts)*self.line_height
         self._from_height=self._to_height=height;self._scroll_distance=height+4;self._set_height(height)
     def set_status(self,text,full=False):
         changed_mode=self.full!=full;self.full=full
@@ -255,11 +269,11 @@ class StatusScroller(QLabel):
     def _start(self,text):
         if text==self.current:return
         self.incoming=text;self.pending=None
-        self._from_height=self.height();self._to_height=len(self.lines_for(text))*self.line_height
+        self._from_height=self.height();self._to_height=43 if self.expanded_row else len(self.lines_for(text))*self.line_height
         # Freeze travel distance for this transition: changing viewport height
         # must not also change the text's speed or create a second resize phase.
-        self._scroll_distance=max(self._from_height,len(self.lines_for(self.current))*self.line_height)+4
-        self.progress=0.;self.animation.start();self.update()
+        self._scroll_distance=self.line_height+2 if self.expanded_row else max(self._from_height,len(self.lines_for(self.current))*self.line_height)+4
+        self.progress=0.;play_animation(self.animation);self.update()
     def _advance(self,value):
         self.progress=float(value)
         self._set_height(self._from_height+(self._to_height-self._from_height)*self.progress)
@@ -281,32 +295,70 @@ class StatusScroller(QLabel):
             row.animation.stop();row.current=row.incoming=row.text();row.pending=None;row.progress=1.
         super().hideEvent(event)
     def paintEvent(self,event):
-        p=QPainter(self);p.setClipRect(0,0,self.width()-(30 if self.extra else 0),self.height());p.setFont(self.font());p.setPen(INK)
-        if self.full:
-            p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setBrush(QColor('#f5f1f7'));p.setPen(Qt.PenStyle.NoPen)
-            p.drawRoundedRect(QRectF(self.rect()),5,5);p.setPen(INK)
+        p=QPainter(self);p.setClipRect(0,0,self.width()-(30 if self.extra else 0),self.height());p.setFont(self.font());p.setPen(theme_color(INK))
+        # Expanded status uses the card surface too; only completion and name
+        # interaction below need their own background, not the whole viewport.
         if self.conversation_rows:return
+        if self.expanded_row:
+            self._paint_expanded_row(p);return
         if self.completed:
-            p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setPen(QPen(QColor('#dacee6'),1));p.setBrush(QColor('#eee7f4'))
+            p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setPen(QPen(QColor(theme_color('#dacee6')),1));p.setBrush(QColor(theme_color('#eee7f4')))
             p.drawRoundedRect(QRectF(self.rect()).adjusted(.5,.5,-.5,-.5),5,5)
         left=self.text_left()
         if self.conversation_title:
             if self.name_hovered or self.name_pressed:
-                p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setPen(QPen(QColor('#806095' if self.name_pressed else '#a087b3'),1))
-                p.setBrush(QColor('#c5add9' if self.name_pressed else '#dfcfeb'));p.drawRoundedRect(QRectF(1,1,left-4,self.height()-2),4,4)
+                p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setPen(QPen(QColor(theme_color('#806095' if self.name_pressed else '#a087b3')),1))
+                p.setBrush(QColor(theme_color('#c5add9' if self.name_pressed else '#dfcfeb')));p.drawRoundedRect(QRectF(1,1,left-4,self.height()-2),4,4)
             offset=1 if self.name_pressed else 0
             title_font=font(12,True);title_font.setUnderline(self.name_hovered or self.name_pressed)
-            p.setFont(title_font);p.setPen(QColor('#30203e' if self.name_pressed else '#472c5d' if self.name_hovered else '#665078'))
+            from theme_registry import palette
+            p.setFont(title_font);p.setPen(QColor(palette()['ink' if self.name_pressed else 'accentText']))
             p.drawText(QRectF(5+offset,offset,self.title_width,self.height()),Qt.AlignmentFlag.AlignVCenter,self.short_title)
-            p.setPen(QColor('#c1b4cc'));p.drawLine(left-5,5,left-5,self.height()-5)
-        p.setFont(self.font());p.setPen(INK);p.setClipRect(left,0,max(0,self.width()-left-(30 if self.extra else 0)),self.height())
+            p.setPen(QColor(theme_color('#c1b4cc')));p.drawLine(left-5,5,left-5,self.height()-5)
+        p.setFont(self.font());p.setPen(theme_color(INK));p.setClipRect(left,0,max(0,self.width()-left-(30 if self.extra else 0)),self.height())
         def draw(text,y):
             for i,line in enumerate(self.lines_for(text)):p.drawText(QRectF(left,y+i*self.line_height,self.width()-left,self.line_height),Qt.AlignmentFlag.AlignVCenter,line)
         if self.animation.state()==QAbstractAnimation.State.Running:
             old_y,new_y=self.offsets();draw(self.current,old_y);draw(self.incoming,new_y)
         else:draw(self.current,0)
     def _on_name(self,point):
+        if self.expanded_row:return bool(self.conversation_id and self.conversation_title and self.rect().contains(point.toPoint()))
         return bool(self.conversation_id and self.conversation_title and self.rect().contains(point.toPoint()) and 0<=point.x()<self.text_left())
+    def transition_regions(self):
+        """Semantic text bounds shared by the normal/detail morph, in local space."""
+        if self.expanded_row:
+            return dict(title=QRectF(1,5,max(1,self.width()-65),17),
+                        detail=QRectF(1,22,max(1,self.width()-2),16),
+                        badge=QRectF(max(0,self.width()-58),5,58,16))
+        left=self.text_left()
+        return dict(title=QRectF(5,0,max(0,left-10),self.height()),
+                    divider=QRectF(max(0,left-5),0,1,self.height()) if left else QRectF(),
+                    detail=QRectF(left,0,max(1,self.width()-left),self.height()))
+    def _paint_expanded_row(self,p):
+        from theme_registry import palette
+        from conversation_roster import LABELS
+        colors=palette();p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self.name_hovered or self.name_pressed:
+            p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor(colors['selected' if self.name_pressed else 'panel']))
+            p.drawRoundedRect(QRectF(self.rect()),5,5)
+        bounds=self.transition_regions();p.setFont(font(12));p.setPen(QColor(colors['ink']))
+        p.drawText(bounds['title'],Qt.AlignmentFlag.AlignVCenter,self.short_title)
+        tag=LABELS.get(self.conversation_state,'待命')
+        if self.completed:tag='待查看'
+        p.setFont(ui_font(10));tw=min(58,QFontMetrics(p.font()).horizontalAdvance(tag)+10)
+        tagrect=QRectF(self.width()-tw,5,tw,16)
+        p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor(colors['selected']));p.drawRoundedRect(tagrect,4,4)
+        p.setPen(QColor(colors['accentText']));p.drawText(tagrect,Qt.AlignmentFlag.AlignCenter,tag)
+        p.save();p.setClipRect(bounds['detail']);p.setFont(font(11));p.setPen(QColor(colors['muted']))
+        def draw(text,offset):
+            text=QFontMetrics(p.font()).elidedText(text.replace('\n',' '),Qt.TextElideMode.ElideRight,max(1,self.width()-2))
+            p.drawText(bounds['detail'].translated(0,offset),Qt.AlignmentFlag.AlignVCenter,text)
+        if self.animation.state()==QAbstractAnimation.State.Running:
+            old_y,new_y=self.offsets();draw(self.current,old_y);draw(self.incoming,new_y)
+        else:draw(self.current,0)
+        p.restore()
+        if not getattr(self,'row_last',False):
+            p.setPen(QColor(colors['track']));p.drawLine(1,self.height()-1,self.width()-1,self.height()-1)
     def mouseMoveEvent(self,event):
         hovered=self._on_name(event.position())
         if hovered!=self.name_hovered:self.name_hovered=hovered;self.update()
@@ -344,7 +396,7 @@ class QuotaDial(QWidget):
     def sizeHint(self):return QSize(116,CARD_HEIGHT)
     def paintEvent(self,event):
         p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor('#f5f2f7'));p.drawRoundedRect(QRectF(self.rect()),11,11)
+        p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor(theme_color('#f5f2f7')));p.drawRoundedRect(QRectF(self.rect()),11,11)
         cx=self.width()/2;rect=QRectF(cx-26,5,52,52)
         p.setPen(QPen(TRACK,4.5,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap));p.drawArc(rect,210*16,-240*16)
         value=self.remaining
@@ -352,11 +404,11 @@ class QuotaDial(QWidget):
         if value is not None and value>0:
             p.setPen(QPen(color,4.5,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
             p.drawArc(rect,210*16,-round(240*16*max(0,min(100,value))/100))
-        p.setFont(font(17,True));p.setPen(color if value is not None and value<=15 else INK)
+        p.setFont(font(17,True));p.setPen(theme_color(color if value is not None and value<=15 else INK))
         p.drawText(QRectF(3,17,self.width()-6,24),Qt.AlignmentFlag.AlignCenter,f'{value:g}%' if value is not None else '—')
-        p.setFont(font(11,True));p.setPen(INK)
+        p.setFont(font(11,True));p.setPen(theme_color(INK))
         p.drawText(QRectF(3,47,self.width()-6,15),Qt.AlignmentFlag.AlignCenter,self.name+'剩余')
-        p.setFont(font(11));p.setPen(AMBER if epoch(self.window.get('resetsAt')) and epoch(self.window.get('resetsAt'))<=time.time() else MUTED)
+        p.setFont(font(11));p.setPen(theme_color(AMBER if epoch(self.window.get('resetsAt')) and epoch(self.window.get('resetsAt'))<=time.time() else MUTED))
         text=reset_brief(self.window.get('resetsAt'))
         text_width=QFontMetrics(p.font()).horizontalAdvance(text);left=(self.width()-text_width-15)/2
         # A vector clock avoids thin/missing Unicode reset glyphs in font fallback.
@@ -372,7 +424,7 @@ def source_button(parent=None,compact=False):
     button=QToolButton(parent);button.setText('Resets' if compact else 'Codex Resets');button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     button.setIcon(action_icon('external'));button.setIconSize(QSize(13,13));button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
     button.setCursor(Qt.CursorShape.PointingHandCursor)
-    button.setStyleSheet('QToolButton{'+FONT_CSS+'font-size:11px;color:#75618d;border:0;padding:0;background:transparent;} QToolButton:hover{color:#514360;}')
+    set_theme_style(button,'QToolButton{'+FONT_CSS+'font-size:11px;color:#75618d;border:0;padding:0;background:transparent;} QToolButton:hover{color:#514360;}')
     button.setToolTip('来源：Codex Resets（第三方）\n点击打开原始公告；预计时间不等于账户额度已到账。')
     button.setAccessibleName('打开 Codex Resets 第三方公告来源')
     button.clicked.connect(lambda:QDesktopServices.openUrl(QUrl(SOURCE_URL)));return button
@@ -404,12 +456,14 @@ class CompactBubble(Bubble):
     dataBusyChanged=Signal(str,bool)
     def __init__(self,owner=None):
         super().__init__();self._owner=owner;self.setParent(owner,self.windowFlags())
-        self.report=None;self.inline_explanations=InlineExplanationOnly(self);QApplication.instance().installEventFilter(self.inline_explanations)
+        self.report=None;self.inline_explanations=HeaderHints(self);QApplication.instance().installEventFilter(self.inline_explanations)
         self.role_scale=1.;self.ui_scale=1.;self.scale_host=None
+        self._details_cache=None;self._details_cache_until=0.;self._details_navigation=False;self._details_key=None;self._status_headers={};self._deck_cache={};self._navigation_widget=None
+        self._edge_compact=False;self._pending_edge_compact=None
         self.content=StatusContent(self);self.content.setLayout(self.layout);self.content.setFixedWidth(268);self.content.show()
         self.setFixedWidth(268);self.layout.setContentsMargins(10,6,10,6);self.layout.setSpacing(3)
         self.layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
-        self.setFont(font(12));self.setStyleSheet('QLabel{'+FONT_CSS+'font-weight:500;color:#393343;font-size:12px;background:transparent;}')
+        self.setFont(font(12));set_theme_style(self,'QLabel{'+FONT_CSS+'font-weight:500;color:#393343;font-size:12px;background:transparent;}')
         self.windows=[];self.status='已启动，正在连接 Codex…';self._speech_text='';self.heading='白龙 · Codex 桌面伙伴'
         self.quota_caption='额度加载中…';self.reset_snapshot=None;self.reset_feed_error=False;self.reset_error_details=None
         self.show_quota=True;self.enabled=True;self.expanded=False
@@ -422,23 +476,24 @@ class CompactBubble(Bubble):
         self.refresh_button=action_button('refresh','刷新额度、Token 与重置公告',parent=self.content,hit_size=28)
         self.refresh_button.setObjectName('bubble_refresh_all');self.refresh_button.clicked.connect(self.request_refresh_all)
         self.refresh_button.hide()
-        self.token_snapshot=None;self.dashboard_page='tokens';self.deck=None;self.today_tokens_card=None;self._active_reset_key=None;self._ring_values={}
+        self.token_snapshot=None;self.dashboard_page='tokens';self.deck=None;self.quota_summary_card=None;self.today_tokens_card=None;self.live_rate_card=None;self._active_reset_key=None;self._ring_values={}
         self.token_range='all';self.detail_tab='quota';self.details_tabs=None;self.detail_scroll={}
         self._chart_entry=False;self._plot_resume=None
         from conversation_roster import ConversationRoster
         self.roster=ConversationRoster();self._roster_pending=False
         self.panel_page='status';self._editor_origin=None;self._editor_positioned=False;self.editor_stack=QStackedWidget(self);self.editor_stack.hide();self.editor_title=None
         self.editor_stack.setObjectName('integrated_contents')
-        self.editor_stack.setStyleSheet(editor_stylesheet(FONT_CSS))
+        set_theme_style(self.editor_stack,editor_stylesheet(FONT_CSS))
         palette=QPalette()
         for role,color in ((QPalette.ColorRole.WindowText,'#393343'),(QPalette.ColorRole.Text,'#393343'),(QPalette.ColorRole.ButtonText,'#514360'),(QPalette.ColorRole.Window,'#f5f2f7'),(QPalette.ColorRole.Base,'#fcfafc'),(QPalette.ColorRole.Button,'#eee7f5'),(QPalette.ColorRole.Highlight,'#dacbe8'),(QPalette.ColorRole.HighlightedText,'#352840'),(QPalette.ColorRole.PlaceholderText,'#786d84')):
-            palette.setColor(role,QColor(color))
+            palette.setColor(role,QColor(theme_color(color)))
         self.editor_stack.setPalette(palette)
         self.status_indicator=StatusIndicator(self.content)
         self.island=None;self.minimal_quota=None;self.shortcut_button=None;self.capsule_action='chatgpt';self._quota_reset_requested=None;self._card_press=None;self._card_dragged=False
         self.status_indicator.changed.connect(self._refresh_island_status)
         self.size_transition=PanelTransition(self)
         self.size_transition.animation.finished.connect(self._apply_pending_mode)
+        self.size_transition.animation.finished.connect(self._flush_edge_compact)
         self._redrawing=False;self._fitting_height=False;self.status_view=StatusScroller(248,self);self.status_view.expand.connect(self.toggle_details)
         self.status_view.conversationRequested.connect(self.conversationRequested.emit)
         self.status_view.overflow.clicked.connect(lambda:self.cycle_conversations())
@@ -461,20 +516,53 @@ class CompactBubble(Bubble):
         if content is not None:
             content.setUpdatesEnabled(enabled)
     def clear(self):
+        # The compact shared widgets must outlive a small-screen scroll wrapper.
+        self._status_body_layout=None;self._status_scroll=None
+        self._task_count=None;self._task_dot=None
+        self.status_view.setParent(self.content)
+        if self._details_cache is not None:
+            self._details_cache.setParent(self.content);self._details_cache.hide()
+        live=getattr(self,'live_rate_card',None)
+        from shiboken6 import isValid
+        if not isValid(live):self.live_rate_card=None;live=None
+        if live is not None:
+            live.begin_rebuild(self.panel_page=='status' and not self.is_minimal() and not self.is_island() and not self.size_transition.preparing)
+            live.setParent(self.content);live.hide()
+        from island_widgets import QuotaSatellite
+        old=next((w for w in self.content.findChildren(QuotaSatellite) if w.isVisibleTo(self.content)),None)
+        resume=getattr(old,'_reveal_resume_ms',None)
+        self._quota_reveal_state=None if old is None else (self._last_compact_surface,old.reveal.pending,old.reveal.progress,old.reveal.animation.currentTime() if resume is None else resume,old.reveal.animation.state()==QAbstractAnimation.State.Running or resume is not None)
         # Headers are rebuilt; the tiny task animation must keep its clock.
-        self._plot_resume=None;self.deck=None
+        self._plot_resume=None;self.deck=None;self.quota_summary_card=None;self.today_tokens_card=None
         self.shortcut_button=None
         for widget in self.content.findChildren(QWidget):
             if widget.isVisible() and type(widget).__name__=='TokenPlot' and widget.reveal.animation.state()==QAbstractAnimation.State.Running:
                 self._plot_resume=widget.reveal.animation.currentTime()
+        for deck in self._deck_cache.values():
+            deck.setParent(self.content);deck.hide()
         self.island=None;self.minimal_quota=None;self._status_title=None;self._status_badge=None;self._header=None;self.today_tokens_card=None;self.status_indicator.set_island(False)
         self.status_indicator.hide();self.status_indicator.setParent(self.content)
         self.refresh_button.hide();self.refresh_button.setParent(self.content)
         while self.layout.count():
             widget=self.layout.takeAt(0).widget()
             if widget is self.editor_stack:widget.hide()
-            elif widget and widget is not self.status_view:widget.hide();widget.deleteLater()
-    def add(self,widget):self.layout.addWidget(widget);widget.show();return widget
+            elif widget and widget is not self.status_view:
+                widget.hide()
+                if widget is not self._details_cache and widget is not live and widget not in self._status_headers.values() and widget is not self._navigation_widget:widget.deleteLater()
+    def add(self,widget):
+        target=getattr(self,'_status_body_layout',None) or self.layout
+        target.addWidget(widget);widget.show();return widget
+    def _begin_status_body(self):
+        if self.expanded_height()>=440:return
+        from PySide6.QtWidgets import QScrollArea,QFrame
+        from ui_theme import hide_scrollbars
+        area=hide_scrollbars(QScrollArea(self.content));area.setObjectName('expanded_status_scroll')
+        area.setFrameShape(QFrame.Shape.NoFrame);area.setWidgetResizable(True)
+        area.setStyleSheet('QScrollArea{border:0;background:transparent;}')
+        body=QWidget();body.setObjectName('expanded_status_body');body.setStyleSheet('background:transparent;')
+        layout=QVBoxLayout(body);layout.setContentsMargins(0,0,0,0);layout.setSpacing(0)
+        area.setWidget(body);self.layout.addWidget(area);area.show()
+        self._status_scroll=area;self._status_body_layout=layout
     def label(self,text):
         label=QLabel(text);label.setTextFormat(Qt.TextFormat.PlainText);label.setWordWrap(True);return self.add(label)
     def toggle_details(self):
@@ -482,7 +570,10 @@ class CompactBubble(Bubble):
             self._pending_navigation=('toggle',None);return
         if self.size_transition.running:self._pending_navigation=('toggle',None);self._pending_mode=None;return
         if self.panel_page!='status':self.collapse_to_normal();return
-        self.size_transition.begin();self.expanded=not self.expanded;self.redraw();self.size_transition.commit()
+        self.size_transition.begin();self.expanded=not self.expanded;self._details_navigation=True
+        try:self.redraw()
+        finally:self._details_navigation=False
+        self.size_transition.commit()
     def show_status(self,expanded=True):
         if self.size_transition.running:self._pending_navigation=('status',expanded);self._pending_mode=None;return
         self.size_transition.begin()
@@ -499,8 +590,17 @@ class CompactBubble(Bubble):
         self._editor_origin=None;self._editor_positioned=False;self._manual_grace_until=time.monotonic()+15
         self._editing_flags(False);self.redraw();self.size_transition.commit()
     def collapse_to_normal(self):
-        if self.bubble_mode=='minimal':self.open_normal_from_minimal()
+        if self.bubble_mode=='minimal' or self._edge_compact:self.open_normal_from_minimal()
         else:self.set_mode('auto')
+    def show_explanations(self):
+        from detail_sections import explanation_page
+        if getattr(self,'_explanation_page',None) is None:self._explanation_page=explanation_page(self)
+        self.show_page('help',self._explanation_page)
+        for area in self._explanation_page.findChildren(__import__('PySide6.QtWidgets',fromlist=['QScrollArea']).QScrollArea):area.verticalScrollBar().setValue(0)
+    def _task_layout_changed(self):
+        selected,_=self.roster.selection(self.status_indicator.unread)
+        target=max(1,len(selected))*43+9
+        return self.expanded and self.status_view.full and self.panel_page=='status' and self.isVisible() and self.status_view.height()!=target
     def show_page(self,key,widget):
         if self.size_transition.running:self._pending_navigation=(key,widget);self._pending_mode=None;return
         if self.report:self.report.dismiss()
@@ -513,6 +613,13 @@ class CompactBubble(Bubble):
         if entering:self._editor_positioned=False
         self._editing_flags(True);self.redraw();self.size_transition.commit()
     def _editing_flags(self,editing):
+        owner=self.owner_pet();dialog=getattr(owner,'settings_dialog',None)
+        if dialog is not None:
+            visit=getattr(dialog,'begin_visit' if editing and self.panel_page=='settings' else 'end_visit',None)
+            if visit:visit()
+        if self.panel_page!='settings' and dialog is not None and getattr(dialog,'draft',None) is not None:
+            from theme_registry import THEME_KEYS
+            if getattr(owner,'_theme_preview',None) is not None or any(k in dialog.draft.dirty for k in THEME_KEYS):dialog.end_theme_preview()
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating,not editing)
         if __import__('sys').platform=='darwin':
             from mac_native import set_keyboard_input
@@ -521,35 +628,53 @@ class CompactBubble(Bubble):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents,through)
         if self.windowHandle():self.windowHandle().setFlag(Qt.WindowType.WindowTransparentForInput,through)
     def navigation(self):
+        if self._navigation_widget is not None:
+            toolbar=self._navigation_widget;tabs=self._navigation_segments
+            blocked=tabs.blockSignals(True);tabs.setCurrentIndex(tabs.findData(self.panel_page),False);tabs.blockSignals(blocked)
+            for kind,value in (('pin',self.pinned),('move',self.wandering)):
+                button=toolbar.findChild(QToolButton,'bubble_'+kind)
+                blocked=button.blockSignals(True);button.setChecked(value);button.blockSignals(blocked)
+                button.setFocusPolicy(Qt.FocusPolicy.StrongFocus if self.panel_page!='status' else Qt.FocusPolicy.NoFocus)
+                if kind=='move':
+                    button.setEnabled(not self.movement_locked)
+                    button.setToolTip('移动已锁定，请在设置中解除锁定' if self.movement_locked else '切换桌面自由移动')
+            return toolbar
         from settings_controls import SlidingSegments
-        toolbar=QWidget();toolbar.setObjectName('detail_shortcuts');toolbar.setFixedHeight(32)
-        actions=QHBoxLayout(toolbar);actions.setContentsMargins(0,0,0,0);actions.setSpacing(7)
+        toolbar=QWidget();toolbar.setObjectName('detail_shortcuts');toolbar.setFixedHeight(47)
+        actions=QHBoxLayout(toolbar);actions.setContentsMargins(0,3,0,10);actions.setSpacing(5)
         tabs=SlidingSegments([('状态','status'),('聊天','chat'),('设置','settings')],compact=True)
+        tabs.setFixedHeight(28);tabs.setProperty('largeCardPalette',True);tabs.layout().setSpacing(2)
         tabs.setObjectName('main_navigation');tabs.setCurrentIndex(tabs.findData(self.panel_page),False)
-        for key,b in tabs.buttons.items():b.setObjectName('bubble_'+('details' if key=='status' else key))
+        for key,b in tabs.buttons.items():
+            b.setObjectName('bubble_'+('details' if key=='status' else key))
+            set_theme_style(b,theme_style_source(b).replace('QToolButton:checked{color:#393343;}',f'QToolButton:checked{{color:{PRIMARY};}}'))
         tabs.currentIndexChanged.connect(lambda index:self.return_to_status() if tabs.currentData()=='status' else
             self.chatRequested.emit() if tabs.currentData()=='chat' else self.settingsRequested.emit())
         actions.addWidget(tabs,1);self._navigation_segments=tabs
         for kind,text,tip,key,value in [('pin','置顶','切换始终置顶','on_top',self.pinned),('move','移动','切换桌面自由移动','wandering',self.wandering)]:
-            shortcut=action_button(kind,tip,text,keyboard=self.panel_page!='status');shortcut.setCheckable(True);shortcut.setChecked(value)
+            shortcut=action_button(kind,tip,keyboard=self.panel_page!='status',hit_size=25);shortcut.setCheckable(True);shortcut.setChecked(value)
+            shortcut.setAccessibleName(text);shortcut.setProperty('headerActionHint','置顶' if key=='on_top' else '移动')
             shortcut.toggled.connect(lambda checked,k=key:self.optionRequested.emit(k,checked));actions.addWidget(shortcut)
-            if key=='wandering' and self.movement_locked:shortcut.setEnabled(False);shortcut.setText('已锁定');shortcut.setToolTip('移动已锁定，请在设置中解除锁定')
+            if key=='wandering' and self.movement_locked:shortcut.setEnabled(False);shortcut.setToolTip('移动已锁定，请在设置中解除锁定')
+        self._navigation_widget=toolbar
         return toolbar
     def _redraw_editor(self):
         self._redrawing=True
         self._last_compact_surface=None
-        self.layout.setContentsMargins(10,6,10,6);self.layout.setSpacing(3)
+        self.layout.setContentsMargins(13,9,13,11);self.layout.setSpacing(0)
         if self.layout.indexOf(self.editor_stack)<0:
             if self.details_tabs:self.detail_scroll={key:area.verticalScrollBar().value() for key,area in self.details_tabs.areas.items()}
             self.quota_refresh_button=None;self.reset_refresh_buttons=[];self.token_refresh_buttons=[]
             self.clear();self.details_tabs=None;self.status_view.hide()
-            header=QWidget();header.setFixedHeight(28);row=QHBoxLayout(header);row.setContentsMargins(2,0,0,0)
+            header=QWidget();header.setFixedHeight(27);row=QHBoxLayout(header);row.setContentsMargins(0,0,0,0);row.setSpacing(6)
             row.addWidget(self.status_indicator);self.status_indicator.show()
             self.editor_title=QLabel();row.addWidget(self.editor_title,1)
-            codex=action_button('external','打开 Codex','Codex',keyboard=True);codex.setObjectName('open_codex');codex.clicked.connect(lambda:self.codexRequested.emit());row.addWidget(codex)
-            close=action_button('collapse','收起到正常气泡','收起',keyboard=True);close.clicked.connect(self.collapse_to_normal);row.addWidget(close)
+            codex=action_button('external','打开 Codex',keyboard=True,hit_size=25);codex.setObjectName('open_codex');codex.clicked.connect(lambda:self.codexRequested.emit());row.addWidget(codex)
+            self.editor_codex_button=codex
+            close=action_button('collapse','收起到正常卡片',keyboard=True,hit_size=26);close.clicked.connect(self.collapse_to_normal);row.addWidget(close)
             self.add(header);self.add(self.navigation());self.add(self.editor_stack)
-        self.editor_title.setText('白龙 '+('聊天' if self.panel_page=='chat' else '设置'))
+        self.editor_title.setText('白龙 '+({'chat':'聊天','settings':'设置','help':'使用说明'}.get(self.panel_page,'详情')))
+        self.editor_codex_button.setVisible(self.panel_page=='chat')
         tabs=getattr(self,'_navigation_segments',None)
         if tabs:
             blocked=tabs.blockSignals(True);tabs.setCurrentIndex(tabs.findData(self.panel_page));tabs.blockSignals(blocked)
@@ -558,10 +683,10 @@ class CompactBubble(Bubble):
                 button.setChecked(button.objectName()=='bubble_'+self.panel_page)
             elif button.objectName() in ('bubble_pin','bubble_move'):
                 button.blockSignals(True);button.setChecked(self.pinned if button.objectName()=='bubble_pin' else self.wandering);button.blockSignals(False)
-                if button.objectName()=='bubble_move':button.setEnabled(not self.movement_locked);button.setText('已锁定' if self.movement_locked else '移动')
+                if button.objectName()=='bubble_move':button.setEnabled(not self.movement_locked)
         screen=self.screen() or QApplication.primaryScreen();area=screen.availableGeometry()
         self.content.setFixedWidth(min(EXPANDED_WIDTH,area.width()-24))
-        self.editor_stack.setFixedHeight(max(120,self.expanded_height()-78))
+        self.editor_stack.setFixedHeight(max(120,self.expanded_height()-94))
         self._redrawing=False;self._fit_height()
         owner=self.owner_pet()
         if owner is None or owner.isVisible():self.show()
@@ -580,6 +705,9 @@ class CompactBubble(Bubble):
         self._sync_today_selection()
     def _sync_today_selection(self):
         if self.today_tokens_card:self.today_tokens_card.set_selected(self.dashboard_page=='tokens' and self.token_range=='day')
+        menu=getattr(self.deck,'range_menu',None)
+        if menu:
+            blocked=menu.blockSignals(True);menu.setCurrentIndex(menu.findData(self.token_range));menu.blockSignals(blocked)
     def select_token_range(self,period):
         from token_calendar import TOKEN_RANGES
         if period in TOKEN_RANGES:
@@ -662,6 +790,11 @@ class CompactBubble(Bubble):
         title.setAccessibleName(heading+'；点击打开 Codex')
         header.layout().activate()
     def _refresh_conversation_rows(self):
+        if self.expanded and getattr(self,'_task_count',None) is not None:
+            active=sum(v['state'] in ('thinking','working','responding','waiting') for v in self.roster.items.values())
+            self._task_count.setText(f'{active} 个进行中' if active else '暂无进行中任务')
+            if getattr(self,'_task_dot',None) is not None:self._task_dot.setVisible(bool(active))
+        self.status_view.expanded_row=self.expanded
         if self._speech_text:
             self.status_view.clear_conversations();self.status_view.extra=0;self.status_view.overflow.hide()
             self.status_view.set_status(self._speech_text,self.expanded);return
@@ -677,6 +810,7 @@ class CompactBubble(Bubble):
         else:
             self.status_view.clear_conversations()
             self.status_view.set_status('等待 Codex 新消息' if self.roster.items or self.status_indicator.completion_auto_dismissed else self.status,self.expanded)
+            if self.expanded:self.status_view._set_height(52)
     def refresh_status(self):
         """Keep static cards and chart clocks alive for text-only changes."""
         if self.size_transition.running or self.size_transition.preparing:
@@ -692,51 +826,102 @@ class CompactBubble(Bubble):
         title=getattr(self,'_status_title',None)
         if title is None or not self.status_view.isVisible():
             self.redraw();return
+        if not self.size_transition.preparing and self._task_layout_changed():
+            self.size_transition.begin();self._refresh_conversation_rows();self._fit_height();self.size_transition.commit();return
         self._update_header()
         self._refresh_conversation_rows()
         self.setAccessibleName(self.heading+'；'+self.status)
+    def _details_revision(self):
+        import json
+        snapshot=self.token_snapshot
+        tokens=None if snapshot is None else {key:snapshot.get(key) for key in ('unavailable','all_total','total','partial')}
+        return json.dumps((self.windows,self.quota_caption,tokens,self.reset_snapshot,self.reset_feed_error,self.reset_error_details),sort_keys=True,ensure_ascii=False,default=str)
+    def _status_header(self):
+        header=self._status_headers.get(self.expanded)
+        if header is None:
+            header=QWidget(self.content);header.setObjectName('status_header');header.setFixedHeight(27 if self.expanded else 26);row=QHBoxLayout(header);row.setContentsMargins(0,0,0,0);row.setSpacing(6 if self.expanded else 2)
+            title=QToolButton();title.setObjectName('open_codex');title.setFont(font(12,True))
+            title.setFixedHeight(26)
+            title.setFocusPolicy(Qt.FocusPolicy.NoFocus);title.setCursor(Qt.CursorShape.PointingHandCursor)
+            set_theme_style(title,'QToolButton{'+FONT_CSS+'font-size:12px;color:#75618d;border:0;padding:0;background:transparent;text-align:left;}QToolButton:hover{color:#8b78a6;}')
+            title.setAccessibleName('打开 Codex');title.clicked.connect(lambda:self.codexRequested.emit())
+            self._status_title=title
+            name_group=QWidget();name_group.setObjectName('codex_heading');name_group.setFixedHeight(26)
+            name_row=QHBoxLayout(name_group);name_row.setContentsMargins(0,0,0,0);name_row.setSpacing(2)
+            name_row.addWidget(self.status_indicator);self.status_indicator.show();name_row.addWidget(title)
+            badge=QLabel();badge.setObjectName('codex_active_count');badge.setFixedHeight(18)
+            set_theme_style(badge,FONT_CSS+'font-size:11px;font-weight:500;color:#66517e;background:#eee6f4;border-radius:6px;padding:0;')
+            badge.setAlignment(Qt.AlignmentFlag.AlignCenter);name_row.addWidget(badge);self._status_badge=badge
+            row.addWidget(name_group);row.addStretch(1)
+            self.refresh_button.setFixedSize(26,26);self.quota_refresh_button=self.refresh_button;row.addWidget(self.refresh_button);self.refresh_button.show()
+            report_button=action_button('report','打开 / 收起数据面板',hit_size=26);report_button.setObjectName('bubble_report')
+            report_button.clicked.connect(self.reportRequested.emit);row.addWidget(report_button)
+            compact_target='minimal' if self.bubble_mode=='minimal' or self._edge_compact else 'mini'
+            mini=action_button('compact','收起到极简模式' if compact_target=='minimal' else '收起到胶囊模式',hit_size=26)
+            mini.setObjectName('bubble_compact');mini.clicked.connect(self.compact_requested)
+            if not self.expanded:row.addWidget(mini)
+            else:mini.setParent(header);mini.hide()
+            button=action_button('collapse' if self.expanded else 'details','收起详情' if self.expanded else '展开完整状态、来源与重置说明',hit_size=26)
+            button.setObjectName('bubble_details')
+            button.clicked.connect(self.toggle_details);row.addWidget(button)
+            header._status_parts=(title,name_group,badge,report_button,mini,button)
+            self._status_headers[self.expanded]=header
+        title,name_group,badge,report_button,mini,button=header._status_parts
+        name_group.layout().insertWidget(0,self.status_indicator);self.status_indicator.show()
+        header.layout().insertWidget(2,self.refresh_button);self.refresh_button.show()
+        self.quota_refresh_button=self.refresh_button
+        self._status_title=title;self._status_badge=badge
+        compact_target='minimal' if self.bubble_mode=='minimal' or self._edge_compact else 'mini'
+        mini.setToolTip('收起到极简模式' if compact_target=='minimal' else '收起到胶囊模式')
+        mini.setAccessibleName(mini.toolTip());mini.setVisible(not self.expanded)
+        self._header=header;self._header_actions=[self.refresh_button,report_button,button] if self.expanded else [self.refresh_button,report_button,mini,button]
+        for target,hint in zip(self._header_actions,('刷新','数据','收回') if self.expanded else ('刷新','数据','收起','详情')):
+            target.setProperty('headerActionHint',hint)
+        self.add(header);self._update_header()
     def redraw(self):
         if self.size_transition.running:self.size_transition.deferred=True;return
+        if not self.size_transition.preparing and self._task_layout_changed():
+            self.size_transition.begin();self.redraw();self.size_transition.commit();return
+        # Two size-specific chart decks are reused only across pure expansion
+        # toggles. Any source/option redraw invalidates both before reuse.
+        if not self._details_navigation:
+            for old in self._deck_cache.values():
+                if old is not self.deck:old.deleteLater()
+            self._deck_cache.clear()
+        # Keep at most one prepared details subtree across a pure size toggle.
+        # Only fields used by this subtree and time boundaries invalidate it.
+        # Task/live-rate refreshes must not rebuild unchanged detail widgets.
+        if self._details_cache is not None and (self._details_key!=self._details_revision() or time.time()>=self._details_cache_until):
+            old=self._details_cache;self._details_cache=None
+            if old is not self.details_tabs:old.deleteLater()
         if self.panel_page!='status':self._redraw_editor();return
         if self.is_minimal():self._redraw_minimal();return
         if self.is_island():self._redraw_island();return
         self._last_compact_surface=None
+        self.inline_explanations.preserve_for_rebuild()
         self._redrawing=True
+        old_scroll=getattr(self,'_status_scroll',None)
+        outer_scroll=old_scroll.verticalScrollBar().value() if old_scroll is not None and not self._details_navigation else 0
         if self.details_tabs:
             self.detail_scroll={key:area.verticalScrollBar().value() for key,area in self.details_tabs.areas.items()}
         self.details_tabs=None
-        self.layout.setContentsMargins(10,6,10,6);self.layout.setSpacing(3)
+        self.layout.setContentsMargins(13 if self.expanded else 10,9 if self.expanded else 6,13 if self.expanded else 10,11 if self.expanded else 6);self.layout.setSpacing(0 if self.expanded else 3)
         screen=self.screen() or QApplication.primaryScreen()
         width=min(EXPANDED_WIDTH,screen.availableGeometry().width()-24) if self.expanded else 268
         self.content.setFixedWidth(width)
-        self.status_view.setFixedWidth(width-20)
+        self.status_view.setFixedWidth(width-(26 if self.expanded else 20))
         self.clear();self.quota_refresh_button=None;self.reset_refresh_buttons=[];self.token_refresh_buttons=[]
-        header=QWidget();header.setObjectName('status_header');header.setFixedHeight(28);row=QHBoxLayout(header);row.setContentsMargins(0,0,0,0);row.setSpacing(2)
-        title=QToolButton();title.setObjectName('open_codex');title.setFont(font(12,True))
-        title.setFixedHeight(28)
-        title.setFocusPolicy(Qt.FocusPolicy.NoFocus);title.setCursor(Qt.CursorShape.PointingHandCursor)
-        title.setStyleSheet('QToolButton{'+FONT_CSS+'font-size:12px;color:#393343;border:0;padding:0;background:transparent;text-align:left;}QToolButton:hover{color:#8b78a6;}')
-        title.setAccessibleName('打开 Codex');title.clicked.connect(lambda:self.codexRequested.emit())
-        self._status_title=title
-        name_group=QWidget();name_group.setObjectName('codex_heading');name_group.setFixedHeight(28)
-        name_row=QHBoxLayout(name_group);name_row.setContentsMargins(0,0,0,0);name_row.setSpacing(2)
-        name_row.addWidget(self.status_indicator);self.status_indicator.show();name_row.addWidget(title)
-        badge=QLabel();badge.setObjectName('codex_active_count');badge.setFixedHeight(18)
-        badge.setStyleSheet(FONT_CSS+'font-size:11px;font-weight:500;color:#66517e;background:#eee6f4;border-radius:6px;padding:0;')
-        badge.setAlignment(Qt.AlignmentFlag.AlignCenter);name_row.addWidget(badge);self._status_badge=badge
-        row.addWidget(name_group);row.addStretch(1)
-        self.quota_refresh_button=self.refresh_button;row.addWidget(self.refresh_button);self.refresh_button.show()
-        report_button=action_button('report','打开 / 收起数据面板',hit_size=28);report_button.setObjectName('bubble_report')
-        report_button.clicked.connect(self.reportRequested.emit);row.addWidget(report_button)
-        compact_target='minimal' if self.bubble_mode=='minimal' else 'mini'
-        mini=action_button('compact','收起到极简模式' if compact_target=='minimal' else '收起到胶囊模式',hit_size=28)
-        mini.setObjectName('bubble_compact');mini.clicked.connect(lambda:self.set_mode(compact_target));row.addWidget(mini)
-        button=action_button('collapse' if self.expanded else 'details','收起详情' if self.expanded else '展开完整状态、来源与重置说明',hit_size=28)
-        button.clicked.connect(self.toggle_details);row.addWidget(button);self.add(header)
-        self._header=header;self._header_actions=[self.refresh_button,report_button,mini,button];self._update_header()
+        self._status_header()
         if self.expanded:
             self.add(self.navigation())
-            label=self.label('当前任务');label.setObjectName('detail_status_title');label.setStyleSheet(FONT_CSS+'font-size:11px;color:#706879;margin-top:3px;')
+            self._begin_status_body()
+            caption=QWidget();caption.setObjectName('detail_status_title');caption.setFixedHeight(22)
+            caption_row=QHBoxLayout(caption);caption_row.setContentsMargins(0,0,0,5);caption_row.setSpacing(3)
+            label=QLabel('当前任务');set_theme_style(label,FONT_CSS+'font-size:11px;color:#393343;background:transparent;');caption_row.addWidget(label,1)
+            self._task_dot=QWidget();self._task_dot.setFixedSize(5,5)
+            set_theme_style(self._task_dot,'background:#506e66;border-radius:2px;');caption_row.addWidget(self._task_dot,0,Qt.AlignmentFlag.AlignVCenter)
+            self._task_count=QLabel();set_theme_style(self._task_count,FONT_CSS+'font-size:11px;color:#706879;background:transparent;');caption_row.addWidget(self._task_count)
+            self.add(caption)
         self._refresh_conversation_rows()
         self.add(self.status_view)
         if self.show_quota:
@@ -751,24 +936,51 @@ class CompactBubble(Bubble):
             settings=getattr(self.owner_pet(),'settings',{})
             warning=visible_anomaly(self.token_snapshot,self.windows,decline_threshold=settings.get('quota_decline_threshold',10),
                                    increase_threshold=settings.get('quota_increase_threshold',15))
-            container=QWidget()
-            stack=QVBoxLayout(container);stack.setContentsMargins(0,0,0,0);stack.setSpacing(2)
-            cards=QWidget();row=QHBoxLayout(cards);row.setContentsMargins(0,0,0,0);row.setSpacing(6);stack.addWidget(cards)
-            quota=QuotaSummary(self.windows,self.quota_caption,progress_cache=self._ring_values,anomaly=warning);quota.expand.connect(self.show_quota_details)
+            container=QWidget(self.content)
+            stack=QVBoxLayout(container);stack.setContentsMargins(0,0,0,10 if self.expanded else 0);stack.setSpacing(6 if self.expanded else 2)
+            cards=QWidget(container);row=QHBoxLayout(cards);row.setContentsMargins(0,0,0,0);row.setSpacing(7 if self.expanded else 6);stack.addWidget(cards)
+            quota=QuotaSummary(self.windows,self.quota_caption,parent=cards,progress_cache=self._ring_values,anomaly=warning,expanded=self.expanded);self.quota_summary_card=quota;quota.expand.connect(self.show_quota_details)
             quota.anomalyRequested.connect(self.quotaCompareRequested.emit)
-            cards.setFixedHeight(quota.height());container.setFixedHeight(quota.height()+TodayTokens.HEIGHT+2)
+            cards.setFixedHeight(quota.height());container.setFixedHeight(quota.height()+(40 if self.expanded else TodayTokens.HEIGHT+2))
             quota.resetDue.connect(self._quota_reset_due);row.addWidget(quota,1)
             self.ring_kinds=['quota']*len(quota.items)+['time','tokens']
-            deck=CardDeck(self.dashboard_page,self.token_snapshot,self.reset_snapshot,self.reset_error_details or self.reset_feed_error,self.reset_busy,token_busy=self.token_busy,token_range=self.token_range)
-            deck.reset_details_requested.connect(self.show_reset_details)
+            deck=self._deck_cache.get(self.expanded)
+            if deck is not None and (deck.page!=self.dashboard_page or deck.token_range!=self.token_range):
+                deck.deleteLater();deck=None
+            if deck is None:
+                deck=CardDeck(self.dashboard_page,self.token_snapshot,self.reset_snapshot,self.reset_error_details or self.reset_feed_error,self.reset_busy,parent=cards,token_busy=self.token_busy,token_range=self.token_range,expanded=self.expanded)
+                deck.reset_details_requested.connect(self.show_reset_details)
+                deck.selected.connect(self.select_dashboard)
+                deck.token_range_changed.connect(self.select_token_range)
+                self._deck_cache[self.expanded]=deck
             self.deck=deck
-            deck.selected.connect(self.select_dashboard)
-            deck.token_range_changed.connect(self.select_token_range)
-            row.addWidget(deck,1,Qt.AlignmentFlag.AlignTop);daily=TodayTokens(self.token_snapshot,selected=self.dashboard_page=='tokens' and self.token_range=='day');self.today_tokens_card=daily
-            daily.activated.connect(self.show_today_tokens);stack.addWidget(daily);self.add(container)
+            row.addWidget(deck,1,Qt.AlignmentFlag.AlignTop);deck.show();daily=TodayTokens(self.token_snapshot,parent=container,selected=self.dashboard_page=='tokens' and self.token_range=='day');self.today_tokens_card=daily
+            from live_rate_ui import LiveRateCard
+            footer=QWidget(container);footer.setObjectName('status_footer');footer_row=QHBoxLayout(footer);footer_row.setContentsMargins(0,0,0,0);footer_row.setSpacing(7 if self.expanded else 5)
+            if getattr(self,'live_rate_card',None) is None:self.live_rate_card=LiveRateCard(getattr(self,'live_output_rate',None),footer)
+            else:
+                self.live_rate_card.setParent(footer)
+                self.live_rate_card.set_data(getattr(self,'live_output_rate',self.live_rate_card.value))
+            footer_row.addWidget(self.live_rate_card,1);self.live_rate_card.show()
+            self.live_rate_card.expanded=self.expanded;self.live_rate_card.setFixedHeight(24 if self.expanded else 20)
+            daily.setFixedHeight(24 if self.expanded else TodayTokens.HEIGHT)
+            daily.compact=True;daily.expanded=self.expanded;daily.activated.connect(self.show_today_tokens);footer_row.addWidget(daily,1);stack.addWidget(footer);self.add(container)
             if self.expanded:
                 from detail_sections import DetailsTabs
-                self.details_tabs=DetailsTabs(self);self.add(self.details_tabs)
+                if self._details_cache is None:
+                    # QTabWidget must settle its tab/scrollbar sizing before
+                    # adopting the hidden preparation root. Early parenting
+                    # leaves a narrow tab bar until the first live show.
+                    self._details_cache=DetailsTabs(self);self._details_key=self._details_revision()
+                    now=time.time();due=[(int(now//60)+1)*60]
+                    pending=pending_reset(self.reset_snapshot)
+                    stamps=[w.get('resetsAt') for w in self.windows]+([pending.get('scheduled')] if pending else [])
+                    due.extend(stamp for value in stamps if (stamp:=epoch(value)) is not None and stamp>now)
+                    self._details_cache_until=min(due)
+                self.details_tabs=self._details_cache
+                index=self.details_tabs.keys.index(self.detail_tab) if self.detail_tab in self.details_tabs.keys else 0
+                self.details_tabs._restore_index(index);self.details_tabs._last_index=index
+                self.add(self.details_tabs)
         self._redrawing=False;self._fit_height()
         self.set_quota_busy(self.quota_busy);self.set_reset_busy(self.reset_busy);self.set_token_busy(self.token_busy)
         owner=self.owner_pet()
@@ -778,6 +990,8 @@ class CompactBubble(Bubble):
         if self.details_tabs:
             tabs=self.details_tabs;positions=dict(self.detail_scroll)
             QTimer.singleShot(0,tabs,lambda:tabs.restore_scroll(positions))
+        if getattr(self,'_status_scroll',None) is not None:
+            area=self._status_scroll;QTimer.singleShot(0,area,lambda:area.verticalScrollBar().setValue(outer_scroll))
         self._position_now()
         if self._chart_entry:
             self._chart_entry=False
@@ -800,9 +1014,37 @@ class CompactBubble(Bubble):
     def host_visible(self):
         owner=self.owner_pet()
         return owner is None or (owner.card_surface_visible() if hasattr(owner,'card_surface_visible') else owner.isVisible())
-    def is_minimal(self):return self.panel_page=='status' and not self.expanded and self.bubble_mode=='minimal' and not self._minimal_normal_open
-    def is_compact(self):return self.is_island() or self.is_minimal()
-    def is_island(self):return self.panel_page=='status' and not self.expanded and (self.bubble_mode=='mini' or (self.bubble_mode=='auto' and self.auto_compact))
+    def compact_kind(self,edge=None):
+        if getattr(self,'_drag_compact_kind',None):return self._drag_compact_kind
+        if self.panel_page!='status' or self.expanded:return None
+        edge=self._edge_compact if edge is None else edge
+        if edge:return None if self._minimal_normal_open else 'minimal'
+        if self.bubble_mode=='minimal':return None if self._minimal_normal_open else 'minimal'
+        if self.bubble_mode=='mini':return None if self._minimal_normal_open else 'minimal' if edge else 'mini'
+        if self.bubble_mode=='auto' and self.auto_compact:return 'minimal' if edge else 'mini'
+        return None
+    def is_minimal(self):return self.compact_kind()=='minimal'
+    def is_compact(self):return self.compact_kind() is not None
+    def is_island(self):return self.compact_kind()=='mini'
+    def set_edge_compact(self,value):
+        value=bool(value)
+        if self.size_transition.running or self.size_transition.preparing:
+            self._pending_edge_compact=value;return
+        self._pending_edge_compact=None
+        if self._edge_compact==value:return
+        changed=self.compact_kind()!=self.compact_kind(value)
+        if changed:self.size_transition.begin()
+        self._edge_compact=value
+        if changed:self.redraw();self.size_transition.commit()
+    def _flush_edge_compact(self):
+        if self._pending_edge_compact is not None:self.set_edge_compact(self._pending_edge_compact)
+    def compact_requested(self):
+        if not self._edge_compact:self.set_mode('minimal' if self.bubble_mode=='minimal' else 'mini');return
+        if self.size_transition.running:self._pending_navigation=('dock_compact',None);self._pending_mode=None;return
+        self.size_transition.begin();self.auto_compact=True;self._minimal_normal_open=False
+        self.expanded=False;self.panel_page='status';self._editor_origin=None
+        if self.report:self.report.dismiss()
+        self._editing_flags(False);self.redraw();self.size_transition.commit()
     def set_mode(self,mode):
         if mode not in ('auto','mini','minimal'):raise ValueError('未知的卡片显示模式')
         if self.size_transition.running:self._pending_mode=mode;self._pending_navigation=None;return
@@ -824,7 +1066,7 @@ class CompactBubble(Bubble):
         if mode:self.set_mode(mode);return
         if nav:
             key,value=nav
-            callback=(lambda:self.toggle_details()) if key=='toggle' else self.return_to_status if key=='return' else self.open_normal_from_minimal if key=='minimal_normal' else (lambda:self.show_status(value)) if key=='status' else (lambda:self.show_page(key,value))
+            callback=(lambda:self.toggle_details()) if key=='toggle' else self.return_to_status if key=='return' else self.open_normal_from_minimal if key=='minimal_normal' else self.compact_requested if key=='dock_compact' else (lambda:self.show_status(value)) if key=='status' else (lambda:self.show_page(key,value))
             callback()
     def keyPressEvent(self,event):
         if event.key()==Qt.Key.Key_Escape:
@@ -840,9 +1082,10 @@ class CompactBubble(Bubble):
         if self.codex_open is False:self.codex_open=None
         self.evaluate_mode()
     def evaluate_mode(self,now=None):
+        if getattr(self,'_drag_compact_kind',None):return
         now=time.monotonic() if now is None else now
         if self.panel_page!='status' or self.expanded or (self.report and self.report.requested) or self.size_transition.running:return
-        if self.bubble_mode=='minimal':
+        if self.bubble_mode=='minimal' or self._edge_compact:
             if self._minimal_normal_open and now>=self._manual_grace_until and (now-self.last_task_update>=90 or self.codex_open is False):
                 self.size_transition.begin();self._minimal_normal_open=False;self.redraw();self.size_transition.commit()
             return
@@ -875,18 +1118,20 @@ class CompactBubble(Bubble):
     def _redraw_island(self):
         from island_widgets import StatusIsland,QuotaSatellite,WIDTH,HEIGHT
         self._redrawing=True
-        entering=self._last_compact_surface!='mini';self._last_compact_surface='mini'
+        entering=self._last_compact_surface!='mini'
         if self.details_tabs:self.detail_scroll={key:area.verticalScrollBar().value() for key,area in self.details_tabs.areas.items()}
-        self.clear();self.details_tabs=None;self.status_view.animation.stop();self.status_view.hide()
+        self.clear();self._last_compact_surface='mini';self.details_tabs=None;self.status_view.animation.stop();self.status_view.hide()
         self.quota_refresh_button=None;self.reset_refresh_buttons=[];self.token_refresh_buttons=[]
-        self.layout.setContentsMargins(0,2,0,2);self.layout.setSpacing(0)
-        self.content.setFixedWidth(WIDTH if self.show_quota else WIDTH-45)
-        cluster=QWidget();cluster.setFixedHeight(40);row=QHBoxLayout(cluster);row.setContentsMargins(0,0,0,0);row.setSpacing(5)
-        circle_style='QToolButton{border:0;border-radius:20px;background:#fcfafc;}QToolButton:hover{background:#eee8f3;}QToolButton:pressed{background:#e4dbea;}'
+        self.layout.setContentsMargins(0,0,0,0);self.layout.setSpacing(0)
+        self.content.setFixedWidth(WIDTH if self.show_quota else WIDTH-43)
+        cluster=QWidget();cluster.setFixedHeight(HEIGHT);row=QHBoxLayout(cluster);row.setContentsMargins(0,0,0,0);row.setSpacing(5)
+        circle_style='QToolButton{border:0;border-radius:19px;background:#302a3c;}QToolButton:hover{background:#494052;}QToolButton:pressed{background:#302a3c;}'
         from quick_actions import action_info
         key,title,icon=action_info(self.capsule_action)
-        shortcut=action_button(icon,title,keyboard=True);shortcut.setObjectName('island_shortcut');shortcut.setFixedSize(40,40);shortcut.setIconSize(QSize(18,18))
-        shortcut.setStyleSheet(circle_style+'QToolButton:focus{border:0;background:#eee8f3;}')
+        shortcut=action_button(icon,title,keyboard=True);shortcut.setObjectName('island_shortcut');shortcut.setFixedSize(38,38);shortcut.setIconSize(QSize(18,18))
+        shortcut.setProperty('themeIconIsland',True)
+        if icon!='refresh':shortcut.setIcon(action_icon(icon,island=True))
+        set_theme_style(shortcut,circle_style+'QToolButton:focus{border:0;background:#eee8f3;}')
         shortcut.clicked.connect(self.shortcutRequested.emit);row.addWidget(shortcut);self.shortcut_button=shortcut
         if key=='refresh':shortcut.set_busy(self.refresh_busy)
         self.status_indicator.set_island(True);self.island=StatusIsland(self.status_indicator)
@@ -898,6 +1143,7 @@ class CompactBubble(Bubble):
         if self.show_quota:
             quota=QuotaSatellite(self.windows,self.quota_caption);quota.clicked.connect(self.toggle_details)
             if entering:quota.begin_reveal()
+            else:self._restore_quota_reveal(quota,'mini')
             quota.resetDue.connect(self._quota_reset_due);row.addWidget(quota)
         self.add(cluster);self._redrawing=False;self._fit_height()
         owner=self.owner_pet()
@@ -907,16 +1153,27 @@ class CompactBubble(Bubble):
         if self.show_quota and entering and not self.size_transition.preparing and not self.size_transition.running:
             QTimer.singleShot(0,quota,quota.start_reveal)
         self._position_now()
+    def _restore_quota_reveal(self,widget,kind):
+        from settings_controls import motion_enabled
+        if not motion_enabled():widget.reveal.prepare();return
+        state=getattr(self,'_quota_reveal_state',None)
+        if not state or state[0]!=kind:return
+        _,pending,progress,elapsed,running=state
+        if pending:widget.begin_reveal()
+        elif running:
+            widget.reveal.progress=progress;widget._reveal_resume_ms=elapsed
+        else:widget.reveal.progress=progress
     def _redraw_minimal(self):
         from island_widgets import MinimalQuota
         self._redrawing=True
-        entering=self._last_compact_surface!='minimal';self._last_compact_surface='minimal'
-        self.clear();self.details_tabs=None;self.status_view.animation.stop();self.status_view.hide()
+        entering=self._last_compact_surface!='minimal'
+        self.clear();self._last_compact_surface='minimal';self.details_tabs=None;self.status_view.animation.stop();self.status_view.hide()
         self.quota_refresh_button=None;self.reset_refresh_buttons=[];self.token_refresh_buttons=[]
         self.layout.setContentsMargins(0,0,0,0);self.layout.setSpacing(0);self.content.setFixedWidth(54)
         self.minimal_quota=MinimalQuota(self.windows,self.quota_caption,self)
         self.minimal_quota.clicked.connect(self.open_normal_from_minimal);self.minimal_quota.resetDue.connect(self._quota_reset_due)
         if entering:self.minimal_quota.begin_reveal()
+        else:self._restore_quota_reveal(self.minimal_quota,'minimal')
         self.add(self.minimal_quota);self._redrawing=False;self._fit_height()
         if self.enabled and self.host_visible():self.show()
         elif self.host_visible():self.size_transition.dismiss()
@@ -957,13 +1214,36 @@ class CompactBubble(Bubble):
         wanted=margins.top()+margins.bottom()+self.layout.spacing()*max(0,self.layout.count()-1)
         for i in range(self.layout.count()):
             widget=self.layout.itemAt(i).widget();widget.ensurePolished()
+            if widget is self.details_tabs:
+                # Detail size hints include inactive pages. Never feed a long
+                # notice or the previously expanded height back into prefix.
+                wanted+=widget.height();continue
             h=widget.heightForWidth(inner) if widget.hasHeightForWidth() else widget.sizeHint().height()
             wanted+=min(widget.maximumHeight(),max(widget.minimumSizeHint().height(),h,widget.minimumHeight()))
         owner=self.owner_pet()
-        if self.details_tabs:
-            old=self.details_tabs.height();height=max(120,self.expanded_height()-(wanted-old))
-            self.details_tabs.setFixedHeight(height);wanted+=height-old
-        if self.content.height()!=max(40,wanted):self.content.setFixedHeight(max(40,wanted))
+        if self.panel_page!='status':
+            # Editor pages keep the pre-adaptation fixed height. Status detail
+            # measurements must never size a conversation or settings form.
+            self.editor_stack.setFixedHeight(max(120,self.expanded_height()-94))
+            wanted=self.expanded_height()
+        elif getattr(self,'_status_scroll',None) is not None:
+            # Header/navigation stay fixed. The body scrolls within the space
+            # actually available instead of enlarging the native window.
+            height=max(80,self.expanded_height()-94)
+            self._status_scroll.setFixedHeight(height);wanted=self.expanded_height()
+            if self.details_tabs:self.details_tabs.setFixedHeight(170)
+        elif self.details_tabs:
+            old=self.details_tabs.height();prefix=wanted-old
+            baseline=self.details_tabs.content_height(1,inner)
+            requested=self.details_tabs.content_height(self.details_tabs.currentIndex(),inner)
+            screen=self.screen() or QApplication.primaryScreen();limit=screen.availableGeometry().height()-24
+            owner=self.owner_pet()
+            if owner and not getattr(owner,'settings',{}).get('panel_detached') and getattr(owner,'settings',{}).get('character_visible',True):
+                area=screen.availableGeometry();limit=min(limit,max(320,max(owner.y()-area.top()-8,area.bottom()-owner.y()-owner.height()-7)))
+            height=max(60,min(max(baseline,requested),limit-prefix))
+            self.details_tabs.setFixedHeight(height);wanted=prefix+height
+        minimum=38 if self.is_island() else 40
+        if self.content.height()!=max(minimum,wanted):self.content.setFixedHeight(max(minimum,wanted))
         self.setAccessibleName(self.heading+'；'+self.status)
         self._sync_scale_host()
         if not self.size_transition.preparing and self.size()!=self.visual_size():self.setFixedSize(self.visual_size())
@@ -972,10 +1252,13 @@ class CompactBubble(Bubble):
         if self.size_transition.running or self.size_transition.preparing or self.size_transition.landing.image is not None:return
         owner=self.owner_pet()
         if owner and getattr(owner,'enhanced_ready',False):owner.position_bubble()
-    def content_geometry(self,size=None):
+    def content_geometry(self,size=None,docked=True):
         owner=self.owner_pet();size=self.visual_size() if size is None else size
         if owner is None:return QRectF(self.x(),self.y(),size.width(),size.height()).toRect()
         if hasattr(owner,'card_geometry') and (owner.settings.get('panel_detached') or not owner.settings.get('character_visible',True)):return owner.card_geometry(size)
+        edge=getattr(owner,'edge_dock',None)
+        if docked and edge and self.is_minimal() and (edge.active or edge.amount>0):
+            return edge.card_geometry(size,edge.target_amount if self.size_transition.preparing else None)
         screen=QApplication.screenAt(owner.frameGeometry().center()) or QApplication.primaryScreen();area=screen.availableGeometry()
         if self.panel_page!='status' and self._editor_positioned:x,y=self.x(),self.y()
         else:
@@ -996,7 +1279,7 @@ class CompactBubble(Bubble):
         p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source);p.fillRect(self.rect(),Qt.GlobalColor.transparent)
         p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
         if not self.isVisible() or self.is_compact() or self.size_transition.canvas_morph or self.size_transition.preparing:return
-        p.setBrush(QColor('#fcfafc'));p.setPen(QPen(QColor('#e0d9e6'),1))
+        p.setBrush(QColor(theme_color('#fcfafc')));p.setPen(QPen(QColor(theme_color('#e0d9e6')),1))
         p.drawRoundedRect(QRectF(self.rect()).adjusted(.5,.5,-.5,-.5),PANEL_RADIUS*self.ui_scale,PANEL_RADIUS*self.ui_scale)
     def resizeEvent(self,event):
         super().resizeEvent(event)
@@ -1008,6 +1291,10 @@ class CompactBubble(Bubble):
     def showEvent(self,event):
         super().showEvent(event)
         if not self.size_transition.running and not self.size_transition.preparing:self.content.show()
+        if not self.size_transition.running and not self.size_transition.preparing:
+            from island_widgets import QuotaSatellite
+            for widget in self.content.findChildren(QuotaSatellite):
+                if widget.isVisibleTo(self.content):widget.begin_reveal();QTimer.singleShot(0,widget,widget.start_reveal)
         self._editing_flags(self.panel_page!='status')
     def message(self,text,*,speech=False):
         self.is_quota_result=False;self.status=clean_text(text,180)

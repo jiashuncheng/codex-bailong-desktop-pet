@@ -14,11 +14,11 @@ class QuickDeploymentTests(unittest.TestCase):
  def existing(self):
   version='0.6.25-test';exe=self.root/'versions'/version/'BailongEnhanced.exe';exe.parent.mkdir(parents=True);exe.write_bytes(b'test')
   installer.write_manifest(dict(current=version,versions=[version]),self.root);return exe
- def test_new_install_enables_startup_and_upgrade_retains_disabled(self):
-  self.assertTrue(installer.startup_preference(self.root));self.existing();self.assertFalse(installer.startup_preference(self.root))
+ def test_new_install_requires_startup_opt_in_and_upgrade_retains_disabled(self):
+  self.assertFalse(installer.startup_preference(self.root));self.existing();self.assertFalse(installer.startup_preference(self.root))
  def test_enabled_startup_is_preserved_and_corrupt_existing_registration_is_repaired(self):
-  exe=self.existing();vbs=self.startup/'BailongEnhanced.vbs';vbs.write_text(str(exe),encoding='utf-16');self.assertTrue(installer.startup_preference(self.root))
-  vbs.write_bytes(b'broken');self.assertTrue(installer.startup_preference(self.root))
+  exe=self.existing();vbs=self.startup/'BailongEnhanced.vbs';vbs.write_text('Set s=CreateObject("WScript.Shell")\ns.Run """'+str(exe)+'""",0,False\n',encoding='utf-16');self.assertTrue(installer.startup_preference(self.root))
+  vbs.write_bytes(b'broken');self.assertFalse(installer.startup_preference(self.root));self.assertEqual(vbs.read_bytes(),b'broken')
  def test_maintenance_never_runs_automatic_deployment(self):
   self.assertTrue(installer.quick_mode([],Path('白龙桌宠-一键部署.exe')))
   self.assertTrue(installer.quick_mode(['--quick'],Path('renamed.exe')))
@@ -35,7 +35,9 @@ class QuickDeploymentTests(unittest.TestCase):
   old=self.root/'old/BailongEnhanced.exe'
   with patch.object(installer,'stop_existing',return_value=old),patch.object(installer,'install',side_effect=OSError('bad payload')),patch.object(installer.subprocess,'Popen') as launch:
    with self.assertRaises(OSError):installer.deploy(Path('payload.zip'),True,self.root)
-   launch.assert_called_once_with([str(old)],cwd=str(old.parent),creationflags=0x08000000)
+   launch.assert_called_once();self.assertEqual(launch.call_args.args[0],[str(old)])
+   self.assertEqual(launch.call_args.kwargs['cwd'],str(old.parent))
+   self.assertEqual(launch.call_args.kwargs['env']['PYINSTALLER_RESET_ENVIRONMENT'],'1')
  def test_unrelated_process_with_same_filename_is_never_stopped(self):
   exe=self.existing();owned=Mock();owned.info={'exe':str(exe)};owned.cmdline.return_value=[str(exe)];other=Mock();other.info={'exe':str(self.root/'unrelated/BailongEnhanced.exe')}
   with patch('psutil.process_iter',return_value=[other,owned]),patch('psutil.wait_procs',return_value=([owned],[])) as wait,patch.object(installer.subprocess,'run') as run:
@@ -64,6 +66,15 @@ class QuickDeploymentTests(unittest.TestCase):
   with patch.object(installer,'read_manifest',return_value={'current':''}),patch.object(installer,'startup_preference',return_value=False),patch.object(installer.QTimer,'singleShot') as schedule:
    window=installer.Installer(quick=True)
    self.assertTrue(window.install_button.isEnabled());self.assertTrue(window.browse.isEnabled());schedule.assert_not_called()
+   window.close();window.deleteLater();APP.processEvents()
+
+ def test_fresh_program_installer_waits_and_passes_explicit_startup_choice(self):
+  from program_update_apply import ProgramInstaller
+  with patch.object(installer,'read_manifest',return_value={'current':''}),patch.object(installer,'startup_preference',return_value=False),patch.object(installer.QTimer,'singleShot') as schedule,patch('program_update_apply.ProgramApplyJob') as job:
+   window=ProgramInstaller(Path('staged-program'))
+   schedule.assert_not_called();self.assertFalse(window.startup.isChecked());self.assertFalse(window.startup.isHidden())
+   window.startup.setChecked(True);window.start()
+   self.assertTrue(job.call_args.kwargs['startup'])
    window.close();window.deleteLater();APP.processEvents()
 
 if __name__=='__main__':unittest.main()

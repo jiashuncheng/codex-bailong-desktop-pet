@@ -1,0 +1,341 @@
+{
+  "schema": 1,
+  "default": "light",
+  "tiers": {
+    "light": {
+      "id": "8849481e60e0b3f2314ec6a0",
+      "resolution": 512,
+      "files": [
+        {
+          "path": "quality-v1/drag.webp",
+          "bytes": 20436020,
+          "sha256": "60ef68b94d561e204f3aca2625328ddf27d37f3c69d8ce62ded55da2c9b8779b"
+        },
+        {
+          "path": "quality-v1/idle.webp",
+          "bytes": 21635842,
+          "sha256": "d802347d66ed2f4609fba74abc66381fc91ef5575311273ea5e486c014e4bff8"
+        },
+        {
+          "path": "quality-v1/idle2.webp",
+          "bytes": 22227406,
+          "sha256": "5685d56dd150ba84db1c2b8f7a3b4edd75fe82cda34cc850b784f34ecdf24b9a"
+        },
+        {
+          "path": "quality-v1/landing.webp",
+          "bytes": 11616070,
+          "sha256": "c146edd1c243c7ca880d60724e25d98e093df60d667d199744e8b8ccb7f17200"
+        },
+        {
+          "path": "quality-v2/01.webp",
+          "bytes": 22458836,
+          "sha256": "d2ab0ae370bcf05cfbc2b0ec4c4cfb9a57e3097d018e765a513dbec886d5f534"
+        },
+        {
+          "path": "quality-v2/04.webp",
+          "bytes": 23429124,
+          "sha256": "06a7bd07f1f3a667c54c11d1662997468e4f43d833f1c78faf4f4a099c50f0bf"
+        },
+        {
+          "path": "quality-v2/05.webp",
+          "bytes": 22511114,
+          "sha256": "3bdd6b4a7e0c0b33d070f21e92c820ff293683f76eacc69e659c981bc765c314"
+        },
+        {
+          "path": "quality-v2/08.webp",
+          "bytes": 23350640,
+          "sha256": "fdfaf3ce85431cda3f7d1acbb899ceb8a47612d0e3c96fd54f69daeac3615be8"
+        },
+        {
+          "path": "quality-v2/09.webp",
+          "bytes": 21911642,
+          "sha256": "2b025984286f28c044aeb8eff6bc271b800afe03c37c592d52238e6c96b16c3b"
+        },
+        {
+          "path": "quality-v2/13.webp",
+          "bytes": 22204584,
+          "sha256": "3557a50407885f58e7733256759c19f563a54919e607da14ca366cc2712c613d"
+        },
+        {
+          "path": "quality-v2/14.webp",
+          "bytes": 22776712,
+          "sha256": "f7e80672535ae7f6569a8b23c3b0f5a49953f9895414618ea8fc06350e45efa3"
+        },
+        {
+          "path": "quality-v2/18.webp",
+          "bytes": 23870662,
+          "sha256": "9bdc763a421e0aa3485527861d7bcfbcb86d16ace7b4f097e24750c34990eaeb"
+        },
+        {
+          "path": "quality-v2/22.webp",
+          "bytes": 23745568,
+          "sha256": "f417671b67c3c6807f4c5c2a96f9bd304de29cae52e371dcab5f84b3cb34c192"
+        },
+        {
+          "path": "quality-v2/25.webp",
+          "bytes": 23298342,
+          "sha256": "6ffdfffd62c8790e86e727e9c68d3d93d5d241541f2699e0f68ae59be22f335a"
+        },
+        {
+          "path": "quality-v2/quota.webp",
+          "bytes": 22714708,
+          "sha256": "c90e2d98615de75216f918cf6dc28feca4e0051cad4b19211d4e546743a3837f"
+        },
+        {
+          "path": "quality-v3/17.webp",
+          "bytes": 28614864,
+          "sha256": "81efd459640dd8c79cc8b56dc2907f5a937436348d89f559330447b4141851f2"
+        },
+        {
+          "path": "quality-v3/20.webp",
+          "bytes": 22575846,
+          "sha256": "0bd721d1ece6f6f95e481e59b74c20493d2dbb51a5a29830e9650ce06d076cab"
+        },
+        {
+          "path": "quality-v3/21.webp",
+          "bytes": 24666558,
+          "sha256": "64acd2cee4e6c5b2d20e9ba7bbd5d4e03637a5a3f9bf2f50f87b4adbb7d842a4"
+        },
+        {
+          "path": "quality-v3/24.webp",
+          "bytes": 35210802,
+          "sha256": "0b7f9d480c9a4b6bc7ba71d60242559456c05626326d8dae3fb6adf4df4e5169"
+        },
+        {
+          "path": "quality-v3/26.webp",
+          "bytes": 25590636,
+          "sha256": "6194ea0a57c75c0eac97dc17c243eb97bfe08553bbaffef7a8408ba86d91a4c5"
+        },
+        {
+          "path": "quality-v3/work01.webp",
+          "bytes": 23891026,
+          "sha256": "6c6d3ebe2ee5c195353e3715cdb7432afd8ace395f205de3326ec2091c3b5f8a"
+        },
+        {
+          "path": "quality-v3/work02.webp",
+          "bytes": 33985560,
+          "sha256": "76bb9f7eb77d29671887add3db8da1877d6a4ea6638516b5c5b0b15508925ec1"
+        },
+        {
+          "path": "quality-v3/work03.webp",
+          "bytes": 30131498,
+          "sha256": "3b9651f905cfd131d9678fda168746676f79b20cce4b1e8f31347d3498ee1b6a"
+        },
+        {
+          "path": "quality-v3/work04.webp",
+          "bytes": 28908142,
+          "sha256": "6948b1ee433d1ffa6203932a1516337d361f44d186594414d3d3f4fc3d2c0b87"
+        },
+        {
+          "path": "quality-v3/work05.webp",
+          "bytes": 23446662,
+          "sha256": "ba9ddc5662190339ac695f759f332f03d44769e6fb8a899bddb5282326fa0dec"
+        },
+        {
+          "path": "quality-v5/work02-seam-0.webp",
+          "bytes": 1751658,
+          "sha256": "469421f15a7c308633ca311c0bc6edf55e12f1927ffc6e691cd15ea22a73670c"
+        },
+        {
+          "path": "quality-v5/work02-seam-1.webp",
+          "bytes": 2480450,
+          "sha256": "8c2782c33e518b7d28bdba05e052135b672b56b8c4621e8f431b3086ecd50011"
+        },
+        {
+          "path": "quality-v5/work02-seam-2.webp",
+          "bytes": 2145848,
+          "sha256": "f868afb7d696fba35dfae940f4ac0dc829d006d0286e68bfeffe2c907b5f8ffd"
+        },
+        {
+          "path": "quality-v5/work04-seam-0.webp",
+          "bytes": 1762860,
+          "sha256": "f64e4fabfaa5dd2f3dac8f963f4f37635861fc142a885d62f6c28ad316b8a9b2"
+        },
+        {
+          "path": "quality-v5/work04-seam-1.webp",
+          "bytes": 2522804,
+          "sha256": "c37589d2a2dee6d1bdd8b46a6dc0941f8e892105aedc91257351ee2072f39ec6"
+        },
+        {
+          "path": "quality-v5/work04-seam-2.webp",
+          "bytes": 2147998,
+          "sha256": "799a86014a49bf6d5acb38824aaae9a448078013a018cefa2b4fd7b1b22259ae"
+        },
+        {
+          "path": "素材清单.json",
+          "bytes": 17157,
+          "sha256": "fe91d24c6bfa87304c21e41eb7139569eb0864a17e1ca5f9fea5d3e5f5f46ead"
+        }
+      ],
+      "bytes": 618037639
+    },
+    "hd": {
+      "id": "934269f1c8e31be56d0a78d2",
+      "resolution": 720,
+      "files": [
+        {
+          "path": "quality-v1/drag.webp",
+          "bytes": 36795814,
+          "sha256": "85e5bf0b42be76ea136f28afdb33b2d644efd6fccdf1d5bbf444bb6c9eec4e75"
+        },
+        {
+          "path": "quality-v1/idle.webp",
+          "bytes": 34118940,
+          "sha256": "98ab2d9c1f53a32fd0d630d4c6bfa527b8d083ec757710fe792bea3b93fbc5bc"
+        },
+        {
+          "path": "quality-v1/idle2.webp",
+          "bytes": 39577090,
+          "sha256": "0f837014cfe485a58e2013fdc4f3f67c6da1c3d000a6357e944f4a00f2bcc079"
+        },
+        {
+          "path": "quality-v1/landing.webp",
+          "bytes": 20916148,
+          "sha256": "96e7ad9b86baa063b7f22c10931e9c6286ff996176a243bc476e91ea925e3be4"
+        },
+        {
+          "path": "quality-v2/01.webp",
+          "bytes": 39560586,
+          "sha256": "b1ab61ead72d2b620886d06b60497d183fa020a1e14495802575983253d7cb68"
+        },
+        {
+          "path": "quality-v2/04.webp",
+          "bytes": 41449170,
+          "sha256": "4d6e54237617a5f918689759b550e456e90d637708325fbf2b7bf7f6ed8a29ae"
+        },
+        {
+          "path": "quality-v2/05.webp",
+          "bytes": 39920220,
+          "sha256": "a9cd36a0c154979f2dc1439fe90d0b9dbb3d933dfacfb81557fd8d9f4ac50dbb"
+        },
+        {
+          "path": "quality-v2/08.webp",
+          "bytes": 41553318,
+          "sha256": "2fae23caf68fbeafe66d0f3473c396c8a1c4d249873f837c1f4e336ae5bb1dcb"
+        },
+        {
+          "path": "quality-v2/09.webp",
+          "bytes": 38475280,
+          "sha256": "645f07b3f954ff99d83816017239d91581fe5e901606dfd01f54d1e142e92572"
+        },
+        {
+          "path": "quality-v2/13.webp",
+          "bytes": 39450130,
+          "sha256": "7fca0142400214d2c1480d033a9ea46450110f08191dd721948e5a540128846a"
+        },
+        {
+          "path": "quality-v2/14.webp",
+          "bytes": 39876934,
+          "sha256": "9f5282f2a4a649b2787b66d28157e3c73cc80034a66352a02ef5dab9569b505a"
+        },
+        {
+          "path": "quality-v2/18.webp",
+          "bytes": 41912346,
+          "sha256": "714929ae1e67a21ad36e10d5355878f16da075d6f788b53f2933bb90b1d0f6e4"
+        },
+        {
+          "path": "quality-v2/22.webp",
+          "bytes": 42365496,
+          "sha256": "764f64f6bc9518667bea10821a07588a7a128de14f57ef6aa14577b1eaae04ac"
+        },
+        {
+          "path": "quality-v2/25.webp",
+          "bytes": 40795340,
+          "sha256": "6d0f4986e1ea04887d403caef565d9d31af59c7e9c4ed800ef26a9b347fa2578"
+        },
+        {
+          "path": "quality-v2/quota.webp",
+          "bytes": 40303870,
+          "sha256": "ff93bb6031b4fb41775898659dc9193379b0bd52bb6a4f595ac37ffa3ef5a7ed"
+        },
+        {
+          "path": "quality-v3/17.webp",
+          "bytes": 50240824,
+          "sha256": "3640ef7c47bc75876d00f8cc7df7f6416b780657eaa30f32f815caed197e2305"
+        },
+        {
+          "path": "quality-v3/20.webp",
+          "bytes": 39382468,
+          "sha256": "f4f6161e1aabc51576cfb603b8b8eb84bacc53a18015ce3aafd48dd8e0d480bd"
+        },
+        {
+          "path": "quality-v3/21.webp",
+          "bytes": 43504706,
+          "sha256": "afeab5014df2497474fea2dba636fa6bf3082c3c99df93724c5d6cd8e10e160c"
+        },
+        {
+          "path": "quality-v3/24.webp",
+          "bytes": 60944538,
+          "sha256": "2c1d1f5d11bbee727e1f32bd9ac58b99f2a6bea928c445e45a0e77edd284e479"
+        },
+        {
+          "path": "quality-v3/26.webp",
+          "bytes": 44582274,
+          "sha256": "f81b9600b757e2d04dfea9e09196f8e5b5506d5858ece76627dcac6655ebdf6c"
+        },
+        {
+          "path": "quality-v3/work01.webp",
+          "bytes": 41856472,
+          "sha256": "ab7d4e1e5f5da889749d5a43b2ac2420e34d6a1ade30d4fe2e2618018aa17579"
+        },
+        {
+          "path": "quality-v3/work02.webp",
+          "bytes": 60131364,
+          "sha256": "8f091ea98018cb69bde0b9e577f3139dceb6ce6768ea84751d61e55b5d5824b6"
+        },
+        {
+          "path": "quality-v3/work03.webp",
+          "bytes": 52170172,
+          "sha256": "9619384653fa50e6818171eb30a53d3bc62087f088a14d4115a1bf0371e8b4ed"
+        },
+        {
+          "path": "quality-v3/work04.webp",
+          "bytes": 50198672,
+          "sha256": "ff6f6eb164024fd89f576b2461dec7590de259160caa1d743173dd25af207283"
+        },
+        {
+          "path": "quality-v3/work05.webp",
+          "bytes": 40808752,
+          "sha256": "f88bfde4430fee1549cbeba34a6cb111debc2b4b961037f1ec32f9aa6b8ca3ff"
+        },
+        {
+          "path": "quality-v5/work02-seam-0.webp",
+          "bytes": 3006744,
+          "sha256": "857aceb6f32634365488e09cebe239fce1d494d90273cc0b08c7f2a1ed60e43a"
+        },
+        {
+          "path": "quality-v5/work02-seam-1.webp",
+          "bytes": 4327494,
+          "sha256": "8ae683c41791e0fdad0ad45f55106d950f8d08877afc28b752ec0976d1b0b1c5"
+        },
+        {
+          "path": "quality-v5/work02-seam-2.webp",
+          "bytes": 3714198,
+          "sha256": "dada51daafc4da93073232635de8e76848587773d03b2fece54062c91e87a7c2"
+        },
+        {
+          "path": "quality-v5/work04-seam-0.webp",
+          "bytes": 3099976,
+          "sha256": "17d0dae31200f41d205380e3f5effd8f6d2b13fe8b3a3ce2b1a0eefe1d3bb418"
+        },
+        {
+          "path": "quality-v5/work04-seam-1.webp",
+          "bytes": 4423346,
+          "sha256": "f906aa83fd10ea59ff2c5e9b49e4c41d72f95860056c14894c1f34e8a175662c"
+        },
+        {
+          "path": "quality-v5/work04-seam-2.webp",
+          "bytes": 3788290,
+          "sha256": "9f82cc558f12949177ac7a81ca7efce149f68d4a1207c908b8f536af54a6f2e2"
+        },
+        {
+          "path": "素材清单.json",
+          "bytes": 17157,
+          "sha256": "fe91d24c6bfa87304c21e41eb7139569eb0864a17e1ca5f9fea5d3e5f5f46ead"
+        }
+      ],
+      "bytes": 1083268129,
+      "url": "https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/download/materials-934269f1c8e31be56d0a78d2/bailong-hd-934269f1c8e31be56d0a78d2.zip"
+    }
+  }
+}

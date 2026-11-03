@@ -87,6 +87,21 @@ class StartupTests(unittest.TestCase):
         self.assertFalse(gate.observe(set()));self.assertFalse(gate.observe(set()))
         self.assertTrue(gate.observe({(30,345.)}));self.assertFalse(gate.observe({(30,345.)}))
         self.assertTrue(gate.observe({(40,456.)})) # restart entirely between samples
+    def test_listener_survives_close_reopen_and_transient_io_failure(self):
+        kernel=Mock();kernel.CreateMutexW.return_value=123
+        reads=[{(10,1.)},OSError('transient'),set(),set(),{(20,2.)}]
+        with patch.object(cs.ctypes,'WinDLL',return_value=kernel),patch.object(cs.ctypes,'get_last_error',return_value=0),patch.object(cs,'enabled',side_effect=[True]*5+[False]),patch.object(cs,'install_root',return_value=self.root),patch.object(cs,'current_command',return_value=['pet.exe']),patch.object(cs,'desktop_sessions',side_effect=reads),patch.object(cs,'spawn') as launch,patch.object(cs.time,'sleep'):
+            self.assertEqual(cs.main(),0)
+        self.assertEqual(launch.call_count,2)
+        self.assertTrue(all(c.args[0]==['pet.exe','--from-codex'] for c in launch.call_args_list))
+        state=cs.read_json(cs.data_dir()/'codex-watch-state.json')
+        self.assertTrue(state['codex_open']);self.assertNotIn('error',state)
+        kernel.CloseHandle.assert_called_once_with(123)
+    def test_listener_retries_failed_state_write_without_relaunching_pet(self):
+        kernel=Mock();kernel.CreateMutexW.return_value=123
+        with patch.object(cs.ctypes,'WinDLL',return_value=kernel),patch.object(cs.ctypes,'get_last_error',return_value=0),patch.object(cs,'enabled',side_effect=[True,True,False]),patch.object(cs,'install_root',return_value=self.root),patch.object(cs,'current_command',return_value=['pet.exe']),patch.object(cs,'desktop_sessions',return_value={(10,1.)}),patch.object(cs,'spawn') as launch,patch.object(cs,'atomic',side_effect=[OSError('locked'),None]) as write,patch.object(cs.time,'sleep'):
+            self.assertEqual(cs.main(),0)
+        self.assertEqual(write.call_count,2);launch.assert_called_once()
     def test_desktop_detector_excludes_cli_chatgpt_only_and_helpers(self):
         def process(pid,path,args):
             p=Mock(pid=pid,info={'name':Path(path).name});p.exe.return_value=path;p.cmdline.return_value=args;p.create_time.return_value=100.;return p
@@ -98,7 +113,7 @@ class StartupTests(unittest.TestCase):
     def test_enable_disable_registration_and_failed_spawn_are_reversible(self):
         exe=self.root/'versions/0.8.1-test/BailongEnhanced.exe'
         with patch.object(cs,'spawn') as launch:
-            cs.configure(True,exe);self.assertTrue(cs.enabled());self.assertIn('--watch-codex',cs.startup_path().read_text(encoding='utf-16'))
+            cs.configure(True,exe);self.assertTrue(cs.enabled());self.assertIn('--watch-codex',__import__('windows_entries').read_shortcut(cs.startup_path())['arguments'])
             launch.assert_called_once_with([str(exe),'--watch-codex'])
             cs.configure(False,exe);self.assertFalse(cs.enabled());self.assertFalse(cs.startup_path().exists())
         before=cs.preference_path().read_bytes()
@@ -108,12 +123,13 @@ class StartupTests(unittest.TestCase):
         cs.atomic(cs.preference_path(),{'enabled':True})
         cs.register(self.root/'versions/0.8.1-test/BailongEnhanced.exe')
         cs.register(self.root/'versions/0.8.2-test/BailongEnhanced.exe')
-        self.assertIn('0.8.2-test',cs.startup_path().read_text(encoding='utf-16'))
+        self.assertIn('0.8.2-test',__import__('windows_entries').read_shortcut(cs.startup_path())['target'])
         cs.register(self.root/'versions/0.8.0-test/BailongEnhanced.exe');self.assertFalse(cs.startup_path().exists())
     def test_launch_drops_stale_installer_nonce(self):
         with patch.dict(os.environ,BAILONG_DEPLOY_TOKEN='private',BAILONG_DEPLOY_RECEIPT='old'),patch.object(cs.subprocess,'Popen') as launch:
             cs.spawn(['pet.exe','--from-codex'])
-        self.assertNotIn('BAILONG_DEPLOY_TOKEN',launch.call_args.kwargs['env']);self.assertNotIn('BAILONG_DEPLOY_RECEIPT',launch.call_args.kwargs['env'])
+        self.assertFalse('BAILONG_DEPLOY_TOKEN' in launch.call_args.kwargs['env'],'监听不应继承安装交接参数')
+        self.assertFalse('BAILONG_DEPLOY_RECEIPT' in launch.call_args.kwargs['env'],'监听不应继承安装交接回执')
     def test_corrupt_preference_does_not_crash_startup_or_enable_it(self):
         cs.atomic(cs.preference_path(),['enabled'])
         self.assertFalse(cs.enabled())

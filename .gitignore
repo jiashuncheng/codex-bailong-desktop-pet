@@ -41,3 +41,5 @@ token-sync.json
 token-sync-credentials.json
 token-sync-status.json
 token-sync-cache.json
+
+/work/

@@ -29,28 +29,19 @@ def autostart_enabled():
         from mac_services import autostart_enabled as mac_autostart_enabled
         return mac_autostart_enabled()
     vbs,link=startup_paths()
-    if vbs.exists():
-        try:return command().replace('"','""') in vbs.read_text(encoding='utf-16')
-        except (OSError,UnicodeError):return False
-    # Existing shortcut is supported while upgrading the previous local build.
-    if link.exists():
-        # Shortcut target is inspected via PowerShell only on opening settings.
-        literal=str(link).replace("'","''")
-        script="$s=(New-Object -ComObject WScript.Shell).CreateShortcut('"+literal+"'); Write-Output $s.TargetPath; Write-Output $s.Arguments"
-        result=subprocess.run(['powershell.exe','-NoProfile','-Command',script],capture_output=True,text=True,creationflags=0x08000000)
-        return str(Path(sys.executable).with_name('pythonw.exe')).lower() in result.stdout.lower() or (getattr(sys,'frozen',False) and sys.executable.lower() in result.stdout.lower())
-    return False
+    from windows_entries import command_parts,command_matches,legacy_command
+    expected=command_parts(command())
+    if link.exists():return command_matches(link,expected)
+    old=legacy_command(vbs)
+    return old is not None and [os.path.normcase(x) for x in old]==[os.path.normcase(x) for x in expected]
 
 def set_autostart(enabled):
     if sys.platform=='darwin':
         from mac_services import set_autostart as mac_set_autostart
         return mac_set_autostart(enabled)
     vbs,link=startup_paths();vbs.parent.mkdir(parents=True,exist_ok=True)
-    if enabled:
-        script='Option Explicit\nDim shell\nSet shell = CreateObject("WScript.Shell")\nshell.Run "'+command().replace('"','""')+'", 0, False\n'
-        vbs.write_text(script,encoding='utf-16')
-    elif vbs.exists():vbs.unlink()
-    if link.exists():link.unlink() # only this app's legacy shortcut
+    from windows_entries import startup_entry,command_parts
+    startup_entry(link,vbs,command_parts(command()),enabled)
 
 class Blob(ctypes.Structure):
     _fields_=[('size',ctypes.c_ulong),('data',ctypes.POINTER(ctypes.c_ubyte))]

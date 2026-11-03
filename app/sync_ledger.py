@@ -22,6 +22,13 @@ class SyncLedger:
             if column not in columns:db.execute('ALTER TABLE files ADD COLUMN '+column+' INTEGER')
         db.execute('CREATE TABLE IF NOT EXISTS records(seq INTEGER PRIMARY KEY AUTOINCREMENT,session TEXT,total INTEGER,stamp REAL,model TEXT,input INTEGER,output INTEGER,UNIQUE(session,total))')
         db.execute('CREATE TABLE IF NOT EXISTS cursors(target TEXT PRIMARY KEY,seq INTEGER)')
+        columns={r[1] for r in db.execute('PRAGMA table_info(records)')}
+        if 'cached' not in columns:
+            for column,kind in [('cached','INTEGER'),('speed','TEXT'),('effort','TEXT')]:db.execute('ALTER TABLE records ADD COLUMN '+column+' '+kind)
+            # One bounded replay enriches old counters; a separate target cursor
+            # sends the enriched union without changing any v1 acknowledgement.
+            db.execute('DELETE FROM files');db.execute('DELETE FROM records');db.execute('DELETE FROM cursors')
+        db.execute('CREATE TABLE IF NOT EXISTS scan_context(path TEXT PRIMARY KEY,state TEXT)')
         return db
     def scan(self,stop=lambda:False,budget=4):
         deadline=time.monotonic()+budget;errors=0;more=False;count=0
@@ -38,6 +45,9 @@ class SyncLedger:
                         offset,sid,model,old_header,mtime,inode=row or (0,'',UNKNOWN,'',None,None)
                         if size<offset or old_header!=signature or inode!=stat.st_ino or (size==offset and mtime!=stat.st_mtime_ns):offset,sid,model=0,'',UNKNOWN
                         if size==offset:continue
+                        context_row=db.execute('SELECT state FROM scan_context WHERE path=?',(str(path),)).fetchone()
+                        context=json.loads(context_row[0]) if context_row and offset else {}
+
                         stream.seek(offset);waiting_tail=False
                         while not stop() and time.monotonic()<deadline:
                             line=stream.readline(4*1024*1024)
@@ -55,7 +65,10 @@ class SyncLedger:
                                 identity=p.get('id') or p.get('session_id')
                                 sid=hashlib.sha256(identity.encode()).hexdigest() if isinstance(identity,str) and identity and len(identity)<256 else ''
                                 model=model_name(p.get('model')) or model
-                            elif kind=='turn_context':model=model_name(p.get('model')) or model
+                            elif kind=='turn_context':
+                                model=model_name(p.get('model')) or model
+                                from quota_workload import context as workload_context
+                                workload_context(context,p)
                             elif kind=='event_msg' and p.get('type')=='token_count' and sid:
                                 info=p.get('info') or {};usage=info.get('total_token_usage') if isinstance(info,dict) else None
                                 if not isinstance(usage,dict):continue
@@ -64,17 +77,24 @@ class SyncLedger:
                                 stamp=stamp_of(o)
                                 if total is None or total==0 or total>=2**60 or stamp is None:continue
                                 current=model_name(p.get('model')) or model_name(info.get('model')) or model
-                                # Store cumulative evidence, never file-local deltas or prose.
-                                db.execute('INSERT OR IGNORE INTO records(session,total,stamp,model,input,output) VALUES(?,?,?,?,?,?)',(sid,total,stamp,current,a,b));count+=1
+                                from quota_workload import event_context
+                                event_context(context,current,p,info)
+                                cached=counter(usage.get('cached_input_tokens'))
+                                cached=cached if cached is not None and a is not None and cached<=a else None
+                                db.execute('''INSERT INTO records(session,total,stamp,model,input,output,cached,speed,effort) VALUES(?,?,?,?,?,?,?,?,?)
+                                    ON CONFLICT(session,total) DO UPDATE SET cached=COALESCE(records.cached,excluded.cached),speed=CASE WHEN COALESCE(records.speed,'')='' THEN excluded.speed ELSE records.speed END,
+                                    effort=CASE WHEN COALESCE(records.effort,'')='' THEN excluded.effort ELSE records.effort END''',(sid,total,stamp,current,a,b,cached,context.get('speed',''),context.get('effort','')));count+=1
+                        db.execute('INSERT OR REPLACE INTO scan_context VALUES(?,?)',(str(path),json.dumps(context)))
                         more|=offset<size and not waiting_tail
                         db.execute('INSERT OR REPLACE INTO files VALUES(?,?,?,?,?,?,?)',(str(path),offset,sid,model,signature,stat.st_mtime_ns,stat.st_ino))
                 except (OSError,ValueError,TypeError):errors+=1
         return dict(more=more,errors=errors+self.catalog.errors,observations=count)
-    def batch(self,target,limit=1000):
+    def batch(self,target,limit=1000,v2=False):
         with closing(self.connect()) as db:
             cursor=db.execute('SELECT seq FROM cursors WHERE target=?',(target,)).fetchone()
-            rows=db.execute('SELECT seq,session,total,stamp,model,input,output FROM records WHERE seq>? ORDER BY seq LIMIT ?',(cursor[0] if cursor else 0,limit)).fetchall()
-        return [dict(zip(('seq','session','total','stamp','model','input','output'),row)) for row in rows]
+            fields=('seq','session','total','stamp','model','input','output')+(('cached','speed','effort') if v2 else ())
+            rows=db.execute('SELECT '+','.join(fields)+' FROM records WHERE seq>? ORDER BY seq LIMIT ?',(cursor[0] if cursor else 0,limit)).fetchall()
+        return [dict(zip(fields,row)) for row in rows]
     def acknowledge(self,target,seq):
         with closing(self.connect()) as db,db:
             db.execute('INSERT INTO cursors VALUES(?,?) ON CONFLICT(target) DO UPDATE SET seq=MAX(seq,excluded.seq)',(target,seq))

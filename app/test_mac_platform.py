@@ -224,12 +224,21 @@ class KeyboardFocusTests(unittest.TestCase):
         from mac_native import set_level
         from unittest.mock import Mock
         window = Mock()
-        window.level.return_value = 3
+        window.level.return_value = 8
         with patch('mac_native.native_window', return_value=window):
             self.assertTrue(set_level(Mock(), True))
             window.setLevel_.assert_not_called()
             set_level(Mock(), False)
             window.setLevel_.assert_called_once_with(0)
+
+    def test_pending_explicit_editor_does_not_release_application_focus(self):
+        from types import SimpleNamespace
+        from mac_native import MacIntegration
+        integration=SimpleNamespace(pet=SimpleNamespace(bubble=SimpleNamespace(panel_page='status',_mac_keyboard_input=True)))
+        with patch('mac_native.QApplication.activePopupWidget',return_value=None),patch('mac_native.release_application_focus') as release:
+            MacIntegration.release_passive_activation(integration);release.assert_not_called()
+            integration.pet.bubble._mac_keyboard_input=False
+            MacIntegration.release_passive_activation(integration);release.assert_called_once()
 
     def test_focus_return_never_overrides_users_new_application(self):
         from mac_native import release_application_focus

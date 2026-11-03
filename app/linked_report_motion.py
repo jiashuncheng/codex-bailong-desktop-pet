@@ -73,7 +73,15 @@ class LinkedReportMotion(QObject):
         if not self.committed:return self.start
         if self.tracked_rect is not None:return self.tracked_rect
         time=self.progress if time is None else time;f=container_progress(time);a,z=self.start,self.end
-        return QRectF(a.x()+(z.x()-a.x())*f,a.y()+(z.y()-a.y())*f,a.width()+(z.width()-a.width())*f,a.height()+(z.height()-a.height())*f)
+        rect=QRectF(a.x()+(z.x()-a.x())*f,a.y()+(z.y()-a.y())*f,a.width()+(z.width()-a.width())*f,a.height()+(z.height()-a.height())*f)
+        transition=self.report.bubble.size_transition
+        morph=getattr(transition,'morph',None)
+        if morph is not None and morph.route and transition.running:
+            from panel_placement import morph_rect
+            straight=morph_rect(morph.start.rect,morph.end.rect,f)
+            routed=morph.geometry(time)
+            rect.translate(routed.center().x()-straight.center().x(),routed.bottom()-straight.bottom())
+        return rect
     def advance(self,time):
         if self.active and self.committed:self.progress=time;self.render_frame();self.landing.repaint()
     def begin_status(self,target):

@@ -67,6 +67,8 @@ class DesktopPet(EnhancedPet):
         # logical owner for data/placement, with an independent native card.
         self.bubble.setParent(None,self.bubble.windowFlags())
         self.bubble._owner=self
+        from window_layers import WindowLayers
+        self.window_layers=WindowLayers(self)
         from codex_navigation import CodexNavigation
         self.codex_navigation=CodexNavigation(lambda session:open_codex(session),self)
         self.codex_navigation.error.connect(lambda text:self.say(text,6000))
@@ -757,11 +759,7 @@ class DesktopPet(EnhancedPet):
         if (self.settings['no_move'] or not self.wandering or
             any(self.settings.get(k)!=previous.get(k) for k in POLICY_KEYS)):self.stop_walk()
         if self.settings['no_move']:self.throwing=False
-        for widget in (self,self.bubble):
-            visible=widget.isVisible()
-            widget.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint,self.settings['on_top'])
-            if widget is self:widget.setWindowFlag(Qt.WindowType.WindowTransparentForInput,self.settings['mouse_through'])
-            if visible:widget.show()
+        self.window_layers.apply_flags()
         self.sync_panel_flags()
         if values.get('bubble') is False:
             self.bubble.size_transition.cancel();self.bubble.panel_page='status';self.bubble.expanded=False
@@ -921,7 +919,7 @@ class DesktopPet(EnhancedPet):
         x=round(cx-size.width()/2);y=round(bottom-size.height())
         reserve=self.bubble.report.reserved_height(size)+6 if self.bubble.report and self.bubble.report.requested else 0
         x=max(a.left(),min(x,a.right()-size.width()+1));y=max(a.top()+min(reserve,max(0,a.height()-size.height())),min(y,a.bottom()-size.height()+1))
-        return QRect(x,y,size.width(),size.height())
+        return self.bubble.avoid_character_geometry(QRect(x,y,size.width(),size.height()))
     def move_card(self,point):
         rect=QRect(point,self.bubble.size());self.remember_card_anchor(rect);self.bubble.move(self.card_geometry(rect.size()).topLeft());self.remember_card_anchor(self.bubble.geometry())
     def position_bubble(self):
@@ -941,10 +939,9 @@ class DesktopPet(EnhancedPet):
         if self.enhanced_ready and edge and (edge.active or edge.amount>0) and self.bubble.is_minimal():
             self.bubble.move(edge.card_geometry(self.bubble.content.size()).topLeft())
             return
-        if self.enhanced_ready and self.bubble.panel_page!='status' and self.bubble._editor_positioned:
-            if not self.card_surface_visible():self.bubble.hide()
-            return
-        super().position_bubble()
+        target=self.bubble.content_geometry().topLeft()
+        if target!=self.bubble.pos():
+            self.bubble.move(target);self.window_layers.request()
         if self.enhanced_ready and self.bubble.panel_page!='status':self.bubble._editor_positioned=True
         if self.enhanced_ready and not self.card_surface_visible():self.bubble.hide()
     def can_raise_bubble(self):
@@ -1411,6 +1408,8 @@ class DesktopPet(EnhancedPet):
             from platform_support import MAC_VERSION
             value.update(mac_version=MAC_VERSION,video_firefox_backend='macOS AX',video_backend='macOS Accessibility')
         value['ui_revision']=99
+        value['window_layout_avoids_character']=True
+        value['window_stack_policy']='pet_card_report_relative_no_activation'
         from version import DISPLAY_VERSION,UPSTREAM_VERSION
         value.update(display_version=DISPLAY_VERSION,upstream_version=UPSTREAM_VERSION,custom_version=VERSION)
         shared=getattr(getattr(self,'activity',None),'shared_worker',None)
@@ -1445,6 +1444,7 @@ class DesktopPet(EnhancedPet):
             if not self._update_exit_pending:self._update_exit_pending=True;self.updates.idle.connect(self.close)
             event.ignore();return
         self._codex_closing=True;self.codex_timer.stop();self.click_timer.stop();self.last_click=None
+        self.window_layers.shutdown()
         self.edge_dock.shutdown();self.cancel_pointer();self.sustained.cancel();self.locomotion.cancel();self.codex_navigation.close()
         if self.bubble.report:self.bubble.report.animation.stop();self.bubble.report.hide()
         if self.chat_window:self.chat_window.shutdown()

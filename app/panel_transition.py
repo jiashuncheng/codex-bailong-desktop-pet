@@ -249,7 +249,9 @@ class PanelTransition(QObject):
         image=complete_frame(b)
         self.cover.image=image
         self.cover.next_image=None;self.cover.blend=0.
-        self.morph=SurfaceMorph(self.old_surface,SurfaceState.capture(b,target.topLeft(),frame=image,content=image))
+        owner=b.owner_pet()
+        character=owner.frameGeometry() if owner and hasattr(owner,'frameGeometry') and owner.isVisible() and not getattr(owner,'_materials_missing',False) and getattr(owner,'settings',{}).get('character_visible',True) and not getattr(getattr(owner,'edge_dock',None),'active',False) else None
+        self.morph=SurfaceMorph(self.old_surface,SurfaceState.capture(b,target.topLeft(),frame=image,content=image),character)
         b.layout.setEnabled(False)
         self.frozen=[(b.layout.itemAt(i).widget(),b.layout.itemAt(i).widget().updatesEnabled()) for i in range(b.layout.count()) if b.layout.itemAt(i).widget()]
         for widget,enabled in self.frozen:widget.setUpdatesEnabled(False)

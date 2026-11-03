@@ -1305,6 +1305,16 @@ class CompactBubble(Bubble):
         if self.size_transition.running or self.size_transition.preparing or self.size_transition.landing.image is not None:return
         owner=self.owner_pet()
         if owner and getattr(owner,'enhanced_ready',False):owner.position_bubble()
+    def avoid_character_geometry(self,rect):
+        owner=self.owner_pet()
+        if owner is None:return rect
+        screen=QApplication.screenAt(rect.center()) or self.screen() or QApplication.primaryScreen()
+        report=self.report
+        reserve=report.reserved_height(rect.size())+report.GAP if report and report.requested else 0
+        width=report.panel_width(rect) if reserve else 0
+        character=owner.frameGeometry() if owner.isVisible() and not getattr(owner,'_materials_missing',False) and getattr(owner,'settings',{}).get('character_visible',True) else None
+        from panel_placement import avoid_character
+        return avoid_character(rect,character,screen.availableGeometry(),reserve,width)
     def content_geometry(self,size=None,docked=True):
         owner=self.owner_pet();size=self.visual_size() if size is None else size
         if owner is None:return QRectF(self.x(),self.y(),size.width(),size.height()).toRect()
@@ -1321,7 +1331,7 @@ class CompactBubble(Bubble):
         reserve=self.report.reserved_height(size)+6 if self.report and self.report.requested else 0
         reserve=min(reserve,max(0,area.height()-size.height()))
         x=max(area.left(),min(x,area.right()-size.width()+1));y=max(area.top()+reserve,min(y,area.bottom()-size.height()+1))
-        return QRectF(x,y,size.width(),size.height()).toRect()
+        return self.avoid_character_geometry(QRectF(x,y,size.width(),size.height()).toRect())
     def placement_height(self):
         # One-/two-line changes must not flip the bubble to the opposite side
         # of the character near the top edge. Probe with the larger compact size.
@@ -1338,6 +1348,8 @@ class CompactBubble(Bubble):
         super().resizeEvent(event)
         if not self._redrawing and not self._fitting_height:self._position_now()
     def hideEvent(self,event):
+        if getattr(self,'_changing_window_flags',False):
+            return super().hideEvent(event)
         if hasattr(self,'size_transition'):self.size_transition.cancel()
         self.content.hide()
         super().hideEvent(event)

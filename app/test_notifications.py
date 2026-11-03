@@ -55,7 +55,7 @@ class NotificationTests(unittest.TestCase):
     def test_reset_refresh_continues_while_alert_popup_is_muted(self):
         pet=SimpleNamespace(settings={'notifications':False},
             local_reset_evidence=SimpleNamespace(decorate=lambda s:s),
-            bubble=Mock(),position_bubble=Mock(),say=Mock(),notify=Mock(),refresh_quota=Mock())
+            bubble=Mock(reset_snapshot=None,reset_feed_error=False),position_bubble=Mock(),say=Mock(),notify=Mock(),refresh_quota=Mock())
         with patch('enhanced.locally_reset',return_value=False),patch('enhanced.schedule_text',return_value=''):
             EnhancedPet.on_reset_feed(pet,{'checked':1},[dict(kind='confirmed',title='重置',text='已重置')],True)
         pet.say.assert_not_called();pet.refresh_quota.assert_called_once()

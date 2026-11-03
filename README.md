@@ -4,7 +4,7 @@
 
 在 Windows 和 Mac 上使用同一份 Python 源码，查看 Codex 任务状态、接收完成提醒、统计额度与 Token，并与白龙互动。保留源码和一键执行脚本，方便后续修改、更新及两端同步。
 
-**当前源码版本：v1.4.2.19.4 / UI99**。版本号前 3 段是上游基线（1.4.2），后 2 段是本 fork 定制号（19.4，对应内部更新版本 0.19.4）；同步功能更新前的组合号示例为 v1.4.2.17.3。已合入 [Wunsch2048 增强版](https://github.com/Wunsch2048/codex-bailong-desktop-pet) 的 **v1.4.2**（`fc0ce47`），保留本仓库的 Windows/macOS 适配、Token 同步、SSH、会话轮换和随机动作。角色与原始桌宠来自 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet)。
+**当前源码版本：v1.4.2.19.5 / UI99**。版本号前 3 段是上游基线（1.4.2），后 2 段是本 fork 定制号（19.5，对应内部更新版本 0.19.5）；同步功能更新前的组合号示例为 v1.4.2.17.3。已合入 [Wunsch2048 增强版](https://github.com/Wunsch2048/codex-bailong-desktop-pet) 的 **v1.4.2**（`fc0ce47`），保留本仓库的 Windows/macOS 适配、Token 同步、SSH、会话轮换和随机动作。角色与原始桌宠来自 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet)。
 
 [源码使用与更新](docs/跨平台源码使用.md) · [上游 v1.4.2 更新](docs/releases/v1.4.2.md) · [来源与授权](NOTICE.md) · [反馈问题](https://github.com/jiashuncheng/codex-bailong-desktop-pet/issues)
 
@@ -15,6 +15,7 @@
 | 功能 | 说明 |
 | --- | --- |
 | Windows / macOS 共用源码 | 通用界面、动画、会话和统计共用 `app/`，系统接口按平台适配；两端均提供一键启动、停止、检查和同步脚本 |
+| 人物与面板避让 | Windows/macOS 共用布局，展开卡片和数据面板避开人物，移动路径同步避让；统一自有窗口顺序，切换置顶保留已打开面板 |
 | Mac 窗口焦点修复 | 人物与普通状态卡片不取得键盘焦点，避免干扰其他窗口打字和快捷键；主动打开设置或聊天时才接收输入 |
 | 角色与状态面板联动缩放 | 状态卡片、胶囊和极简圆圈跟随人物一半的大小变化，限制为 0.8～1.5 倍，文字、图标及点击区域同步；设置、聊天和展开详情保留原尺寸。超出可用屏幕时限制面板尺寸 |
 | 胶囊会话来源 | 两行分别显示来源、短会话名和状态，优先保留 jsc-1 等编号；本机、终端、WSL 或 SSH 别名随会话轮换；长来源名省略，展开查看完整会话。保持运行黄色、完成白色和固定高度 |

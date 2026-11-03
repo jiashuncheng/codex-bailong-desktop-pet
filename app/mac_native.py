@@ -41,10 +41,13 @@ def native_window(widget):
 
 
 def set_level(widget, top):
-    from AppKit import NSFloatingWindowLevel, NSNormalWindowLevel
+    from AppKit import NSModalPanelWindowLevel, NSNormalWindowLevel
     window = native_window(widget)
     if window is not None:
-        level = NSFloatingWindowLevel if top else NSNormalWindowLevel
+        # Match Qt's WindowStaysOnTopHint. A different AppKit level gets reset
+        # on Qt's next native geometry/flags update, changing sibling order.
+        # This sets stacking only; keyboard eligibility remains independent.
+        level = NSModalPanelWindowLevel if top else NSNormalWindowLevel
         # AppKit can reorder a panel on setLevel:, even for the same level.
         if window.level() != level:
             window.setLevel_(level)
@@ -139,7 +142,9 @@ class MacIntegration(QObject):
     def release_passive_activation(self):
         # A plain Python process can be promoted by AppKit on its first show.
         # Yield our own activation once; never activate another app by PID.
-        if self.pet.bubble.panel_page == 'status' and QApplication.activePopupWidget() is None:
+        if (self.pet.bubble.panel_page == 'status'
+                and not getattr(self.pet.bubble,'_mac_keyboard_input',False)
+                and QApplication.activePopupWidget() is None):
             release_application_focus()
 
     def owned(self, widget):

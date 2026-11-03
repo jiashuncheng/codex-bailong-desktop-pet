@@ -849,9 +849,11 @@ class DailyReport(QWidget):
             if event.type() in (QEvent.Type.Move,QEvent.Type.Resize):
                 if not self.follow.active and (self.requested or self.isVisible()):self.sync_geometry()
             elif event.type()==QEvent.Type.Hide:
+                if getattr(self.bubble,'_changing_window_flags',False):return False
                 self._host_open_page=None;self._host_prepared_page=None;self._host_return=False;self.requested=False;self.hide()
         return False
     def hideEvent(self,event):
+        if getattr(self.bubble,'_changing_window_flags',False):return super().hideEvent(event)
         self.page_fade.clear()
         self.follow.cancel()
         self.animation.stop();self.requested=False;self.fraction=0.;self._animating=False;self._frame=None

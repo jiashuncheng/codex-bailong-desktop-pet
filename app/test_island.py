@@ -129,19 +129,23 @@ class ModeTests(unittest.TestCase):
         icon.session_summary='已完成/执行中/一段非常长的状态描述 +62';self.b.island.refresh()
         label=self.b.island.text;self.assertLessEqual(QFontMetrics(label.font()).horizontalAdvance(label.text()),label.width())
         self.assertTrue(label.text().endswith('+62'));self.assertIn('非常长',self.b.island.accessibleName())
-    def test_custom_rows_animate_without_resizing_native_canvas(self):
+    def test_custom_state_changes_do_not_fade_or_resize_native_canvas(self):
         self.b.set_mode('mini');self.finish();island=self.b.island;outer=QRect(self.b.geometry())
         for text in ('执行中/完成','待命','思考中'):
             self.b.status_indicator.session_summary=text;island.refresh()
-            self.assertTrue(island.animation.state().value)
-            for ms in (0,60,125,190,250):
-                island.animation.setCurrentTime(ms);self.assertEqual(self.b.geometry(),outer)
-            self.assertEqual(island.icon.x(),12)
             self.assertFalse(island.animation.state().value)
+            self.assertEqual(island.text.property('captionProgress'),1.)
+            self.assertEqual(self.b.geometry(),outer)
+            self.assertEqual(island.icon.x(),12)
+            self.assertIn(text,island.accessibleName())
     def test_status_caption_pauses_for_surface_and_stops_when_hidden(self):
         from PySide6.QtCore import QAbstractAnimation
         self.b.set_mode('mini');self.finish();island=self.b.island
-        self.b.status_indicator.session_summary='执行中';island.refresh();island.animation.setCurrentTime(90)
+        icon=self.b.status_indicator;icon.session_summary='执行中'
+        icon.session_entries=[dict(session='first',source_label='mac',title='会话1',state='working')]
+        island.refresh()
+        icon.session_entries=[dict(session='second',source_label='mac',title='会话2',state='working')]
+        island.refresh();island.animation.setCurrentTime(90)
         island.freeze_motion();self.assertEqual(island.animation.state(),QAbstractAnimation.State.Paused)
         island.resume_motion();self.assertEqual(island.animation.state(),QAbstractAnimation.State.Running)
         island.hide();self.assertFalse(island.animation.state().value);self.assertEqual(island.text.property('captionProgress'),1.)

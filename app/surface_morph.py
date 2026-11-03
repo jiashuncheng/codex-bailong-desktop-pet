@@ -413,6 +413,7 @@ class ExclusivePart:
 class SurfaceMorph:
     def translate(self,delta):
         """Move prepared geometry only; reuse every raster and blend buffer."""
+        if self.route:self.route=tuple(point+delta for point in self.route)
         for state in (self.start,self.end):
             state.rect.translate(delta);state.icon_rect.translate(delta)
             if state.frame_origin is not None:state.frame_origin+=delta
@@ -423,8 +424,10 @@ class SurfaceMorph:
         for part in self.exclusive_parts:part.state_rect.translate(delta)
         if self._landing:
             key,*rest=self._landing;self._landing=((key[0]+delta.x(),key[1]+delta.y(),*key[2:]),*rest)
-    def __init__(self,start,end):
+    def __init__(self,start,end,character=None):
         self.start=start;self.end=end;self._landing=None
+        from panel_placement import morph_route
+        self.route=morph_route(start.rect,end.rect,character) if character is not None else None
         self.shrinking=end.rect.width()*end.rect.height()<start.rect.width()*start.rect.height()
         self.page_switch=bool(start.expanded and end.expanded and start.page!=end.page and not start.island and not end.island)
         self.shared_parts={};self.exclusive_parts=[];self.body_frames=(start.content,end.content)
@@ -468,6 +471,9 @@ class SurfaceMorph:
         return 1.-stage(time,0.,.18),stage(time,.24,.62)
     def geometry(self,time):
         a,z=self.start.rect,self.end.rect;f=container_progress(time)
+        if self.route:
+            from panel_placement import morph_rect
+            return morph_rect(a,z,f,self.route)
         # One progress for every edge; staggered spring axes can visibly twist
         # the small capsule when it becomes a tall editor.
         width=a.width()+(z.width()-a.width())*f;height=a.height()+(z.height()-a.height())*f

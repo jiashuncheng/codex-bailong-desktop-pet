@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from token_calendar import TokenUsageIndex
+from version import VERSION,DISPLAY_VERSION,UPSTREAM_VERSION
 
 
 def digest(value):return hashlib.sha256(value.encode()).hexdigest()
@@ -124,7 +125,7 @@ class Handler(BaseHTTPRequestHandler):
         return self.server.store.authenticate(header[7:]) if header.startswith('Bearer ') and len(header)<512 else None
     def do_GET(self):
         try:
-            if self.path=='/health':return self.respond(200,dict(status='ok',schema=2,capabilities=['records','quota','sessions','reads']))
+            if self.path=='/health':return self.respond(200,dict(status='ok',schema=2,version=DISPLAY_VERSION,custom_version=VERSION,upstream_version=UPSTREAM_VERSION,capabilities=['records','quota','sessions','reads']))
             if not self.device():return self.respond(401,dict(error='设备认证失败，请重新导入连接文件。'))
             if self.path=='/v2/state':return self.respond(200,self.server.store.shared.snapshot())
             if self.path=='/v1/snapshot':return self.respond(200,self.server.store.snapshot())

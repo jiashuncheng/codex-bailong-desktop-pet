@@ -8,6 +8,7 @@ from PySide6.QtGui import QShortcut,QKeySequence
 from PySide6.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QFormLayout,QTabWidget,QWidget,
     QCheckBox,QDoubleSpinBox,QPlainTextEdit,QPushButton,QComboBox,QLabel,QFileDialog,QMessageBox,QScrollArea,QLineEdit,QSizePolicy,QLayout)
 from desktop_core import DEFAULTS,VERSION
+from version import DISPLAY_VERSION
 from desktop_services import autostart_enabled,set_autostart,import_character,validate_character,all_items
 from settings_draft import SettingsDraft
 from connection_widgets import CapabilityPanel
@@ -385,7 +386,7 @@ class SettingsDialog(QDialog):
         if program_supported:actions.append(('查看可清理内容','清理历史版本与备份，先预览',pet.cleanup_installations))
         for title,hint,slot in actions:
             button=QPushButton(title);button.setToolTip(hint);button.clicked.connect(slot);data.addRow(button)
-        maintenance.addRow(QLabel('当前版本 '+VERSION))
+        maintenance.addRow(QLabel('当前版本 v'+DISPLAY_VERSION))
 
     def section(self,form,title,note):
         name=QLabel(title);set_theme_style(name,FONT_CSS+f'font-size:11px;font-weight:500;color:{MUTED};background:transparent;padding:0;margin-top:5px;');form.addRow(name)

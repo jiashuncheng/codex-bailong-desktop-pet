@@ -67,6 +67,12 @@ class SharedTests(unittest.TestCase):
         items,ready=SessionCollector(home).snapshot();self.assertTrue(ready);self.assertEqual(len(items),1)
         self.assertEqual(items[0]['summary'],'已整理公开结果');self.assertEqual(items[0]['title'],'真实名称')
         self.assertEqual(items[0]['thread'],sid);self.assertNotIn('PRIVATE',json.dumps(items))
+    def test_display_identity_preserves_standard_update_contract(self):
+        from version import VERSION,DISPLAY_VERSION,UPSTREAM_VERSION,CUSTOM_VERSION,material_compatibility
+        from app_updates import version_tuple
+        self.assertEqual(DISPLAY_VERSION,UPSTREAM_VERSION+'.'+CUSTOM_VERSION)
+        self.assertEqual(version_tuple(VERSION),(0,18,0))
+        self.assertEqual(material_compatibility(VERSION),UPSTREAM_VERSION)
     def test_outbox_is_monotonic_and_only_removes_exact_ack(self):
         state=Path(self.temp.name);remember_reads(state,[('session','one'),('session','two')])
         rows=pending_reads(state);acknowledge_reads(state,rows[:1]);self.assertEqual(len(pending_reads(state)),1)

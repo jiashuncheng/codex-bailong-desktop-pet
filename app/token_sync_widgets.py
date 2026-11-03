@@ -17,12 +17,12 @@ class SyncJob(QThread):
 class TokenSyncPanel(QWidget):
     def __init__(self,pet):
         super().__init__();self.pet=pet;self.job=None;layout=QVBoxLayout(self);layout.setContentsMargins(0,0,0,0)
-        config=read_config(data_dir());self.enabled=QCheckBox('启用多端 Token 同步（仅上传统计计数）');self.enabled.setChecked(bool(config.get('enabled')));layout.addWidget(self.enabled)
+        config=read_config(data_dir());self.enabled=QCheckBox('启用多端统一同步');self.enabled.setChecked(bool(config.get('enabled')));layout.addWidget(self.enabled)
         self.scope=QComboBox();self.scope.addItem('显示全部设备去重汇总','all');self.scope.addItem('显示本机统计（后台仍同步）','local');self.scope.setCurrentIndex(max(0,self.scope.findData(config.get('view','all'))));layout.addWidget(self.scope)
         self.controls=[]
         for title,callback in [('导入同步连接文件…',self.import_file),('导出另一台设备连接文件…',self.export_file),('保存并立即同步',self.apply)]:
             button=QPushButton(title);button.clicked.connect(callback);layout.addWidget(button);self.controls.append(button)
-        self.note=QLabel('首次在另一台设备导入连接文件即可加入。连接文件限一次使用，7 天有效。每 30 秒增量上报，断网后自动补传；聊天正文和登录凭据不上传。');self.note.setWordWrap(True);layout.addWidget(self.note)
+        self.note=QLabel('首次在另一台设备导入连接文件即可加入。连接文件限一次使用，7 天有效。计数与额度约 30 秒、会话与公开摘要约 5 秒同步，断网自动补传；不上传原始日志、完整聊天或凭据。');self.note.setWordWrap(True);layout.addWidget(self.note)
         self.status=QLabel();self.status.setWordWrap(True);layout.addWidget(self.status)
         self.timer=QTimer(self);self.timer.setInterval(5000);self.timer.timeout.connect(self.refresh_status);self.timer.start();self.refresh_status()
     def refresh_status(self):

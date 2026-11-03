@@ -46,7 +46,8 @@ def main():
         print(connection_summary(report))
         return 0 if report['cli_found'] and report['home_exists'] else 1
     began = time.monotonic()
-    result = dict(platform=sys.platform, python=sys.version.split()[0], passed=True, modules=[], tests=0)
+    from version import VERSION,DISPLAY_VERSION
+    result = dict(version=VERSION,display_version=DISPLAY_VERSION,platform=sys.platform, python=sys.version.split()[0], passed=True, modules=[], tests=0)
     for folder in ('app', 'tools', 'ssh-bridge', 'sync-service'):
         if not compileall.compile_dir(ROOT / folder, quiet=2):
             result['passed'] = False

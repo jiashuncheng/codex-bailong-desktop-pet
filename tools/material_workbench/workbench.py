@@ -94,6 +94,7 @@ class MaterialWorkbench(QMainWindow):
         self.guides=QCheckBox('参考框');self.guides.setChecked(True);viewing.addWidget(self.guides)
         self.ghost=QCheckBox('白龙淡影');viewing.addWidget(self.ghost);viewing.addStretch()
         self.adjust_button=QPushButton('调大小 / 位置');self.adjust_button.clicked.connect(self.adjust_alignment);viewing.addWidget(self.adjust_button);rl.addLayout(viewing)
+        self.edit_button=QPushButton('裁剪 / 拼接');self.edit_button.clicked.connect(self.edit_clips);viewing.insertWidget(viewing.count()-1,self.edit_button)
         self.canvas=PreviewCanvas();self.canvas.frameChanged.connect(self.frame_changed);self.canvas.errorOccurred.connect(self.preview_error);self.canvas.playingChanged.connect(self.playing_changed);rl.addWidget(self.canvas,1)
         self.view_mode.currentTextChanged.connect(self.canvas.set_view_mode)
         self.guides.toggled.connect(lambda v:self.preview_flag('guides',v));self.ghost.toggled.connect(lambda v:self.preview_flag('ghost',v))
@@ -192,6 +193,7 @@ class MaterialWorkbench(QMainWindow):
         self.apply_button.setText('先重新生成' if self.inventory.get('unprepared_adjustments') else '已加入桌宠' if ready and not pending else '加入桌宠')
         self.apply_button.setEnabled(ready and pending and not self.busy and not self.inventory.get('unprepared_adjustments'))
         self.adjust_button.setEnabled(not self.busy and bool(self.current_row and self.current_row.get('record') and Path(self.current_row['record'].get('cache','')).is_file()))
+        self.edit_button.setEnabled(not self.busy and bool(self.current_row))
         for widget in (self.add_button,self.change_button,self.refresh_button,self.settings_button,self.rename_button,self.auto_apply):widget.setEnabled(not self.busy)
     def selection_changed(self):
         index=self.table.currentRow()
@@ -218,6 +220,16 @@ class MaterialWorkbench(QMainWindow):
         self.canvas.load(path,True,known_meta=meta);self.play_button.setEnabled(True)
         if processed and not row.get('processed_current'):self.status.setText('这里是旧处理结果；源文件或手动参数已更新，需要重新生成。')
     def preview_flag(self,name,value):setattr(self.canvas,name,value);self.canvas.update()
+    def edit_clips(self):
+        from clip_editor import ClipEditor
+        if self.busy or not self.current_row:return
+        row=self.current_row;processed=self.tabs.currentIndex()==1
+        paths=[row['processed']] if processed and row.get('processed') else [row['path']]
+        playing=self.canvas.playing;self.canvas.set_playing(False)
+        dialog=ClipEditor(paths,self.config,self)
+        if dialog.exec()==QDialog.DialogCode.Accepted and dialog.saved_path:
+            self.current_row={'path':dialog.saved_path};self.refresh()
+        else:self.canvas.set_playing(playing)
     def adjust_alignment(self):
         row=self.current_row
         if self.busy or not row or not row.get('record'):return

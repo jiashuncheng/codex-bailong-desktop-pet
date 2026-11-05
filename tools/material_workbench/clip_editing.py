@@ -1,0 +1,170 @@
+"""Non-destructive, timestamp-based editing of opaque and alpha animations."""
+from dataclasses import dataclass
+from pathlib import Path
+import bisect,math,os,tempfile
+from PIL import Image
+from media import frames,write_animation
+
+MAX_MS=60_000
+MAX_FRAMES=3600
+MAX_PIXELS=16_777_216
+
+def check_cancel(cancel):
+    if cancel():raise InterruptedError('已取消，原文件未改动')
+
+def snapshot(path):
+    stat=Path(path).stat();return stat.st_size,stat.st_mtime_ns
+
+@dataclass(frozen=True)
+class MediaInfo:
+    path: str
+    size: tuple
+    durations: tuple
+    alpha: bool
+    stamp: tuple
+
+    @property
+    def duration_ms(self):return sum(self.durations)
+    @property
+    def starts(self):
+        result=[0]
+        for duration in self.durations:result.append(result[-1]+duration)
+        return result
+    def index_at(self,milliseconds):
+        return max(0,min(len(self.durations)-1,bisect.bisect_right(self.starts,milliseconds)-1))
+    def preview_meta(self):
+        return dict(size=list(self.size),frames=len(self.durations),duration=self.duration_ms/1000,
+                    fps=len(self.durations)*1000/self.duration_ms)
+
+@dataclass(frozen=True)
+class Clip:
+    path: str
+    start_ms: int=0
+    end_ms: int|None=None
+    repeat: int=1
+
+def probe(path,cancel=lambda:False):
+    path=Path(path).resolve();before=snapshot(path);size=None;durations=[];alpha=False
+    iterator=frames(path)
+    try:
+        total=0
+        for image,ms in iterator:
+            check_cancel(cancel)
+            if image.width*image.height>MAX_PIXELS:raise ValueError('单帧超过1600万像素')
+            if size is not None and image.size!=size:raise ValueError('原片画布在变化')
+            size=image.size
+            if not math.isfinite(ms) or int(ms)!=ms or ms<=0:raise ValueError('无效的帧时长')
+            durations.append(int(ms));total+=int(ms)
+            if len(durations)>MAX_FRAMES or total>MAX_MS:raise ValueError('单段素材最多60秒、3600帧')
+            alpha=alpha or image.getchannel('A').getextrema()[0]<255
+    finally:iterator.close()
+    if not durations:raise ValueError('没有可读取的画面')
+    if snapshot(path)!=before:raise ValueError('原片仍在写入，请等同步完成')
+    return MediaInfo(str(path),size,tuple(durations),alpha,before)
+
+def bounds(clip,info):
+    values=(clip.start_ms,info.duration_ms if clip.end_ms is None else clip.end_ms,clip.repeat)
+    if any(isinstance(v,bool) or not isinstance(v,int) for v in values):raise ValueError('剪辑时间需为整数毫秒，重复次数需为整数')
+    start,end,repeat=values
+    if not 0<=start<end<=info.duration_ms:raise ValueError('起点应早于终点，且都在原片范围内')
+    if not 1<=repeat<=20:raise ValueError('每段重复次数为1至20次')
+    return start,end,repeat
+
+def export(clips,target,infos=None,cancel=lambda:False,progress=lambda *a:None):
+    """Exact half-open intervals; pad bottom/centre, never stretch or resample."""
+    clips=list(clips);target=Path(target).resolve()
+    if not clips:raise ValueError('请先添加片段')
+    if target.suffix.lower()!='.webp':raise ValueError('请导出为保留透明度的动画 WebP')
+    if target.exists():raise FileExistsError('目标文件已存在，请换一个名称；原文件不会覆盖')
+    unique={str(Path(clip.path).resolve()) for clip in clips}
+    if str(target) in unique:raise ValueError('不能覆盖原始素材')
+    known=infos or {};sources={}
+    for path in unique:
+        check_cancel(cancel);info=known.get(path)
+        if info is None:info=probe(path,cancel)
+        if snapshot(path)!=info.stamp:raise ValueError('原片已变化，请重新添加片段')
+        sources[path]=info
+    kinds={v.alpha for v in sources.values()}
+    if len(kinds)>1:raise ValueError('透明素材与不透明原片请先统一抠图，再拼接，避免拼入一块背景')
+    canvas=tuple(max(info.size[i] for info in sources.values()) for i in (0,1))
+    if canvas[0]*canvas[1]>MAX_PIXELS:raise ValueError('合并后的画布过大，请先统一画幅')
+    # Raw opaque clips of different sizes cannot be padded without adding a backdrop.
+    if not next(iter(kinds)) and len({v.size for v in sources.values()})>1:
+        raise ValueError('不透明原片画幅不同，请先抠成透明并统一人物大小后再拼接')
+    total=0;estimated_frames=0
+    for clip in clips:
+        info=sources[str(Path(clip.path).resolve())];start,end,repeat=bounds(clip,info)
+        total+=(end-start)*repeat
+        starts=info.starts
+        estimated_frames+=sum(left<end and right>start for left,right in zip(starts,starts[1:]))*repeat
+    if total>MAX_MS or estimated_frames>MAX_FRAMES:raise ValueError('合成动作最多60秒、3600帧；请缩短选段或减少重复')
+    if estimated_frames<2:raise ValueError('请至少保留两个画面帧，才能作为桌宠动画')
+    target.parent.mkdir(parents=True,exist_ok=True)
+    fd,name=tempfile.mkstemp(prefix='.bailong-edit-',suffix='.tmp',dir=target.parent);os.close(fd)
+    temporary=Path(name)
+    def sequence():
+        count=0
+        for clip in clips:
+            info=sources[str(Path(clip.path).resolve())];start,end,repeat=bounds(clip,info)
+            for _ in range(repeat):
+                iterator=frames(info.path);timestamp=0
+                try:
+                    for image,ms in iterator:
+                        check_cancel(cancel)
+                        right=timestamp+ms
+                        overlap=min(right,end)-max(timestamp,start)
+                        if overlap>0:
+                            if image.size!=info.size:raise ValueError('原片画布变化，请重新读取')
+                            if image.size!=canvas:
+                                padded=Image.new('RGBA',canvas)
+                                padded.paste(image,((canvas[0]-image.width)//2,canvas[1]-image.height))
+                                image=padded
+                            count+=1;progress(count,estimated_frames)
+                            yield image,int(overlap)
+                        timestamp=right
+                        if timestamp>=end:break
+                finally:iterator.close()
+        check_cancel(cancel)
+    try:
+        iterator=sequence()
+        try:count,duration=write_animation(temporary,iterator)
+        finally:iterator.close()
+        check_cancel(cancel)
+        if count!=estimated_frames or duration!=total:raise ValueError('编码时序与选段不一致，未保存')
+        # Decode the actual output before publishing it; WebP may coalesce equal frames.
+        decoded_ms=0;decoded_count=0;durations=[]
+        decoded=_decoded_webp(temporary)
+        try:
+            for image,ms in decoded:
+                check_cancel(cancel)
+                if image.size!=canvas:raise ValueError('导出画布校验失败')
+                decoded_ms+=ms;decoded_count+=1;durations.append(ms)
+        finally:decoded.close()
+        if decoded_ms!=total or decoded_count<2:raise ValueError('导出时序异常或只剩静止画面，请扩大选段')
+        for info in sources.values():
+            if snapshot(info.path)!=info.stamp:raise ValueError('导出期间原片变化，未保存')
+        check_cancel(cancel)
+        publish(temporary,target,cancel)
+        return dict(path=str(target),size=list(canvas),durationMs=total,frames=decoded_count,
+                    alpha=next(iter(kinds)),segments=len(clips),durations=durations)
+    finally:temporary.unlink(missing_ok=True)
+
+def _decoded_webp(path):
+    with Image.open(path) as image:
+        for index in range(getattr(image,'n_frames',1)):
+            image.seek(index);image.load()
+            yield image,int(image.info.get('duration',0))
+
+def publish(source,target,cancel=lambda:False):
+    """Exclusive creation protects source files, including a racing filename collision."""
+    target=Path(target);owned=False
+    try:
+        with open(source,'rb') as src,open(target,'xb') as out:
+            owned=True
+            while chunk:=src.read(1024*1024):
+                check_cancel(cancel);out.write(chunk)
+            out.flush();os.fsync(out.fileno())
+        check_cancel(cancel)
+    except BaseException:
+        if owned:target.unlink(missing_ok=True)
+        raise

@@ -153,7 +153,7 @@ def inspect(path, face=None, sample_faces=True, reject_source_clipping=True):
                 union=union,firstBox=boxes[0],faces=faces,
                 sourceEdgeTouchFrames=len(touch),sourceEdgeTouchExamples=touch[:12]),first
 
-def write_animation(path, iterator):
+def write_animation(path, iterator, xmp=None):
     """Lossless WebP; integer per-frame durations, no dropped duplicate frames."""
     from PIL import _webp
     encoder=None;timestamp=0;count=0;size=None
@@ -167,7 +167,7 @@ def write_animation(path, iterator):
         timestamp+=int(ms);count+=1
     if encoder is None:raise ValueError('空动画')
     encoder.add(None,timestamp,True,100,100,0)
-    data=encoder.assemble('', '', '')
+    data=encoder.assemble('', '', xmp or '')
     Path(path).write_bytes(data)
     return count,timestamp
 

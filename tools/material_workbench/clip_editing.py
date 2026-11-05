@@ -4,6 +4,7 @@ from pathlib import Path
 import bisect,math,os,tempfile
 from PIL import Image
 from media import frames,write_animation
+import processed_profile
 
 MAX_MS=60_000
 MAX_FRAMES=3600
@@ -22,6 +23,7 @@ class MediaInfo:
     durations: tuple
     alpha: bool
     stamp: tuple
+    profile: dict|None=None
 
     @property
     def duration_ms(self):return sum(self.durations)
@@ -60,7 +62,7 @@ def probe(path,cancel=lambda:False):
     finally:iterator.close()
     if not durations:raise ValueError('没有可读取的画面')
     if snapshot(path)!=before:raise ValueError('原片仍在写入，请等同步完成')
-    return MediaInfo(str(path),size,tuple(durations),alpha,before)
+    return MediaInfo(str(path),size,tuple(durations),alpha,before,processed_profile.read(path))
 
 def bounds(clip,info):
     values=(clip.start_ms,info.duration_ms if clip.end_ms is None else clip.end_ms,clip.repeat)
@@ -86,7 +88,8 @@ def export(clips,target,infos=None,cancel=lambda:False,progress=lambda *a:None):
         sources[path]=info
     kinds={v.alpha for v in sources.values()}
     if len(kinds)>1:raise ValueError('透明素材与不透明原片请先统一抠图，再拼接，避免拼入一块背景')
-    canvas=tuple(max(info.size[i] for info in sources.values()) for i in (0,1))
+    calibrated_canvas,profile=processed_profile.edit_layout(list(sources.values()))
+    canvas=calibrated_canvas or tuple(max(info.size[i] for info in sources.values()) for i in (0,1))
     if canvas[0]*canvas[1]>MAX_PIXELS:raise ValueError('合并后的画布过大，请先统一画幅')
     # Raw opaque clips of different sizes cannot be padded without adding a backdrop.
     if not next(iter(kinds)) and len({v.size for v in sources.values()})>1:
@@ -115,9 +118,10 @@ def export(clips,target,infos=None,cancel=lambda:False,progress=lambda *a:None):
                         overlap=min(right,end)-max(timestamp,start)
                         if overlap>0:
                             if image.size!=info.size:raise ValueError('原片画布变化，请重新读取')
-                            if image.size!=canvas:
+                            offset=(round(profile['anchor'][0]-info.profile['anchor'][0]),round(profile['anchor'][1]-info.profile['anchor'][1])) if profile else ((canvas[0]-image.width)//2,canvas[1]-image.height)
+                            if image.size!=canvas or offset!=(0,0):
                                 padded=Image.new('RGBA',canvas)
-                                padded.paste(image,((canvas[0]-image.width)//2,canvas[1]-image.height))
+                                padded.paste(image,offset)
                                 image=padded
                             count+=1;progress(count,estimated_frames)
                             yield image,int(overlap)
@@ -127,7 +131,7 @@ def export(clips,target,infos=None,cancel=lambda:False,progress=lambda *a:None):
         check_cancel(cancel)
     try:
         iterator=sequence()
-        try:count,duration=write_animation(temporary,iterator)
+        try:count,duration=write_animation(temporary,iterator,xmp=processed_profile.encode(profile) if profile else None)
         finally:iterator.close()
         check_cancel(cancel)
         if count!=estimated_frames or duration!=total:raise ValueError('编码时序与选段不一致，未保存')

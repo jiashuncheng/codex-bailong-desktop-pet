@@ -36,8 +36,9 @@ class EditWorker(QThread):
         except Exception as error:self.failed.emit(str(error))
 
 class ClipEditor(QDialog):
-    def __init__(self,paths,config,parent=None):
+    def __init__(self,paths,config,parent=None,profiles=None):
         super().__init__(parent);self.config=config;self.entries={};self.infos={};self.worker=None
+        self.profiles={str(Path(k).resolve()):v for k,v in (profiles or {}).items()}
         self.preview_result=None;self.result_signature=None;self.result_path=None;self.saved_path=None
         self.pending_close=False;self.loading=False;self.seeking=False;self.showing_result=False;self.owned_previews=[]
         self.setWindowTitle('裁剪 / 拼接 · 保留原文件');self.resize(980,740);self.setMinimumSize(820,600)
@@ -98,6 +99,11 @@ class ClipEditor(QDialog):
     def add_scanned(self,infos,errors):
         first=None
         for info in infos:
+            inherited=self.profiles.get(info.path) or self.config.get('processed_profiles',{}).get(Path(info.path).name)
+            if inherited and not info.profile:
+                from processed_profile import validate
+                try:info=replace(info,profile=validate(inherited,info.size))
+                except ValueError as error:errors.append(Path(info.path).name+'：'+str(error));continue
             self.infos[info.path]=info;item=self.add_item(Clip(info.path,0,info.duration_ms))
             if first is None:first=item
         if first:self.list.setCurrentItem(first)

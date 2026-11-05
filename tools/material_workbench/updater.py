@@ -9,6 +9,8 @@ from webp_padding import pad_webp
 from config_store import load_config,pillow_font
 from alignment import adjusted_record,manual_values
 import integration as appio
+import processed_profile
+from motion_stabilization import analyse,transform_at,geometry_transforms
 
 BASE=Path(__file__).resolve().parent
 REVISION='bailong-cartoon-v2-eyes'
@@ -61,8 +63,12 @@ def decode_check(path,matcher=None,allow_source_edge=True):
 def prepare(path,config,matcher):
     sha,before=appio.stable_hash(path,config.get('settle_seconds',3))
     override=config.get('overrides',{}).get(path.name,{})
-    key=hashlib.sha256(json.dumps(dict(source=sha,revision=REVISION,override=override,
-        multiplier=config.get('extra_scale',1),reference=digest(BASE/'白龙标准参考.png')),sort_keys=True).encode()).hexdigest()
+    inherited=processed_profile.read(path) or config.get('processed_profiles',{}).get(path.name)
+    stabilize=bool(config.get('stabilize_actions',{}).get(path.name,False))
+    options=dict(source=sha,revision=REVISION,override=override,multiplier=config.get('extra_scale',1),reference=digest(BASE/'白龙标准参考.png'))
+    if inherited:options['processedProfile']=processed_profile.validate(inherited)
+    if stabilize:options['stabilizeRevision']=1
+    key=hashlib.sha256(json.dumps(options,sort_keys=True).encode()).hexdigest()
     cache=Path(config['state_dir'])/'sources'/key;receipt=cache/'record.json'
     old=read_json(receipt,{})
     if old and Path(old.get('cache','')).is_file() and digest(old['cache'])==old.get('cacheSha256'):
@@ -89,10 +95,16 @@ def prepare(path,config,matcher):
     info,first=decode_check(native,matcher,allow_source_edge=True)
     if not transparent and (info['frames']!=source_stats[0] or info['durationMs']!=source_stats[1]):raise ValueError('抠图后帧数/时序变化')
     if appio.snapshot(path)!=before or digest(path)!=sha:raise ValueError('文件仍在变化，留待下次处理')
-    scale,matches=calibrate(info['faceSamples'],override)
-    scale*=float(config.get('extra_scale',1))
+    if inherited:
+        inherited=processed_profile.validate(inherited,info['size'])
+        scale=607/inherited['referenceHeight'];matches=[]
+        log('沿用已处理素材的尺度与脚底，不再重复校准',file=path.name)
+    else:
+        scale,matches=calibrate(info['faceSamples'],override)
+        scale*=float(config.get('extra_scale',1))
     if not math.isfinite(scale) or not .2<=scale<=5:raise ValueError('人物缩放超出范围')
-    if override.get('anchor'):anchor=override['anchor']
+    if inherited:anchor=inherited['anchor']
+    elif override.get('anchor'):anchor=override['anchor']
     elif matches:
         first_match=next((v for v in matches if v.get('frame')==0),None)
         if first_match is None:
@@ -105,15 +117,22 @@ def prepare(path,config,matcher):
     record=dict(source=str(path),sourceSha256=sha,cache=str(native),cacheSha256=digest(native),info=info,
         transform=dict(scale=scale,anchor=list(map(float,anchor)),sourceSize=info['size']),name=config.get('action_names',{}).get(path.name,path.stem),
         calibration=dict(method='白龙双眼与脸部模板匹配',matches=matches,manual=bool(override.get('scale'))))
+    if inherited:
+        record['calibration'].update(method='继承已处理素材的固定尺度与脚底',inherited=True);record['processedProfile']=inherited
+    if stabilize:
+        if inherited and inherited['stabilizationBaked']:
+            record['stabilization']=dict(schema=1,frames=info['frames'],gains=[1.]*info['frames'],footY=[anchor[1]]*info['frames'],alreadyBaked=True)
+        else:record['stabilization']=analyse(native,matcher,log)
     atomic_json(receipt,record);return adjusted_record(record,config.get('adjustments',{}).get(path.name))
 
 def geometry(actions):
     # Original 720 canvas stays centered; only transparent padding changes.
     extent=360
     for a in actions.values():
-        t=a['transform'];s=t['scale'];x,y=t['anchor'];l,top,r,b=a['info']['union']
-        dx,dy=t.get('offset',[0,0]);relative=[(l-x)*s+dx,(top-y)*s+dy,(r-x)*s+dx,(b-y)*s+dy]
-        extent=max(extent,-relative[0]+24,relative[2]+24,-relative[1]-308+24,relative[3]+308+24)
+        for t in geometry_transforms(a):
+            s=t['scale'];x,y=t['anchor'];l,top,r,b=a['info']['union']
+            dx,dy=t.get('offset',[0,0]);relative=[(l-x)*s+dx,(top-y)*s+dy,(r-x)*s+dx,(b-y)*s+dy]
+            extent=max(extent,-relative[0]+24,relative[2]+24,-relative[1]-308+24,relative[3]+308+24)
     side=max(800,math.ceil(extent*2/8)*8)
     if side>2048:raise ValueError('动作跨度过大，画布超过当前播放器2048上限，请检查校准')
     pad=(side-720)//2
@@ -135,8 +154,12 @@ def build_runtime(config,base_root,base,actions):
     from desktop_services import all_items,validate_character
     from sustained_assets import seam_items
     side,pad,anchor=geometry(actions);state=Path(config['state_dir'])
+    identities={k:[v['cacheSha256'],v['transform'],v['name']] for k,v in actions.items()}
+    for k,v in actions.items():
+        if v.get('stabilization'):identities[k].append(v['stabilization'])
+        if not v.get('automatic',True):identities[k].append({'automatic':False})
     fingerprint=hashlib.sha256(json.dumps(dict(base=digest(base_root/'素材清单.json'),canvas=side,
-        revision=REVISION,manifestRevision=MANIFEST_REVISION,actions={k:[v['cacheSha256'],v['transform'],v['name']] for k,v in actions.items()}),sort_keys=True).encode()).hexdigest()
+        revision=REVISION,manifestRevision=MANIFEST_REVISION,actions=identities),sort_keys=True).encode()).hexdigest()
     release=state/'releases'/fingerprint
     if appio.valid_release(release):
         log('播放库已是本次版本，无需重新生成');return release,read_json(release/'素材清单.json'),False
@@ -163,7 +186,9 @@ def build_runtime(config,base_root,base,actions):
     preview=Image.new('RGB',(600,350*max(1,math.ceil(len(actions)/2))),(240,240,240));draw=ImageDraw.Draw(preview)
     font=pillow_font(14)
     for index,(action,record) in enumerate(sorted(actions.items())):
-        playback_key=hashlib.sha256(json.dumps(dict(source=record['cacheSha256'],transform=record['transform'],canvas=side),sort_keys=True).encode()).hexdigest()
+        identity=dict(source=record['cacheSha256'],transform=record['transform'],canvas=side)
+        if record.get('stabilization'):identity['stabilization']=record['stabilization']
+        playback_key=hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest()
         cached=state/'playback-cache'/(playback_key+'.webp');cached.parent.mkdir(parents=True,exist_ok=True)
         metadata=cached.with_suffix('.json');old=read_json(metadata,{})
         if not cached.exists() or old.get('sha256')!=digest(cached):
@@ -171,17 +196,19 @@ def build_runtime(config,base_root,base,actions):
             def converted():
                 for frame_index,(im,ms) in enumerate(frames(record['cache'])):
                     if frame_index%48==0:log('新增素材编码进度',action=action,frame=frame_index+1,total=record['info']['frames'])
-                    yield placed(im,record['transform'],side,anchor),ms
-            tmp=cached.with_name(cached.stem+'-tmp.webp');count,duration=write_animation(tmp,converted())
+                    yield placed(im,transform_at(record,frame_index),side,anchor),ms
+            profile=processed_profile.from_layout(dict(canvas=[side,side],anchor=anchor),baked=bool(record.get('stabilization')) or bool(record.get('processedProfile',{}).get('stabilizationBaked')))
+            tmp=cached.with_name(cached.stem+'-tmp.webp');count,duration=write_animation(tmp,converted(),xmp=processed_profile.encode(profile))
             info,first=decode_check(tmp,allow_source_edge=False)
             if (count,duration)!=(record['info']['frames'],record['info']['durationMs']):raise ValueError('输出帧数/时序变化')
             if (info['frames'],info['durationMs'])!=(count,duration):raise ValueError('逐帧回读检查失败')
             os.replace(tmp,cached);old=dict(sha256=digest(cached),info=info);atomic_json(metadata,old)
         else:info=old['info'];first=next(frames(cached))[0]
         name='custom/'+action+'.webp';link_copy(cached,stage/name)
-        item=dict(id=action,name=record['name'],file=name,durationMs=info['durationMs'],automatic=True,
+        item=dict(id=action,name=record['name'],file=name,durationMs=info['durationMs'],automatic=record.get('automatic',True),
             renderScale=1.,renderOffset=[0,0],sourceFrames=record['info']['frames'],decodedFrames=info['frames'],
             sourceSha256=record['sourceSha256'],playbackSha256=old['sha256'],manualAdjustment=record.get('manualAdjustment'))
+        if record.get('stabilization'):item['stabilizationEnabled']=True
         manifest.setdefault('variants',[]).append(item)
         manifest.setdefault('clickAnimations',[]).append(copy.deepcopy(item))
         b=info['union'];bounds=[min(bounds[0],b[0]),min(bounds[1],b[1]),max(bounds[2],b[2]),max(bounds[3],b[3])]
@@ -259,11 +286,17 @@ def run(config,prepare_only=False,selected_files=None,activate_only=False):
             except Exception as error:
                 failures.append(dict(file=str(path),error=str(error)));log('本条未更新，保留旧动作',file=path.name,error=str(error))
         if not actions:raise ValueError('没有可用的新增动作；当前白龙保持不变')
+        for record in actions.values():
+            wanted=bool(config.get('automatic_actions',{}).get(Path(record['source']).name,True))
+            if activate_only and wanted!=record.get('automatic',True):raise ValueError('有随机动作设置尚未重新生成，请先处理')
+            record['automatic']=wanted
         if not prepare_only:
             for record in actions.values():
                 requested=config.get('adjustments',{}).get(Path(record['source']).name)
                 if manual_values(requested)!=manual_values(record.get('manualAdjustment')):
                     raise ValueError('有手动调整尚未重新生成，请先处理这些动作，再加入桌宠')
+                if bool(config.get('stabilize_actions',{}).get(Path(record['source']).name))!=bool(record.get('stabilization')):
+                    raise ValueError('有稳定选项尚未重新生成，请先处理这些动作')
         if activate_only:
             release=Path(saved.get('release',''))
             if not appio.valid_release(release):raise ValueError('还没有完整的处理结果，请先处理素材并预览')

@@ -226,7 +226,11 @@ class MaterialWorkbench(QMainWindow):
         row=self.current_row;processed=self.tabs.currentIndex()==1
         paths=[row['processed']] if processed and row.get('processed') else [row['path']]
         playing=self.canvas.playing;self.canvas.set_playing(False)
-        dialog=ClipEditor(paths,self.config,self)
+        profiles={}
+        if processed and self.inventory.get('layout'):
+            from processed_profile import from_layout
+            profiles={paths[0]:from_layout(self.inventory['layout'],baked=bool((row.get('record') or {}).get('stabilization')))}
+        dialog=ClipEditor(paths,self.config,self,profiles=profiles)
         if dialog.exec()==QDialog.DialogCode.Accepted and dialog.saved_path:
             self.current_row={'path':dialog.saved_path};self.refresh()
         else:self.canvas.set_playing(playing)
@@ -235,6 +239,8 @@ class MaterialWorkbench(QMainWindow):
         if self.busy or not row or not row.get('record'):return
         self.canvas.set_playing(False);dialog=AlignmentDialog(row,self.config,self)
         if dialog.exec()==QDialog.DialogCode.Accepted:
+            self.config.setdefault('stabilize_actions',{})[row['file']]=dialog.result_stabilize
+            self.config.setdefault('automatic_actions',{})[row['file']]=dialog.result_automatic
             self.config.setdefault('adjustments',{})[row['file']]=dialog.result_adjustment;save_config(self.config_path,self.config)
             self.start_processing(selected_files=[row['path']],preview_only=True)
     def playing_changed(self,value):self.play_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause if value else QStyle.StandardPixmap.SP_MediaPlay))

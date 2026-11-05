@@ -61,7 +61,7 @@ def save_config(path,cfg,platform=None):
     path=Path(path);platform=platform or sys.platform
     raw=json.loads(path.read_text(encoding='utf-8-sig')) if path.exists() else {}
     raw.setdefault('platforms',{})[platform]={k:cfg[k] for k in PATH_KEYS if k in cfg}
-    for key in ('extra_scale','auto_apply','action_names','preview_background','preview_speed','adjustments'):
+    for key in ('extra_scale','auto_apply','action_names','preview_background','preview_speed','adjustments','stabilize_actions','processed_profiles','automatic_actions'):
         if key in cfg:raw[key]=cfg[key]
     # Retain the established Windows CLI configuration; other platforms use their slot.
     if platform=='win32':

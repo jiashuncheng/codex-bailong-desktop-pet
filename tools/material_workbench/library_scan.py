@@ -39,8 +39,10 @@ class ScanWorker(QThread):
                 match=bool(record and record.get('sourceSha256')==sha)
                 processed=Path(config['output_dir'])/(processed_action+'.webp')
                 manual=manual_values(config.get('adjustments',{}).get(path.name));stored=manual_values((record or {}).get('manualAdjustment'))
-                current=match and manual==stored
-                joined=sha in active_items and stored==manual_values(active_items[sha].get('manualAdjustment'))
+                requested_stable=bool(config.get('stabilize_actions',{}).get(path.name))
+                requested_auto=bool(config.get('automatic_actions',{}).get(path.name,True))
+                current=match and manual==stored and requested_stable==bool((record or {}).get('stabilization')) and requested_auto==(record or {}).get('automatic',True)
+                joined=sha in active_items and stored==manual_values(active_items[sha].get('manualAdjustment')) and requested_stable==bool(active_items[sha].get('stabilizationEnabled')) and requested_auto==active_items[sha].get('automatic',True)
                 status='已加入' if current and joined else '已处理' if current else '待重生成' if match else '有更新' if record else '待处理'
                 error=errors.get(str(path.resolve()),'')
                 if error and not match:status='失败'

@@ -1,6 +1,10 @@
 # 白龙素材工作台
 
+<img src="icons/bailong-editor-preview.png" width="112" alt="白龙素材编辑器：白龙头像与胶片剪刀" />
+
 PySide6 / Qt 桌面工具：扫描新增视频 → 在界面检查原片和处理结果 → 拖动、滚轮或数值调整 → 生成 → 加入桌宠。处理算法、界面和加载事务一起维护；无需改当前桌宠的大小和位置。
+
+Windows 可在仓库根目录运行 `创建素材编辑器桌面图标.cmd`，或用当前环境运行 `python tools/material_workbench/install_shortcut.py`。桌面入口名为“白龙素材编辑器”，使用白龙头像加紫色胶片剪刀标记，直接启动工作台；重复执行会更新同一个编辑器快捷方式，不覆盖其他同名程序。图标包含16至256像素多尺寸ICO、PNG和可编辑SVG；角色来源遵循仓库 `NOTICE.md`。macOS继续使用 `素材工作台.command`，桌面链接安装入口仅适用于Windows。
 
 ## 安装与启动
 

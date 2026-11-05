@@ -13,6 +13,7 @@ from preview_player import PreviewCanvas,GUIDE_LEGEND
 from alignment_editor import AlignmentDialog,display_factor
 from desktop_reference import load_desktop_reference,MODES
 from modern_controls import ModernComboBox as QComboBox,dropdown_style
+from branding import editor_icon,configure_native_identity
 
 BASE=Path(__file__).resolve().parent
 STYLE='''
@@ -60,6 +61,7 @@ class MaterialWorkbench(QMainWindow):
     def __init__(self,config_path=None):
         super().__init__();self.config_path=Path(config_path or BASE/'配置.json');self.config=load_config(self.config_path)
         self.setWindowTitle('白龙素材工作台');self.resize(1180,780);self.setMinimumSize(900,630)
+        self.setWindowIcon(editor_icon())
         self.setStyleSheet(STYLE);self.rows=[];self.inventory={};self.scan_workers=[];self.current_row=None
         self.busy=False;self.buffer=b'';self.last_report=None;self.last_error='';self.seeking=False;self.process_mode='';self.result_notice='';self.focus_processed=False
         root=QWidget();root.setObjectName('root');self.setCentralWidget(root)
@@ -338,7 +340,9 @@ class MaterialWorkbench(QMainWindow):
         self.canvas.close_player();event.accept()
 
 def main():
+    configure_native_identity()
     app=QApplication.instance() or QApplication(sys.argv);app.setApplicationName('白龙素材工作台');app.setStyle('Fusion')
+    app.setWindowIcon(editor_icon())
     app.setFont(QFont('PingFang SC' if sys.platform=='darwin' else 'Microsoft YaHei UI' if sys.platform=='win32' else 'Noto Sans',10))
     window=MaterialWorkbench();screen=app.primaryScreen().availableGeometry();window.resize(min(1180,screen.width()-60),min(780,screen.height()-70));window.show();return app.exec()
 if __name__=='__main__':sys.exit(main())

@@ -7,6 +7,7 @@ from preview_player import PreviewCanvas,GUIDE_LEGEND
 from alignment import adjusted_record,manual_values,placement_rect
 from desktop_reference import display_factor,load_desktop_reference,MODES
 from motion_stabilization import transform_at
+from modern_controls import ModernComboBox as QComboBox
 
 def scene_for(record,actions,frame_index=0):
     from updater import geometry

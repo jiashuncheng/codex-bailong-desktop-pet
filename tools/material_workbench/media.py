@@ -153,21 +153,30 @@ def inspect(path, face=None, sample_faces=True, reject_source_clipping=True):
                 union=union,firstBox=boxes[0],faces=faces,
                 sourceEdgeTouchFrames=len(touch),sourceEdgeTouchExamples=touch[:12]),first
 
-def write_animation(path, iterator, xmp=None):
-    """Lossless WebP; integer per-frame durations, no dropped duplicate frames."""
+def write_animation(path, iterator, xmp=None, encoding='lossless'):
+    """WebP with explicit color quality, lossless alpha and original frame timing."""
     from PIL import _webp
-    encoder=None;timestamp=0;count=0;size=None
+    from encoding_presets import preset
+    settings=preset(encoding);lossless=settings['lossless'];quality=settings['quality'];method=settings['method']
+    encoder=None;timestamp=0;count=0;size=None;has_transparency=False
     for im,ms in iterator:
         if encoder is None:
             size=im.size
-            encoder=_webp.WebPAnimEncoder(im.size,0,0,False,9,17,False,False)
+            encoder=_webp.WebPAnimEncoder(im.size,0,0,not lossless,9,17,False,False)
         if size!=im.size:raise ValueError('画布不一致')
+        has_transparency |= 'A' in im.getbands() and im.getchannel('A').getextrema()[0]<255
         # Pillow's own plugin uses this API; unlike FFmpeg it preserves variable timing.
-        im.load();encoder.add(im.getim(),timestamp,True,100,100,1)
+        im.load();encoder.add(im.getim(),timestamp,lossless,quality,100,method)
         timestamp+=int(ms);count+=1
     if encoder is None:raise ValueError('空动画')
-    encoder.add(None,timestamp,True,100,100,0)
+    encoder.add(None,timestamp,lossless,quality,100,method)
     data=encoder.assemble('', '', xmp or '')
+    # An animation containing opaque cropped rectangles can have transparent
+    # canvas margins while libwebp omits VP8X's alpha flag. Pillow otherwise
+    # selects RGB and discards those margins. Set the flag from actual input.
+    # https://developers.google.com/speed/webp/docs/riff_container
+    if has_transparency and len(data)>=30 and data[:4]==b'RIFF' and data[8:16]==b'WEBPVP8X' and not data[20]&0x10:
+        fixed=bytearray(data);fixed[20]|=0x10;data=bytes(fixed)
     Path(path).write_bytes(data)
     return count,timestamp
 

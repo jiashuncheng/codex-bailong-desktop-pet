@@ -39,6 +39,7 @@ def normalize(raw,base,platform=None,home=None):
     cfg.setdefault('character_key','bailong-custom-final');cfg.setdefault('extra_scale',1.)
     cfg.setdefault('recursive',True);cfg.setdefault('prefer_export_subdir',True)
     cfg.setdefault('settle_seconds',3);cfg.setdefault('overrides',{})
+    cfg.setdefault('clip_encodings',['q95','lossless'])
     cfg['input_dir']=cfg.get('input_dir') or str(base/'input')
     cfg['output_dir']=cfg.get('output_dir') or str(base/'processed')
     candidate=source_root(base)
@@ -61,7 +62,7 @@ def save_config(path,cfg,platform=None):
     path=Path(path);platform=platform or sys.platform
     raw=json.loads(path.read_text(encoding='utf-8-sig')) if path.exists() else {}
     raw.setdefault('platforms',{})[platform]={k:cfg[k] for k in PATH_KEYS if k in cfg}
-    for key in ('extra_scale','auto_apply','action_names','preview_background','preview_speed','adjustments','stabilize_actions','processed_profiles','automatic_actions'):
+    for key in ('extra_scale','auto_apply','action_names','preview_background','preview_speed','adjustments','stabilize_actions','processed_profiles','automatic_actions','clip_encodings'):
         if key in cfg:raw[key]=cfg[key]
     # Retain the established Windows CLI configuration; other platforms use their slot.
     if platform=='win32':

@@ -149,6 +149,15 @@ def shift_render_metadata(manifest,side,pad):
             for v in value:visit(v)
     visit(manifest)
 
+def preserve_processed_bytes(record,side,anchor):
+    transform=record['transform'];profile=record.get('processedProfile')
+    if not profile or Path(record['cache']).suffix.lower()!='.webp':return False
+    if record.get('stabilization') and not record['stabilization'].get('alreadyBaked'):return False
+    if list(transform['sourceSize'])!=[side,side] or abs(transform['scale']-1)>1e-9:return False
+    if any(abs(v)>1e-9 for v in transform.get('offset',[0,0])):return False
+    if any(abs(a-b)>1e-9 for a,b in zip(transform['anchor'],anchor)):return False
+    return processed_profile.read(record['cache'])==profile
+
 def build_runtime(config,base_root,base,actions):
     sys.path.insert(0,str(Path(config['app_root'])/'app'))
     from desktop_services import all_items,validate_character
@@ -158,6 +167,7 @@ def build_runtime(config,base_root,base,actions):
     for k,v in actions.items():
         if v.get('stabilization'):identities[k].append(v['stabilization'])
         if not v.get('automatic',True):identities[k].append({'automatic':False})
+        if preserve_processed_bytes(v,side,anchor):identities[k].append({'preserveCompressed':True})
     fingerprint=hashlib.sha256(json.dumps(dict(base=digest(base_root/'素材清单.json'),canvas=side,
         revision=REVISION,manifestRevision=MANIFEST_REVISION,actions=identities),sort_keys=True).encode()).hexdigest()
     release=state/'releases'/fingerprint
@@ -188,6 +198,8 @@ def build_runtime(config,base_root,base,actions):
     for index,(action,record) in enumerate(sorted(actions.items())):
         identity=dict(source=record['cacheSha256'],transform=record['transform'],canvas=side)
         if record.get('stabilization'):identity['stabilization']=record['stabilization']
+        direct=preserve_processed_bytes(record,side,anchor)
+        if direct:identity['preserveCompressed']=True
         playback_key=hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest()
         cached=state/'playback-cache'/(playback_key+'.webp');cached.parent.mkdir(parents=True,exist_ok=True)
         metadata=cached.with_suffix('.json');old=read_json(metadata,{})
@@ -198,7 +210,11 @@ def build_runtime(config,base_root,base,actions):
                     if frame_index%48==0:log('新增素材编码进度',action=action,frame=frame_index+1,total=record['info']['frames'])
                     yield placed(im,transform_at(record,frame_index),side,anchor),ms
             profile=processed_profile.from_layout(dict(canvas=[side,side],anchor=anchor),baked=bool(record.get('stabilization')) or bool(record.get('processedProfile',{}).get('stabilizationBaked')))
-            tmp=cached.with_name(cached.stem+'-tmp.webp');count,duration=write_animation(tmp,converted(),xmp=processed_profile.encode(profile))
+            tmp=cached.with_name(cached.stem+'-tmp.webp')
+            if direct:
+                log('尺度与位置未改变，直接复用剪辑编码，不再转成大文件',file=record['name'])
+                link_copy(record['cache'],tmp);count,duration=record['info']['frames'],record['info']['durationMs']
+            else:count,duration=write_animation(tmp,converted(),xmp=processed_profile.encode(profile))
             info,first=decode_check(tmp,allow_source_edge=False)
             if (count,duration)!=(record['info']['frames'],record['info']['durationMs']):raise ValueError('输出帧数/时序变化')
             if (info['frames'],info['durationMs'])!=(count,duration):raise ValueError('逐帧回读检查失败')

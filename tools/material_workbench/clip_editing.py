@@ -72,9 +72,31 @@ def bounds(clip,info):
     if not 1<=repeat<=20:raise ValueError('每段重复次数为1至20次')
     return start,end,repeat
 
-def export(clips,target,infos=None,cancel=lambda:False,progress=lambda *a:None):
+def composition(infos):
+    infos=list(infos);kinds={info.alpha for info in infos}
+    if len(kinds)>1:raise ValueError('透明素材与不透明原片请先统一抠图，再拼接，避免拼入一块背景')
+    calibrated,profile=processed_profile.edit_layout(infos)
+    canvas=calibrated or tuple(max(info.size[i] for info in infos) for i in (0,1))
+    if canvas[0]*canvas[1]>MAX_PIXELS:raise ValueError('合并后的画布过大，请先统一画幅')
+    if not next(iter(kinds)) and len({info.size for info in infos})>1:raise ValueError('不透明原片画幅不同，请先统一处理')
+    return canvas,profile
+
+def compose_frame(image,info,canvas,profile):
+    offset=(round(profile['anchor'][0]-info.profile['anchor'][0]),round(profile['anchor'][1]-info.profile['anchor'][1])) if profile else ((canvas[0]-image.width)//2,canvas[1]-image.height)
+    if image.size!=canvas or offset!=(0,0):
+        padded=Image.new('RGBA',canvas);padded.paste(image,offset);return padded
+    return image
+
+def can_copy_lossless(clips,sources,canvas,profile):
+    info=sources[str(Path(clips[0].path).resolve())]
+    return (len(clips)==1 and Path(info.path).suffix.lower()=='.webp' and bounds(clips[0],info)==(0,info.duration_ms,1)
+        and info.size==canvas and processed_profile.read(info.path)==profile)
+
+def export(clips,target,infos=None,cancel=lambda:False,progress=lambda *a:None,encoding='lossless'):
     """Exact half-open intervals; pad bottom/centre, never stretch or resample."""
     clips=list(clips);target=Path(target).resolve()
+    from encoding_presets import preset
+    preset(encoding)
     if not clips:raise ValueError('请先添加片段')
     if target.suffix.lower()!='.webp':raise ValueError('请导出为保留透明度的动画 WebP')
     if target.exists():raise FileExistsError('目标文件已存在，请换一个名称；原文件不会覆盖')
@@ -86,14 +108,7 @@ def export(clips,target,infos=None,cancel=lambda:False,progress=lambda *a:None):
         if info is None:info=probe(path,cancel)
         if snapshot(path)!=info.stamp:raise ValueError('原片已变化，请重新添加片段')
         sources[path]=info
-    kinds={v.alpha for v in sources.values()}
-    if len(kinds)>1:raise ValueError('透明素材与不透明原片请先统一抠图，再拼接，避免拼入一块背景')
-    calibrated_canvas,profile=processed_profile.edit_layout(list(sources.values()))
-    canvas=calibrated_canvas or tuple(max(info.size[i] for info in sources.values()) for i in (0,1))
-    if canvas[0]*canvas[1]>MAX_PIXELS:raise ValueError('合并后的画布过大，请先统一画幅')
-    # Raw opaque clips of different sizes cannot be padded without adding a backdrop.
-    if not next(iter(kinds)) and len({v.size for v in sources.values()})>1:
-        raise ValueError('不透明原片画幅不同，请先抠成透明并统一人物大小后再拼接')
+    kinds={v.alpha for v in sources.values()};canvas,profile=composition(sources.values())
     total=0;estimated_frames=0
     for clip in clips:
         info=sources[str(Path(clip.path).resolve())];start,end,repeat=bounds(clip,info)
@@ -105,6 +120,8 @@ def export(clips,target,infos=None,cancel=lambda:False,progress=lambda *a:None):
     target.parent.mkdir(parents=True,exist_ok=True)
     fd,name=tempfile.mkstemp(prefix='.bailong-edit-',suffix='.tmp',dir=target.parent);os.close(fd)
     temporary=Path(name)
+    single_info=sources[str(Path(clips[0].path).resolve())]
+    direct_copy=encoding=='lossless' and can_copy_lossless(clips,sources,canvas,profile)
     def sequence():
         count=0
         for clip in clips:
@@ -118,11 +135,7 @@ def export(clips,target,infos=None,cancel=lambda:False,progress=lambda *a:None):
                         overlap=min(right,end)-max(timestamp,start)
                         if overlap>0:
                             if image.size!=info.size:raise ValueError('原片画布变化，请重新读取')
-                            offset=(round(profile['anchor'][0]-info.profile['anchor'][0]),round(profile['anchor'][1]-info.profile['anchor'][1])) if profile else ((canvas[0]-image.width)//2,canvas[1]-image.height)
-                            if image.size!=canvas or offset!=(0,0):
-                                padded=Image.new('RGBA',canvas)
-                                padded.paste(image,offset)
-                                image=padded
+                            image=compose_frame(image,info,canvas,profile)
                             count+=1;progress(count,estimated_frames)
                             yield image,int(overlap)
                         timestamp=right
@@ -130,9 +143,15 @@ def export(clips,target,infos=None,cancel=lambda:False,progress=lambda *a:None):
                 finally:iterator.close()
         check_cancel(cancel)
     try:
-        iterator=sequence()
-        try:count,duration=write_animation(temporary,iterator,xmp=processed_profile.encode(profile) if profile else None)
-        finally:iterator.close()
+        if direct_copy:
+            check_cancel(cancel)
+            with open(single_info.path,'rb') as source,open(temporary,'wb') as dest:
+                while chunk:=source.read(1024*1024):check_cancel(cancel);dest.write(chunk)
+            count=estimated_frames;duration=total;progress(count,count)
+        else:
+            iterator=sequence()
+            try:count,duration=write_animation(temporary,iterator,xmp=processed_profile.encode(profile) if profile else None,encoding=encoding)
+            finally:iterator.close()
         check_cancel(cancel)
         if count!=estimated_frames or duration!=total:raise ValueError('编码时序与选段不一致，未保存')
         # Decode the actual output before publishing it; WebP may coalesce equal frames.
@@ -150,7 +169,7 @@ def export(clips,target,infos=None,cancel=lambda:False,progress=lambda *a:None):
         check_cancel(cancel)
         publish(temporary,target,cancel)
         return dict(path=str(target),size=list(canvas),durationMs=total,frames=decoded_count,
-                    alpha=next(iter(kinds)),segments=len(clips),durations=durations)
+                    alpha=next(iter(kinds)),segments=len(clips),durations=durations,encoding=encoding,bytes=target.stat().st_size)
     finally:temporary.unlink(missing_ok=True)
 
 def _decoded_webp(path):
@@ -171,4 +190,19 @@ def publish(source,target,cancel=lambda:False):
         check_cancel(cancel)
     except BaseException:
         if owned:target.unlink(missing_ok=True)
+        raise
+
+def publish_batch(jobs,cancel=lambda:False):
+    jobs=[(Path(source),Path(target)) for source,target in jobs]
+    targets=[str(target.resolve()) for _,target in jobs]
+    if len(set(targets))!=len(targets):raise ValueError('批量输出名称重复')
+    if any(target.exists() for _,target in jobs):raise FileExistsError('有同名文件，请换一组名称；未覆盖已有文件')
+    created=[]
+    try:
+        for source,target in jobs:
+            check_cancel(cancel);publish(source,target,cancel);created.append((target,snapshot(target)))
+        return [str(target.resolve()) for _,target in jobs]
+    except BaseException:
+        for target,stamp in created:
+            if target.exists() and snapshot(target)==stamp:target.unlink()
         raise

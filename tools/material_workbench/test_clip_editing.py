@@ -59,7 +59,7 @@ class ClipEditingTests(unittest.TestCase):
         self.assertEqual(target.read_bytes(),b'keep');self.assertEqual(hashlib.sha256(path.read_bytes()).digest(),before)
     def test_cancel_mid_export_removes_temporary_and_new_output(self):
         path=self.source();flag=[False];out=self.root/'cancel.webp'
-        def progress(n,total):flag[0]=n==2
+        def progress(n,total):flag[0]=n>=2
         with self.assertRaises(InterruptedError):export([Clip(str(path))],out,cancel=lambda:flag[0],progress=progress)
         self.assertFalse(out.exists());self.assertFalse(list(self.root.glob('.bailong-edit-*')))
     def test_changed_source_invalidates_previously_probed_metadata(self):

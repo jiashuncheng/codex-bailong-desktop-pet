@@ -26,7 +26,7 @@ class ClipEditorTests(unittest.TestCase):
         self.dialog=ClipEditor([str(self.path)],dict(input_dir=str(self.input),state_dir=str(self.root/'state')))
         self.dialog.show();self.assertTrue(wait(lambda:self.dialog.worker is None and self.dialog.list.count()==1))
     def tearDown(self):
-        self.dialog.reject();wait(lambda:self.dialog.worker is None);self.dialog.close();APP.processEvents();self.tmp.cleanup()
+        self.dialog.reject();wait(lambda:self.dialog.worker is None and self.dialog.estimator is None);self.dialog.close();APP.processEvents();self.tmp.cleanup()
     def test_frame_markers_use_start_and_end_of_current_variable_duration_frame(self):
         d=self.dialog;d.canvas.index=1;d.set_start_here();d.canvas.index=2;d.set_end_here()
         self.assertEqual((d.current().start_ms,d.current().end_ms),(40,240));self.assertIn('0.200',d.total.text())
@@ -63,3 +63,27 @@ class ClipEditorTests(unittest.TestCase):
         with patch('clip_editor.probe',side_effect=delayed):
             d.add_paths([str(self.path)]);self.assertIsNotNone(d.worker);d.close()
             self.assertTrue(wait(lambda:d.worker is None and not d.isVisible()))
+    def test_multiselect_encodings_can_be_compared_and_saved_together(self):
+        d=self.dialog;d.encoding_selector.boxes['q95'].setChecked(True);d.generate_or_save()
+        self.assertTrue(wait(lambda:d.worker is None and len(d.preview_results)==2))
+        self.assertTrue(d.version.isVisible());self.assertTrue(d.save_all_button.isVisible())
+        self.assertEqual(d.preview_result['encoding'],'q95');d.version.setCurrentIndex(1)
+        self.assertEqual(d.preview_result['encoding'],'lossless');self.assertIn('MB',d.version.currentText())
+        with patch('clip_editor.QFileDialog.getExistingDirectory',return_value=str(self.input)):d.save_all()
+        self.assertTrue(wait(lambda:d.worker is None and len(d.saved_paths)==2));self.assertTrue(all(Path(p).exists() for p in d.saved_paths))
+    def test_no_encoding_selected_disables_generation(self):
+        d=self.dialog;d.encoding_selector.boxes['lossless'].setChecked(False);self.assertFalse(d.generate_button.isEnabled())
+    def test_dropdown_uses_modern_popup_without_losing_keyboard_selection(self):
+        from modern_controls import ModernComboBox,dropdown_style
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        box=ModernComboBox();box.setStyleSheet(dropdown_style());box.addItems(['高清 Q95','均衡 Q90']);box.resize(160,38);box.show()
+        try:
+            box.showPopup();APP.processEvents();self.assertTrue(box.view().isVisible())
+            QTest.keyClick(box,Qt.Key.Key_Down);QTest.keyClick(box,Qt.Key.Key_Return);APP.processEvents();self.assertEqual(box.currentIndex(),1)
+        finally:box.hidePopup();box.close()
+    def test_size_estimates_update_when_clip_length_changes(self):
+        d=self.dialog;self.assertTrue(wait(lambda:d.estimator is None and len(d.estimate_values)==4))
+        self.assertTrue(any(unit in d.encoding_selector.boxes['q95'].text() for unit in ('MB','KB')))
+        previous=d.estimate_key;d.repeat.setValue(2);self.assertNotEqual(previous,d.estimate_key)
+        self.assertTrue(wait(lambda:d.estimator is None and len(d.estimate_values)==4));self.assertTrue(d.estimate_values['q95']['bytes']>0)

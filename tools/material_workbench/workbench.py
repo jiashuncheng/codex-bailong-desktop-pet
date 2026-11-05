@@ -12,6 +12,7 @@ from library_scan import ScanWorker,read_json
 from preview_player import PreviewCanvas,GUIDE_LEGEND
 from alignment_editor import AlignmentDialog,display_factor
 from desktop_reference import load_desktop_reference,MODES
+from modern_controls import ModernComboBox as QComboBox,dropdown_style
 
 BASE=Path(__file__).resolve().parent
 STYLE='''
@@ -48,6 +49,8 @@ def label(text='',name=None):
     result=QLabel(text)
     if name:result.setObjectName(name)
     return result
+
+STYLE+=dropdown_style()
 
 def nice_name(value):
     import re

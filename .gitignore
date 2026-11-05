@@ -43,3 +43,13 @@ token-sync-status.json
 token-sync-cache.json
 
 /work/
+
+# Workbench inputs, generated files and machine-specific configuration.
+tools/material_workbench/配置.json
+tools/material_workbench/配置.tmp
+tools/material_workbench/models/
+tools/material_workbench/input/
+tools/material_workbench/processed/
+tools/material_workbench/最近结果.json
+tools/material_workbench/*校验.json
+tools/material_workbench/验证结果.json

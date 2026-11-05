@@ -4,6 +4,33 @@ from bisect import bisect_left
 import math
 
 
+def character_geometry(owner):
+    """Stable visible envelope, opt-in for padded rectangular character packs.
+
+    Never inspect pixels on a frame clock. The declared animation envelope is
+    mapped through the same source target used for painting, then translated
+    into global logical coordinates. Legacy packs retain their HWND bounds.
+    """
+    fallback=owner.frameGeometry()
+    manifest=getattr(owner,'manifest',{})
+    value=manifest.get('canvasLayout') if isinstance(manifest,dict) else None
+    if not isinstance(value,dict) or value.get('schema')!=1:return fallback
+    bounds=value.get('panelBounds',value.get('alphaUnion'))
+    if bounds is None or not hasattr(owner,'frame_target'):return fallback
+    try:
+        width,height=map(float,value['canvas'])
+        left,top,right,bottom=map(float,bounds)
+        if not all(math.isfinite(v) for v in (width,height,left,top,right,bottom)):return fallback
+        if not 0<=left<right<=width or not 0<=top<bottom<=height:return fallback
+        target=owner.frame_target(QRectF(owner.rect()))
+        rect=QRectF(target.x()+target.width()*left/width,
+                    target.y()+target.height()*top/height,
+                    target.width()*(right-left)/width,
+                    target.height()*(bottom-top)/height)
+        return rect.translated(fallback.x(),fallback.y()).toAlignedRect()
+    except (KeyError,TypeError,ValueError,OverflowError):return fallback
+
+
 def distance(a,b):return math.hypot(b.x()-a.x(),b.y()-a.y())
 
 

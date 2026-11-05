@@ -1,0 +1,11 @@
+{
+  "character_key": "bailong-custom-final",
+  "extra_scale": 1.0,
+  "recursive": true,
+  "prefer_export_subdir": true,
+  "settle_seconds": 3,
+  "auto_apply": false,
+  "adjustments": {},
+  "overrides": {},
+  "platforms": {}
+}

@@ -28,7 +28,8 @@ class EdgeDock(QObject):
     def active(self):return self.side is not None
     def available(self):
         p=self.pet
-        return bool(p.settings.get('edge_docking',True) and p.settings.get('character_visible',True) and not p._materials_missing)
+        return bool(p.settings.get('edge_docking',True) and getattr(p,'manifest',{}).get('allowEdgeDock',True) and p.settings.get('character_visible',True) and not p._materials_missing)
+    def upright(self):return getattr(self.pet,'manifest',{}).get('edgeDockStyle')=='upright'
     def visible(self):
         p=self.pet
         return p.isVisible() and not p._desktop_hidden and not p._fullscreen_yielded
@@ -37,7 +38,11 @@ class EdgeDock(QObject):
         if not self.available() or p.settings.get('no_move') or not self.visible():return False
         screen=p.screen() or QApplication.primaryScreen()
         if screen is None:return False
-        area=screen.availableGeometry();side=candidate(p.pos(),p.size(),area)
+        area=screen.availableGeometry()
+        if self.upright():
+            from panel_placement import character_geometry
+            visible=character_geometry(p);side=candidate(visible.topLeft(),visible.size(),area,threshold=16)
+        else:side=candidate(p.pos(),p.size(),area)
         if not side:return False
         p.stop_walk();p.throwing=False;p.sustained.cancel();p.continuous.clear();p.gate.state='idle'
         self.side=side;self.target_amount=1.;self.temporary=False;self.drop_latched=True;self.reanchor(area)
@@ -50,8 +55,15 @@ class EdgeDock(QObject):
             screen=p.screen() or QApplication.primaryScreen()
             if screen is None:return
             area=screen.availableGeometry()
-        x=area.left() if self.side=='left' else max(area.left(),area.right()-p.width()+1)
-        y=max(area.top(),min(p.y(),max(area.top(),area.bottom()-p.height()+1)))
+        if self.upright():
+            from panel_placement import character_geometry
+            visible=character_geometry(p);margin=10
+            x=p.x()+(area.left()+margin-visible.left() if self.side=='left' else area.right()-margin-visible.right())
+            top=max(area.top()+margin,min(visible.top(),area.bottom()-visible.height()+1-margin))
+            y=p.y()+top-visible.top()
+        else:
+            x=area.left() if self.side=='left' else max(area.left(),area.right()-p.width()+1)
+            y=max(area.top(),min(p.y(),max(area.top(),area.bottom()-p.height()+1)))
         point=QPoint(x,y)
         if p.pos()!=point:p.move(point)
     def reveal(self,temporary=False):
@@ -88,9 +100,12 @@ class EdgeDock(QObject):
             self._revealing_side=self.side;self.side=None
         if update_panel:self.pet.bubble.set_edge_compact(False)
         self.pet.next_chain=__import__('time').monotonic()+self.pet.settings['random_interval']
-    def transform(self,canvas):return pose(canvas,self.side or getattr(self,'_revealing_side',None),self.amount)
+    def transform(self,canvas):
+        if self.upright():return QTransform()
+        return pose(canvas,self.side or getattr(self,'_revealing_side',None),self.amount)
     def card_geometry(self,size,progress=None):
         p=self.pet;b=p.bubble
+        if self.upright():return b.content_geometry(size,docked=False)
         side=self.side or getattr(self,'_revealing_side',None)
         f=self.amount if progress is None else progress
         if not side or f<=0:return b.content_geometry(size,docked=False)

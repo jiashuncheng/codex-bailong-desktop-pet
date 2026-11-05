@@ -13,7 +13,19 @@ def settle(p):
 class DockTests(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
+  # Geometry and hit testing use a synthetic character, independent of Release assets.
+  from PIL import Image,ImageDraw
+  import material_store
+  base=self.root/'assets';base.mkdir()
+  image=Image.new('RGBA',(720,720));ImageDraw.Draw(image).ellipse((180,70,540,668),fill=(180,130,220,255))
+  image.save(base/'idle.webp',lossless=True)
+  (base/'素材清单.json').write_text(json.dumps({'idle':{'id':'idle','file':'idle.webp','durationMs':1000},'variants':[]}),encoding='utf-8')
+  original=material_store.MaterialStore
+  class Store(original):
+   def __init__(s,*a,**kw):
+    super().__init__(*a,**kw);s.root=base;s.current='light'
   self.patches=[patch('enhanced.CONFIG',self.root/'settings.json'),patch('enhanced.STATE_DIR',self.root),patch('desktop.CONFIG',self.root/'settings.json'),patch('desktop.STATE_DIR',self.root),patch('codex_startup.enabled',return_value=False)]
+  self.patches.extend([patch('material_store.MaterialStore',Store),patch('pet.ASSETS',base)])
   for x in self.patches:x.start()
   self.p=DesktopPet(monitor=False);self.p.tick.stop();self.p.motion_timer.stop();self.p.apply_settings(dict(random_actions=False,wandering=False,drag_physics=False,bubble_mode='mini',on_top=False),save=False);self.p.show();settle(self.p)
  def tearDown(self):
@@ -119,5 +131,27 @@ class DockTests(unittest.TestCase):
      if all(im.pixelColor(x+dx,y+dy).alpha()>200 for dx,dy in ((0,0),(-2,0),(2,0),(0,-2),(0,2))):opaque+=1;self.assertTrue(p.alpha_hit(x,y))
    self.assertGreater(opaque,20)
    self.assertFalse(p.status_animation_allowed());p.start_walk();self.assertFalse(p.walking)
+
+ def test_upright_rectangular_pack_docks_by_visible_bounds_without_rotation(self):
+  from panel_placement import character_geometry
+  from PySide6.QtCore import QRectF
+  p=self.p;p.manifest['edgeDockStyle']='upright';p.manifest['allowMirror']=False
+  p.manifest['canvasLayout']=dict(schema=1,canvas=[960,600],anchor=[480.47,490.09],referenceHeight=296,displayHeight=215.82,alphaUnion=[380,180,590,500])
+  for scale in (.7,.9,1.2):
+   p.apply_settings(dict(scale=scale),save=False)
+   for side in ('left','right'):
+    p.edge_dock.clear(immediate=True);settle(p);p.move(300,200)
+    area=p.screen().availableGeometry();r=character_geometry(p)
+    x=p.x()+area.left()-r.left() if side=='left' else p.x()+area.right()-r.right()
+    p.move(x,p.y());self.assertTrue(p.edge_dock.try_dock())
+    p.edge_dock.animation.stop();p.edge_dock._advance(1.);settle(p)
+    self.assertTrue(p.edge_dock.transform(QRectF(p.rect())).isIdentity())
+    r=character_geometry(p);self.assertTrue(area.contains(r),(area,r))
+    self.assertEqual(r.left()-area.left() if side=='left' else area.right()-r.right(),10)
+    card=p.bubble.content_geometry(p.bubble.visual_size())
+    self.assertLessEqual(abs(r.top()-card.bottom()-9),1)
+    self.assertTrue(p.bubble.is_minimal())
+  p.manifest['allowEdgeDock']=False;p.edge_dock.reconcile()
+  self.assertFalse(p.edge_dock.active);self.assertEqual(p.edge_dock.amount,0.)
 
 if __name__=='__main__':unittest.main()

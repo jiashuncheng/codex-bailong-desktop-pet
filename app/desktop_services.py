@@ -124,6 +124,8 @@ def validate_character(root):
         if groups['drag']:manifest['dragAnimation']=groups['drag'][0]
         if groups['landing']:manifest['landingAnimation']=groups['landing'][0]
     if not isinstance(manifest.get('idle'),dict):raise ValueError('角色包需要 idle 待机素材')
+    from character_canvas import layout
+    canvas_layout=layout(manifest)
     manifest.setdefault('variants',[])
     from sustained_assets import seam_items,profile_paths
     items=all_items(manifest)+seam_items(manifest)
@@ -141,6 +143,8 @@ def validate_character(root):
         if path.suffix.lower()!='.webm':
             with Image.open(path) as im:
                 if im.width*im.height>16777216:raise ValueError('动画分辨率过大')
+                if canvas_layout is not None and abs(im.width/im.height-canvas_layout.width/canvas_layout.height)>.002:
+                    raise ValueError('角色素材宽高比与画布声明不一致')
                 for frame in range(im.n_frames):im.seek(frame);im.load()
         scale=float(item.get('renderScale',1))
         if not .1<=scale<=3:raise ValueError('素材缩放参数无效')
@@ -164,8 +168,14 @@ def import_character(source,destination):
                 if not converter:raise ValueError('导入 WebM 需要 FFmpeg；请在角色页选择本机转换工具。WebP/GIF 可直接导入。')
                 target=target.with_suffix('.webp')
                 # libvpx preserves a WebM alpha plane when supplied by the source.
+                from character_canvas import layout
+                declared=layout(manifest)
+                video_filter='scale=720:720:force_original_aspect_ratio=decrease,pad=720:720:(ow-iw)/2:(oh-ih)/2:color=black@0'
+                if declared is not None:
+                    video_filter='scale=720:-2:force_original_aspect_ratio=decrease,format=bgra'
+                encoding=['-pix_fmt','bgra','-lossless','1'] if declared is not None else []
                 for codec in ('libvpx-vp9','libvpx'):
-                    result=subprocess.run([converter,'-v','error','-c:v',codec,'-i',str(src),'-t','60','-vf','scale=720:720:force_original_aspect_ratio=decrease,pad=720:720:(ow-iw)/2:(oh-ih)/2:color=black@0','-an','-loop','0','-c:v','libwebp_anim','-y',str(target)],capture_output=True,timeout=150,creationflags=0x08000000 if sys.platform=='win32' else 0)
+                    result=subprocess.run([converter,'-v','error','-c:v',codec,'-i',str(src),'-t','60','-vf',video_filter,'-an','-loop','0','-c:v','libwebp_anim',*encoding,'-y',str(target)],capture_output=True,timeout=150,creationflags=0x08000000 if sys.platform=='win32' else 0)
                     if not result.returncode:break
                 if result.returncode:raise ValueError('WebM转换失败，请先导出透明WebP或GIF')
                 converted[name]=str(target.relative_to(stage)).replace('\\','/')

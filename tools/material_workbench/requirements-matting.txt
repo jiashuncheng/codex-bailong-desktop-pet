@@ -1,0 +1,3 @@
+# Optional: only raw green-screen inputs need ONNX Runtime and u2netp.onnx.
+-r requirements-workbench.txt
+onnxruntime>=1.17,<2

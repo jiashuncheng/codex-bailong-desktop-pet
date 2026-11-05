@@ -9,6 +9,7 @@ from PySide6.QtGui import QColor,QFont,QFontMetrics,QPainter,QPen,QTextLayout,QT
 from PySide6.QtCore import QPointF,QEvent
 from PySide6.QtWidgets import QWidget,QLabel,QHBoxLayout,QVBoxLayout,QToolButton,QApplication,QStackedWidget,QLayout
 from panel_transition import PanelTransition
+from panel_placement import character_geometry
 from panel_scale import StatusContent,StatusScaleHost,scaled_size,panel_scale_for_role
 from surface_morph import PANEL_RADIUS
 from status_indicator import StatusIndicator
@@ -1057,11 +1058,11 @@ class CompactBubble(Bubble):
     def owner_pet(self):return self._owner or self.parentWidget()
     def expanded_height(self):
         owner=self.owner_pet();screen=self.screen() or QApplication.primaryScreen()
-        if owner:screen=QApplication.screenAt(owner.frameGeometry().center()) or screen
+        if owner:screen=QApplication.screenAt(character_geometry(owner).center()) or screen
         area=screen.availableGeometry();height=min(EXPANDED_HEIGHT,area.height()-24)
         settings=getattr(owner,'settings',{}) if owner else {}
         if owner and not settings.get('panel_detached') and settings.get('character_visible',True):
-            room=max(owner.y()-area.top()-8,area.bottom()-owner.y()-owner.height()-7)
+            room=max(character_geometry(owner).top()-area.top()-8,area.bottom()-character_geometry(owner).bottom()-7)
             height=min(height,max(320,room))
         return height
     def host_visible(self):
@@ -1293,7 +1294,7 @@ class CompactBubble(Bubble):
             screen=self.screen() or QApplication.primaryScreen();limit=screen.availableGeometry().height()-24
             owner=self.owner_pet()
             if owner and not getattr(owner,'settings',{}).get('panel_detached') and getattr(owner,'settings',{}).get('character_visible',True):
-                area=screen.availableGeometry();limit=min(limit,max(320,max(owner.y()-area.top()-8,area.bottom()-owner.y()-owner.height()-7)))
+                area=screen.availableGeometry();limit=min(limit,max(320,max(character_geometry(owner).top()-area.top()-8,area.bottom()-character_geometry(owner).bottom()-7)))
             height=max(60,min(max(baseline,requested),limit-prefix))
             self.details_tabs.setFixedHeight(height);wanted=prefix+height
         minimum=38 if self.is_island() else 40
@@ -1313,7 +1314,7 @@ class CompactBubble(Bubble):
         report=self.report
         reserve=report.reserved_height(rect.size())+report.GAP if report and report.requested else 0
         width=report.panel_width(rect) if reserve else 0
-        character=owner.frameGeometry() if owner.isVisible() and not getattr(owner,'_materials_missing',False) and getattr(owner,'settings',{}).get('character_visible',True) else None
+        character=character_geometry(owner) if owner.isVisible() and not getattr(owner,'_materials_missing',False) and getattr(owner,'settings',{}).get('character_visible',True) else None
         from panel_placement import avoid_character
         return avoid_character(rect,character,screen.availableGeometry(),reserve,width)
     def content_geometry(self,size=None,docked=True):
@@ -1323,12 +1324,13 @@ class CompactBubble(Bubble):
         edge=getattr(owner,'edge_dock',None)
         if docked and edge and self.is_minimal() and (edge.active or edge.amount>0):
             return edge.card_geometry(size,edge.target_amount if self.size_transition.preparing else None)
-        screen=QApplication.screenAt(owner.frameGeometry().center()) or QApplication.primaryScreen();area=screen.availableGeometry()
+        screen=QApplication.screenAt(character_geometry(owner).center()) or QApplication.primaryScreen();area=screen.availableGeometry()
         if self.panel_page!='status' and self._editor_positioned:x,y=self.x(),self.y()
         else:
-            x=owner.x()+(owner.width()-size.width())//2;y=owner.y()-size.height()-8
+            character=character_geometry(owner)
+            x=character.x()+(character.width()-size.width())//2;y=character.y()-size.height()-8
             reserve=max(0,2*self.status_view.line_height-self.status_view.height()) if not self.expanded and not self.is_island() else 0
-            if y-reserve<area.top():y=owner.y()+owner.height()+8
+            if y-reserve<area.top():y=character.bottom()+9
         reserve=self.report.reserved_height(size)+6 if self.report and self.report.requested else 0
         reserve=min(reserve,max(0,area.height()-size.height()))
         x=max(area.left(),min(x,area.right()-size.width()+1));y=max(area.top()+reserve,min(y,area.bottom()-size.height()+1))

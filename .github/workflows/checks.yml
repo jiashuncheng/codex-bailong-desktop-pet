@@ -6,6 +6,20 @@ concurrency:
 permissions:
   contents: read
 jobs:
+  material-workbench:
+    name: Material workbench (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-source.txt -r tools/material_workbench/requirements-workbench.txt
+      - run: python tools/check_material_workbench.py
   source:
     name: Source runtime (${{ matrix.os }})
     env:

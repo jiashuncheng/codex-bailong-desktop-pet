@@ -38,6 +38,7 @@ class DesktopPet(EnhancedPet):
         self._video_yielded=False;self._fullscreen_yielded=False;self.video_yield=None
         self._desktop_hidden=False;self._card_anchor=None;self._visibility_ready=False
         self.settings_revision=0
+        self._restoring_placement=True
         from codex_connection import data_home,saved_paths
         from connection_health import CapabilityHealth
         saved_paths()
@@ -114,6 +115,7 @@ class DesktopPet(EnhancedPet):
             except (OSError,ValueError,KeyError):
                 self.settings['character']='builtin';self.say('角色包不可用，已恢复白龙默认素材。',6000)
         self.restore_saved_position()
+        self._restoring_placement=False
         if self.settings['wander_home'] is None:self.remember_wander_home()
         self.next_chain=time.monotonic()+self.settings['random_interval']
         self.next_talk=time.monotonic()+random.uniform(self.settings['talk_min'],self.settings['talk_max'])
@@ -335,7 +337,8 @@ class DesktopPet(EnhancedPet):
         if selected=='turn':
             self.walk_direction*=-1;self.settings['facing']=self.walk_direction
             return self.play(random.choice(self.manifest.get('turnAnimations') or self.idles),'turn')
-        if selected=='variant' and self.variants:self.choose(random.choice(self.variants));return True
+        automatic=[item for item in self.variants if item.get('automatic',True)]
+        if selected=='variant' and automatic:self.choose(random.choice(automatic));return True
         return False
 
     def frame_transform(self,canvas):
@@ -343,12 +346,48 @@ class DesktopPet(EnhancedPet):
         elapsed=time.monotonic()-self.press_feedback if self.press_feedback else 99
         if elapsed<.5:
             squash=math.sin(elapsed/.5*math.pi*2)*.075*math.exp(-elapsed*5)
-            transform.translate(canvas.center().x(),canvas.bottom())
-            transform.scale(1+squash,1-squash);transform.translate(-canvas.center().x(),-canvas.bottom())
-        if getattr(self,'walk_direction',1)<0:
+            from character_canvas import layout
+            declared=layout(self.manifest)
+            pivot_x,pivot_y=canvas.center().x(),canvas.bottom()
+            if declared:
+                target=self.frame_target(canvas)
+                pivot_x=target.x()+target.width()*declared.anchor_x/declared.width
+                pivot_y=target.y()+target.height()*declared.anchor_y/declared.height
+            transform.translate(pivot_x,pivot_y)
+            transform.scale(1+squash,1-squash);transform.translate(-pivot_x,-pivot_y)
+        if getattr(self,'walk_direction',1)<0 and self.manifest.get('allowMirror',True):
             transform.translate(canvas.x()*2+canvas.width(),0);transform.scale(-1,1)
         if getattr(self,'edge_dock',None):transform=transform*self.edge_dock.transform(canvas)
         return transform
+
+    def frame_target(self,canvas):
+        from character_canvas import layout
+        declared=layout(getattr(self,'manifest',{}))
+        if declared is None:return super().frame_target(canvas)
+        # The shared decoder uses a square raster; restore the declared source
+        # aspect here for both live painting and square snapshot canvases.
+        factor=min(canvas.width()/declared.width,canvas.height()/declared.height)
+        width=declared.width*factor;height=declared.height*factor
+        base=QRectF(canvas.center().x()-width/2,canvas.center().y()-height/2,width,height)
+        scale=self.current.get('renderScale',1.);offset=self.current.get('renderOffset',[0,0])
+        return QRectF(base.x()+(width-width*scale)/2+width*offset[0],base.bottom()-height*scale+height*offset[1],width*scale,height*scale)
+
+    def constrained_position(self,position,pointer=None):
+        from character_canvas import layout
+        manifest=getattr(self,'manifest',{})
+        declared=layout(manifest)
+        if declared is None:return super().constrained_position(position,pointer)
+        bounds=manifest['canvasLayout'].get('alphaUnion',[0,0,declared.width,declared.height])
+        left,top,right,bottom=bounds
+        sx=self.width()/declared.width;sy=self.height()/declared.height
+        def clamp(screen):
+            area=screen.availableGeometry()
+            lo_x=math.ceil(area.left()-left*sx);hi_x=math.floor(area.right()+1-right*sx)
+            lo_y=math.ceil(area.top()-top*sy);hi_y=math.floor(area.bottom()+1-bottom*sy)
+            return QPoint(min(max(position.x(),lo_x),max(lo_x,hi_x)),min(max(position.y(),lo_y),max(lo_y,hi_y)))
+        selected=QApplication.screenAt(pointer) if pointer is not None else None
+        candidates=[clamp(selected)] if selected else [clamp(s) for s in QApplication.screens()]
+        return min(candidates,key=lambda p:(p.x()-position.x())**2+(p.y()-position.y())**2) if candidates else position
 
     def draw_frame(self,painter,canvas):
         painter.save();painter.setTransform(self.frame_transform(canvas),True)
@@ -398,7 +437,7 @@ class DesktopPet(EnhancedPet):
                   for key in ('dragAnimation','landingAnimation')
                   if isinstance(item:=self.manifest.get(key),dict)}
         pool=[item for item in (all_items(self.manifest) or self.idles)
-              if (item.get('playbackFile') or item.get('file')) not in excluded]
+              if (item.get('playbackFile') or item.get('file')) not in excluded and item.get('automatic',True)]
         item=self.click_actions.next(pool)
         if item is not None:self.choose(item,interactive=True)
 
@@ -457,6 +496,7 @@ class DesktopPet(EnhancedPet):
             (area.x(),area.y(),area.width(),area.height()),screen.name())
 
     def start_walk(self):
+        if not self.manifest.get('allowRoaming',True):return
         if self._materials_missing or not self.settings.get('character_visible',True):return
         if self.settings.get('status_actions',True) and (self.reactions.busy(time.monotonic()) or self.bubble.status_indicator.is_busy()):return
         if getattr(self,'edge_dock',None) and self.edge_dock.active:return
@@ -718,7 +758,7 @@ class DesktopPet(EnhancedPet):
             self.remember_card_anchor(self.bubble.content_geometry())
         if 'codex_exit' in values and values['codex_exit']!=previous.get('codex_exit'):
             self._codex_exit_gate.reset()
-        old_size=self.height();foot=self.geometry().bottom()+1;center=self.geometry().center().x()
+        old_size=self.height();old_width=self.width()
         self.settings.update(values);self.settings=normalized(self.settings)
         from settings_controls import set_motion_mode,settle_motion
         set_motion_mode(self.settings['ui_animation_mode'])
@@ -750,8 +790,22 @@ class DesktopPet(EnhancedPet):
                                                auto_compact=False,minimal_normal_open=False)
         self.bubble.token_range=self.settings['token_chart_range']
         self.bubble.pinned=self.settings['on_top'];self.bubble.wandering=self.settings['wandering'];self.bubble.movement_locked=self.settings['no_move']
-        size=round(256*self.settings['scale']);self.setFixedSize(size,size)
-        if size!=old_size:self.move(self.constrained_position(QPoint(center-size//2,foot-size)))
+        from character_canvas import layout
+        declared=layout(self.manifest)
+        size=round(256*self.settings['scale'])
+        width,height=declared.size(self.settings['scale']) if declared else (size,size)
+        if declared:
+            old_anchor=declared.anchor(self.width(),self.height())
+        else:
+            ratios=getattr(self,'_square_anchor',(.5,1.))
+            old_anchor=(ratios[0]*self.width(),ratios[1]*self.height())
+        anchor=getattr(self,'_switch_visual_anchor',None) or (self.x()+old_anchor[0],self.y()+old_anchor[1])
+        self.setFixedSize(width,height)
+        if declared:new_anchor=declared.anchor(width,height)
+        else:
+            ratios=getattr(self,'_square_anchor',(.5,1.));new_anchor=(ratios[0]*width,ratios[1]*height)
+        if (width,height)!=(old_width,old_size) or getattr(self,'_switch_visual_anchor',None):
+            self.move(self.constrained_position(QPoint(round(anchor[0]-new_anchor[0]),round(anchor[1]-new_anchor[1]))))
         # All states use one physical-pixel decode policy. Refresh the current
         # frame immediately rather than changing clarity on the next action.
         self.sync_decode_size()
@@ -789,6 +843,13 @@ class DesktopPet(EnhancedPet):
 
     def desired_decode_size(self):
         from decode_runtime import display_decode_size
+        from character_canvas import layout
+        declared=layout(getattr(self,'manifest',{}))
+        if declared:
+            width,height=declared.size(getattr(self,'settings',{}).get('scale',1))
+            try:limit=max(720,min(2048,int(self.manifest.get('decodeResolution',720))))
+            except (TypeError,ValueError,OverflowError):limit=720
+            return min(limit,max(128,round(max(width,height)*self.devicePixelRatioF())))
         return display_decode_size(getattr(self,'settings',{}).get('scale',1),self.devicePixelRatioF())
 
     def request_decode_sync(self):
@@ -845,7 +906,8 @@ class DesktopPet(EnhancedPet):
         return result
 
     def save_settings(self):
-        if not self.enhanced_ready:return
+        # Constructor character changes must not persist transient window geometry.
+        if not self.enhanced_ready or getattr(self,'_restoring_placement',False):return
         super().save_settings()
         self.settings['facing']=self.walk_direction
         screen=QApplication.screenAt(self.frameGeometry().center()) or QApplication.primaryScreen();a=screen.availableGeometry()
@@ -1174,11 +1236,20 @@ class DesktopPet(EnhancedPet):
             if root.parent!=self.character_dir.resolve():raise ValueError('角色目录无效')
         # Import performs full decoding. Switching checks structure and first frame only.
         m=json.loads((root/'素材清单.json').read_text(encoding='utf-8'))
+        from character_canvas import layout,square_anchor
+        target_layout=layout(m)
         if not isinstance(m,dict) or not isinstance(m.get('idle'),dict) or not isinstance(m.get('variants',[]),list):raise ValueError('角色清单结构无效')
         for item in all_items(m)+seam_items(m):
             path=(root/(item.get('playbackFile') or item['file'])).resolve()
             if not path.is_relative_to(root.resolve()) or not path.is_file():raise ValueError('角色包缺少素材或路径无效')
         old=(self.asset_root,self.manifest,self.idles,self.variants,self.settings.get('character','builtin'))
+        old_layout=layout(self.manifest)
+        if old_layout:old_anchor=old_layout.anchor(self.width(),self.height())
+        else:
+            ratios=square_anchor(self.manifest,self.asset_root)
+            old_anchor=(ratios[0]*self.width(),ratios[1]*self.height())
+        visual_anchor=(self.x()+old_anchor[0],self.y()+old_anchor[1])
+        target_square_anchor=square_anchor(m,root) if target_layout is None else None
         old_missing=self._materials_missing
         preference_keys=('scale','playback_speed','talk_lines')
         self.settings['character_preferences'][old[4]]={k:copy.deepcopy(self.settings[k]) for k in preference_keys}
@@ -1195,7 +1266,10 @@ class DesktopPet(EnhancedPet):
             self.reactions.set_actions(item['id'] for item in all_items(self.manifest))
             self.gate.state='idle';self.idle();raise
         self.settings['character']=key
-        self.apply_settings(self.settings['character_preferences'].get(key,{}))
+        if target_square_anchor is not None:self._square_anchor=target_square_anchor
+        self._switch_visual_anchor=visual_anchor
+        try:self.apply_settings(self.settings['character_preferences'].get(key,{}))
+        finally:self._switch_visual_anchor=None
         if self.bubble.report:self.bubble.report.animation.stop();self.bubble.report.hide()
         if self.chat_window:self.chat_window.shutdown();self.chat_window.deleteLater();self.chat_window=None
 

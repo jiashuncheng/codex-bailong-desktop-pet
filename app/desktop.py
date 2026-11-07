@@ -58,6 +58,7 @@ class DesktopPet(EnhancedPet):
         self._hit_image=None;self.throwing=False;self.velocity=(0.,0.)
         self._pointer_pressed=False;self._pointer_epoch=0
         self.click_actions=ActionShuffle()
+        self.autonomous_actions=ActionShuffle()
         self.drag_samples=deque(maxlen=12);self.press_feedback=0;self.buffer_until=0
         self.pending_completion=None;self.settings_dialog=None;self.chat_window=None
         self.reactions=StatusReactions(time.monotonic());self.last_reaction=None
@@ -338,7 +339,9 @@ class DesktopPet(EnhancedPet):
             self.walk_direction*=-1;self.settings['facing']=self.walk_direction
             return self.play(random.choice(self.manifest.get('turnAnimations') or self.idles),'turn')
         automatic=[item for item in self.variants if item.get('automatic',True)]
-        if selected=='variant' and automatic:self.choose(random.choice(automatic));return True
+        if selected=='variant':
+            item=self.autonomous_actions.next(automatic)
+            if item is not None:self.choose(item);return True
         return False
 
     def frame_transform(self,canvas):

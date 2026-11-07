@@ -87,4 +87,46 @@ class ClickIntegrationTests(unittest.TestCase):
         self.assertEqual(pet.choose.call_count,1);self.assertEqual(pet.click_actions.remaining,remaining)
 
 
+class AutonomousIntegrationTests(unittest.TestCase):
+    def pet(self):
+        return SimpleNamespace(isVisible=lambda:True,dragging=False,throwing=False,walking=False,
+            next_chain=0,buffer_until=0,status_hold=0,settings=dict(status_actions=False,
+                random_interval=10,action_gap=2,no_move=True),roaming=SimpleNamespace(queue=[]),
+            random_actions=True,wandering=False,variants=[action('a'),action('b'),action('c'),dict(action('manual'),automatic=False)],
+            autonomous_actions=ActionShuffle(),click_actions=ActionShuffle(),choose=Mock())
+
+    def test_automatic_rounds_cover_each_enabled_action_once(self):
+        from desktop import DesktopPet
+        pet=self.pet()
+        with patch('desktop.random.choices',return_value=['variant']):
+            for i in range(12):self.assertTrue(DesktopPet.autonomous_boundary(pet,100+i*100))
+        ids=[c.args[0]['id'] for c in pet.choose.call_args_list]
+        for start in range(0,12,3):self.assertEqual(set(ids[start:start+3]),{'a','b','c'})
+        self.assertTrue(all(a!=b for a,b in zip(ids,ids[1:])))
+        self.assertEqual(pet.click_actions.remaining,[])
+        self.assertEqual(pet.next_chain,1212)
+
+    def test_pool_changes_do_not_play_removed_actions_and_empty_pool_is_safe(self):
+        from desktop import DesktopPet
+        pet=self.pet()
+        with patch('desktop.random.choices',return_value=['variant']):
+            DesktopPet.autonomous_boundary(pet,100)
+            pet.variants=[action('new')]
+            DesktopPet.autonomous_boundary(pet,200)
+            self.assertEqual(pet.choose.call_args.args[0]['id'],'new')
+            pet.variants=[]
+            self.assertFalse(DesktopPet.autonomous_boundary(pet,300))
+            self.assertEqual(pet.choose.call_count,2)
+
+    def test_waiting_or_other_autonomous_behavior_does_not_consume_round(self):
+        from desktop import DesktopPet
+        pet=self.pet();pet.next_chain=150
+        self.assertFalse(DesktopPet.autonomous_boundary(pet,100))
+        with patch('desktop.random.choices',return_value=['idle']):
+            self.assertFalse(DesktopPet.autonomous_boundary(pet,200))
+        self.assertEqual(pet.autonomous_actions.remaining,[])
+        pet.dragging=True
+        self.assertFalse(DesktopPet.autonomous_boundary(pet,300));pet.choose.assert_not_called()
+
+
 if __name__=='__main__':unittest.main()

@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass,field
 from datetime import datetime
 from pathlib import Path
+from collections import deque
 from status_reactions import tool_activity
 from session_read_state import session_id,is_subagent_metadata,rollout_alias
 
@@ -328,6 +329,7 @@ class RolloutTail:
         self.health=dict(state='unknown',code='starting');self.pins=set();self.generation=None
         self.discovered=set();self.file_ids={};self.queue=[];self.by_id={}
         self.rate_observer=None
+        self.watch=deque();self.signatures={};self.dormant={}
     def set_pins(self,ids):self.pins={session_id(s) for s in ids}
     def poll(self):
         from performance_metrics import METRICS
@@ -338,9 +340,13 @@ class RolloutTail:
             self.file_ids={p:rollout_alias(p) for p in paths}
             self.generation=self.catalog.revision;new=paths-self.discovered
             def modified(p):
-                try:return p.stat().st_mtime
+                try:
+                    st=p.stat();self.signatures.setdefault(p,(st.st_ino,st.st_mtime_ns,st.st_size))
+                    return st.st_mtime
                 except OSError:return 0
             ordered=sorted(new,key=modified,reverse=True)
+            self.watch.extend(ordered)
+            self.dormant={p:v for p,v in self.dormant.items() if p in paths}
             self.queue.extend((p,self.seeded) for p in (ordered if self.seeded else ordered[:16]))
             self.discovered=set(paths);self.by_id={session_id(self.file_ids[p]):p for p in sorted(paths,key=lambda p:(self.home/'sessions') in p.parents)}
         active={session_id(sid) for sid,s in self.reducer.sessions.items() if not s.source_subagent and (not s.done or s.compacting)}
@@ -348,6 +354,20 @@ class RolloutTail:
         # DB-active/unread/displayed identities are read even if their log has
         # not changed for hours or moved to the archive directory.
         candidates=[(self.by_id[s],False) for s in important if s in self.by_id]
+        # Appending an old completed chat does not change its directory or
+        # create a new path. Revisit a bounded number of dormant paths each
+        # poll, even when the catalog has no new entries and the DB lags.
+        for _ in range(min(32,len(self.watch))):
+            path=self.watch.popleft()
+            if path not in paths:
+                self.signatures.pop(path,None);continue
+            self.watch.append(path)
+            if path in self.files:continue
+            try:
+                st=path.stat();signature=(st.st_ino,st.st_mtime_ns,st.st_size)
+            except OSError:continue
+            previous=self.signatures.get(path);self.signatures[path]=signature
+            if previous is not None and signature!=previous:candidates.append((path,False))
         candidates+=self.queue[:32];self.queue=self.queue[32:]
         live_new={p for p,is_new in self.queue+candidates if is_new}
         for path,is_new in candidates:
@@ -365,14 +385,18 @@ class RolloutTail:
                     self.reducer.apply(sid,meta,historical=True);recognized=True
             except (ValueError,UnicodeError):recognized=False
             except OSError:errors+=1;continue
+            saved=self.dormant.pop(path,None)
+            if saved and saved.get('inode')==st.st_ino and st.st_size>=saved['offset']:
+                self.files[path]=saved;continue
             self.files[path]=dict(sid=sid,offset=0 if is_new else max(0,st.st_size-512000),buffer=b'',history=not is_new,
-                skip=not is_new and st.st_size>512000,recognized=recognized,touched=now,discovery_cutoff=st.st_ctime if is_new else None)
+                skip=not is_new and st.st_size>512000,recognized=recognized,touched=now,discovery_cutoff=st.st_ctime if is_new else None,inode=st.st_ino)
         for path,state in list(self.files.items()):
             if path not in paths:
                 # Keep identity/state for a slow task; rebind its moved log.
                 self.files.pop(path,None);continue
             try:
-                size=path.stat().st_size
+                st=path.stat();size=st.st_size
+                self.signatures[path]=(st.st_ino,st.st_mtime_ns,size)
                 if size<state['offset']:state.update(offset=0,buffer=b'',history=True,skip=False)
                 if size==state['offset']:
                     readable+=1;state['history']=False;continue
@@ -402,6 +426,10 @@ class RolloutTail:
         active={session_id(sid) for sid,s in self.reducer.sessions.items() if not s.source_subagent and (not s.done or s.compacting)}
         important|=active
         recent=sorted(self.files,key=lambda p:self.files[p]['touched'],reverse=True)[:32]
+        for p,v in self.files.items():
+            if p not in recent and session_id(v['sid']) not in important:
+                # Retain the cursor, not a potentially large partial JSON line.
+                self.dormant[p]=dict(v,offset=v['offset']-len(v['buffer']),buffer=b'',skip=False)
         self.files={p:v for p,v in self.files.items() if p in recent or session_id(v['sid']) in important}
         protected={p.stem for p in self.files}|important
         disposable=sorted((sid for sid,s in self.reducer.sessions.items() if sid not in protected and session_id(sid) not in important and s.done),key=lambda sid:self.reducer.sessions[sid].updated,reverse=True)
